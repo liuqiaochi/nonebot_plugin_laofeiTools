@@ -80,9 +80,13 @@ async def handle_search_image(
             await matcher.finish("图片下载失败，请重试")
             return
         
+        logger.info(f"图片下载成功，大小: {len(image_data)} bytes")
+        
         # 调用搜图 API
         client = await get_client()
         result = await client.search(image_data)
+        
+        logger.info(f"搜图API返回: {result}")
         
         # 构建合并转发消息
         forward_msg = await build_forward_message(bot, event, result)
