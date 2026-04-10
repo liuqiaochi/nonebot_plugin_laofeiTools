@@ -258,9 +258,15 @@ async def build_forward_message(
         similarity = item.get("similarity", 0)
         source = item.get("source", "unknown")
         title = item.get("title", "未知标题")
-        preview_url = item.get("previewUrl", "")
-        subject_url = item.get("subjectUrl", "")
-        page_url = item.get("pageUrl", "")
+        # API 返回的字段名是 previewImageUrl, subjectPath, pagePath
+        preview_url = item.get("previewImageUrl", "")
+        subject_path = item.get("subjectPath", "")
+        page_path = item.get("pagePath", "")
+        
+        # 构建完整 URL
+        base_url = "https://soutubot.moe"
+        subject_url = f"{base_url}{subject_path}" if subject_path else ""
+        page_url = f"{base_url}{page_path}" if page_path else ""
         
         # 构建消息内容
         msg_segments = []
