@@ -262,7 +262,7 @@ async def send_forward_message(
         image_base64 = ""
         if preview_url:
             try:
-                image_base64 = await download_and_blur_image(preview_url)
+                image_base64 = await download_and_blur_image(preview_url, blur_radius=3)
             except Exception as e:
                 logger.warning(f"下载或处理预览图失败: {e}")
         
