@@ -253,34 +253,25 @@ async def send_forward_message(
         similarity = item.get("similarity", 0)
         source = item.get("source", "unknown")
         title = item.get("title", "未知标题")
-        # API 返回的字段名是 previewImageUrl, subjectPath, pagePath
         preview_url = item.get("previewImageUrl", "")
-        subject_path = item.get("subjectPath", "")
-        page_path = item.get("pagePath", "")
         
-        # 构建完整 URL
-        base_url = "https://soutubot.moe"
-        subject_url = f"{base_url}{subject_path}" if subject_path else ""
-        page_url = f"{base_url}{page_path}" if page_path else ""
-        
-        # 构建消息内容 - 使用字符串而不是 MessageSegment
-        content_parts = []
-        
-        # 添加文字信息
+        # 构建文字信息（去掉本子和页面链接）
         info_text = f"【{source}】相似度: {similarity}%\n{title[:100]}"
-        if subject_url:
-            info_text += f"\n本子: {subject_url}"
-        if page_url:
-            info_text += f"\n页面: {page_url}"
         
-        content_parts.append(info_text)
-        
-        # 如果有预览图URL，添加图片链接
+        # 下载并处理预览图
+        image_base64 = ""
         if preview_url:
-            content_parts.append(f"\n预览图: {preview_url}")
+            try:
+                image_base64 = await download_and_blur_image(preview_url)
+            except Exception as e:
+                logger.warning(f"下载或处理预览图失败: {e}")
         
-        # 合并为纯文本消息
-        content = "\n".join(content_parts)
+        # 构建消息内容
+        if image_base64:
+            # 有图片时，使用CQ码发送图片
+            content = f"{info_text}\n[CQ:image,file=base64://{image_base64}]"
+        else:
+            content = info_text
         
         nodes.append({
             "type": "node",
@@ -308,8 +299,49 @@ async def send_forward_message(
             similarity = item.get("similarity", 0)
             source = item.get("source", "unknown")
             title = item.get("title", "未知标题")
-            page_path = item.get("pagePath", "")
-            base_url = "https://soutubot.moe"
-            page_url = f"{base_url}{page_path}" if page_path else ""
-            text_results.append(f"{i}. 【{source}】相似度: {similarity}%\n{title[:50]}\n{page_url}\n")
+            text_results.append(f"{i}. 【{source}】相似度: {similarity}%\n{title[:50]}\n")
         await bot.send(event, "\n".join(text_results))
+
+
+async def download_and_blur_image(image_url: str, blur_radius: int = 10) -> str:
+    """
+    下载图片并进行磨砂（模糊）处理
+    
+    Args:
+        image_url: 图片URL
+        blur_radius: 模糊半径，默认10
+    
+    Returns:
+        base64编码的图片数据
+    """
+    import httpx
+    from PIL import Image, ImageFilter
+    import base64
+    from io import BytesIO
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(image_url)
+        resp.raise_for_status()
+        image_data = resp.content
+    
+    # 打开图片
+    img = Image.open(BytesIO(image_data))
+    
+    # 转换为RGB模式（处理RGBA等）
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+    
+    # 应用高斯模糊（磨砂效果）
+    img = img.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    
+    # 压缩图片以减小体积
+    max_size = 800
+    if img.width > max_size or img.height > max_size:
+        img.thumbnail((max_size, max_size), Image.LANCZOS)
+    
+    # 保存为JPEG并转为base64
+    output = BytesIO()
+    img.save(output, format="JPEG", quality=85, optimize=True)
+    output.seek(0)
+    
+    return base64.b64encode(output.getvalue()).decode()
