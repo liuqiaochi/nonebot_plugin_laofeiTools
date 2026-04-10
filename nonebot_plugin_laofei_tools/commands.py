@@ -88,9 +88,8 @@ async def handle_search_image(
         
         logger.info(f"搜图API返回: {result}")
         
-        # 构建合并转发消息
-        forward_msg = await build_forward_message(bot, event, result)
-        await matcher.finish(forward_msg)
+        # 构建并发送合并转发消息
+        await send_forward_message(bot, event, result)
         
     except Exception as e:
         logger.exception("搜图失败")
@@ -212,29 +211,25 @@ async def download_image(bot: Bot, image_url: str) -> Optional[bytes]:
         return None
 
 
-async def build_forward_message(
+async def send_forward_message(
     bot: Bot,
     event: GroupMessageEvent,
     result: dict,
-) -> MessageSegment:
+) -> None:
     """
-    构建合并转发消息
-    
-    每条结果包含：预览图 + 标题/相似度/链接信息
+    发送合并转发消息
     
     Args:
         bot: NoneBot 实例
         event: 群聊消息事件
         result: API 返回的搜索结果
-    
-    Returns:
-        合并转发消息段
     """
     data = result.get("data", [])
     execution_time = result.get("executionTime", 0)
     
     if not data:
-        return MessageSegment.text("Bot酱没有找到任何结果")
+        await bot.send(event, "Bot酱没有找到任何结果")
+        return
     
     # 按相似度排序，取前10条
     sorted_results = sorted(data, key=lambda x: x.get("similarity", 0), reverse=True)[:10]
@@ -303,13 +298,12 @@ async def build_forward_message(
             group_id=event.group_id,
             messages=nodes
         )
-        # 返回空消息，因为已经通过 API 发送了
-        return MessageSegment.text("")
+        logger.info("合并转发消息发送成功")
     except Exception as e:
         logger.error(f"发送合并转发消息失败: {e}")
-        # 如果合并转发失败，返回文本格式的结果
+        # 如果合并转发失败，发送文本格式的结果
         text_results = []
-        text_results.append(f"找到 {len(data)} 条结果（显示前 {len(sorted_results)} 条）\n耗时: {execution_time}ms\n")
+        text_results.append(f"找到 {len(data)} 条结果（显示前 {min(len(sorted_results), 5)} 条）\n耗时: {execution_time}ms\n")
         for i, item in enumerate(sorted_results[:5], 1):
             similarity = item.get("similarity", 0)
             source = item.get("source", "unknown")
@@ -318,4 +312,4 @@ async def build_forward_message(
             base_url = "https://soutubot.moe"
             page_url = f"{base_url}{page_path}" if page_path else ""
             text_results.append(f"{i}. 【{source}】相似度: {similarity}%\n{title[:50]}\n{page_url}\n")
-        return MessageSegment.text("\n".join(text_results))
+        await bot.send(event, "\n".join(text_results))
