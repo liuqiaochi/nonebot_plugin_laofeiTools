@@ -248,7 +248,7 @@ async def build_forward_message(
         "type": "node",
         "data": {
             "name": "搜图Bot酱",
-            "uin": bot.self_id,
+            "uin": str(bot.self_id),
             "content": header_msg,
         }
     })
@@ -268,12 +268,8 @@ async def build_forward_message(
         subject_url = f"{base_url}{subject_path}" if subject_path else ""
         page_url = f"{base_url}{page_path}" if page_path else ""
         
-        # 构建消息内容
-        msg_segments = []
-        
-        # 添加预览图（如果有）
-        if preview_url:
-            msg_segments.append(MessageSegment.image(preview_url))
+        # 构建消息内容 - 使用字符串而不是 MessageSegment
+        content_parts = []
         
         # 添加文字信息
         info_text = f"【{source}】相似度: {similarity}%\n{title[:100]}"
@@ -282,19 +278,44 @@ async def build_forward_message(
         if page_url:
             info_text += f"\n页面: {page_url}"
         
-        msg_segments.append(MessageSegment.text(info_text))
+        content_parts.append(info_text)
         
-        # 合并为一条消息
-        content = Message(msg_segments)
+        # 如果有预览图URL，添加图片链接
+        if preview_url:
+            content_parts.append(f"\n预览图: {preview_url}")
+        
+        # 合并为纯文本消息
+        content = "\n".join(content_parts)
         
         nodes.append({
             "type": "node",
             "data": {
                 "name": f"{source} - {similarity}%",
-                "uin": bot.self_id,
+                "uin": str(bot.self_id),
                 "content": content,
             }
         })
     
-    # 发送合并转发消息
-    return MessageSegment("forward", {"nodes": nodes})
+    # 使用 send_group_forward_msg API 发送合并转发消息
+    try:
+        await bot.call_api(
+            "send_group_forward_msg",
+            group_id=event.group_id,
+            messages=nodes
+        )
+        # 返回空消息，因为已经通过 API 发送了
+        return MessageSegment.text("")
+    except Exception as e:
+        logger.error(f"发送合并转发消息失败: {e}")
+        # 如果合并转发失败，返回文本格式的结果
+        text_results = []
+        text_results.append(f"找到 {len(data)} 条结果（显示前 {len(sorted_results)} 条）\n耗时: {execution_time}ms\n")
+        for i, item in enumerate(sorted_results[:5], 1):
+            similarity = item.get("similarity", 0)
+            source = item.get("source", "unknown")
+            title = item.get("title", "未知标题")
+            page_path = item.get("pagePath", "")
+            base_url = "https://soutubot.moe"
+            page_url = f"{base_url}{page_path}" if page_path else ""
+            text_results.append(f"{i}. 【{source}】相似度: {similarity}%\n{title[:50]}\n{page_url}\n")
+        return MessageSegment.text("\n".join(text_results))
