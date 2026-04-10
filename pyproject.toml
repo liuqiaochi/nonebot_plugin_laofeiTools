@@ -1,5 +1,9 @@
 [project]
 name = "nonebot-plugin-laofei-tools"
+
+[project.urls]
+Homepage = "https://github.com/liuqiaochi/nonebot_plugin_laofeiTools"
+Repository = "https://github.com/liuqiaochi/nonebot_plugin_laofeiTools"
 version = "0.1.0"
 description = "老肥工具箱 - NoneBot 插件，支持以图搜图等功能"
 readme = "README.md"

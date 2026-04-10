@@ -30,7 +30,7 @@ __plugin_meta__ = PluginMetadata(
         - 默认关闭，需超级用户发送「开启lf搜图」开启
     """,
     type="application",
-    homepage="https://github.com/yourname/nonebot-plugin-laofei-tools",
+    homepage="https://github.com/liuqiaochi/nonebot_plugin_laofeiTools",
     supported_adapters={"~onebot.v11"},
     config=Config,
 )
