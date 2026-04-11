@@ -231,8 +231,8 @@ async def send_forward_message(
         await bot.send(event, "Bot酱没有找到任何结果")
         return
     
-    # 按相似度排序，取前10条
-    sorted_results = sorted(data, key=lambda x: x.get("similarity", 0), reverse=True)[:10]
+    # 按相似度排序，取前5条
+    sorted_results = sorted(data, key=lambda x: x.get("similarity", 0), reverse=True)[:5]
     
     # 构建转发消息节点
     nodes = []
@@ -254,9 +254,20 @@ async def send_forward_message(
         source = item.get("source", "unknown")
         title = item.get("title", "未知标题")
         preview_url = item.get("previewImageUrl", "")
+        subject_path = item.get("subjectPath", "")
         
-        # 构建文字信息（去掉本子和页面链接）
+        # 根据 source 拼接链接
+        source_base_urls = {
+            "nhentai": "https://nhentai.net",
+            "ehentai": "https://e-hentai.org",
+        }
+        base_url = source_base_urls.get(source, "https://soutubot.moe")
+        subject_url = f"{base_url}{subject_path}" if subject_path else ""
+        
+        # 构建文字信息
         info_text = f"【{source}】相似度: {similarity}%\n{title[:100]}"
+        if subject_url:
+            info_text += f"\n链接: {subject_url}"
         
         # 下载并处理预览图
         image_base64 = ""
