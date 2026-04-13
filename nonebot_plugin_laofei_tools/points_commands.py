@@ -422,7 +422,7 @@ async def handle_rob_bank(matcher: Matcher, event: MessageEvent):
     # 随机结果
     rand = random.random() * 100
     
-    if rand < 5:  # 5% 大成功
+    if rand < 3:  # 3% 大成功
         amount = random.randint(100, 300)
         user.points += amount
         save_user(user_id)
@@ -430,7 +430,7 @@ async def handle_rob_bank(matcher: Matcher, event: MessageEvent):
             MessageSegment.reply(event.message_id),
             MessageSegment.text(f"抢银行大获成功，获得了 {amount} 积分")
         ]))
-    elif rand < 40:  # 35% 成功
+    elif rand < 23:  # 20% 成功
         amount = random.randint(1, 100)
         user.points += amount
         save_user(user_id)
@@ -438,7 +438,7 @@ async def handle_rob_bank(matcher: Matcher, event: MessageEvent):
             MessageSegment.reply(event.message_id),
             MessageSegment.text(f"抢银行成功，获得 {amount} 积分")
         ]))
-    elif rand < 70:  # 30% 不敢去
+    elif rand < 70:  # 47% 不敢去
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
             MessageSegment.text("思来想去，走到半路还是怕了回家了吧")
@@ -822,7 +822,7 @@ async def handle_rob(
     # 随机结果
     rand = random.random() * 100
     
-    if rand < 40:  # 40% 成功
+    if rand < 30:  # 30% 成功
         max_rob = min(target_user.points, 50)
         amount = random.randint(1, max_rob)
         target_user.points -= amount
@@ -833,16 +833,16 @@ async def handle_rob(
             MessageSegment.reply(event.message_id),
             MessageSegment.text(f"打劫成功，获得 {amount} 积分")
         ]))
-    elif rand < 70:  # 30% 失败扣分
+    elif rand < 70:  # 40% 逃跑
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("打劫失败，对方跑掉了")
+        ]))
+    else:  # 30% 失败扣分
         amount = random.randint(1, 50)
         user.points -= amount
         save_user(user_id)
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
             MessageSegment.text(f"打劫失败，被反杀，损失 {amount} 积分")
-        ]))
-    else:  # 30% 什么都没发生
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("打劫失败，对方跑掉了")
         ]))
