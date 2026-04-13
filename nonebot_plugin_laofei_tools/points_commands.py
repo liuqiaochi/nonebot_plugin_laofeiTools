@@ -495,8 +495,15 @@ async def handle_lottery(
     # 扣除积分
     user.points -= amount
     
-    # 随机获得 0-3 倍积分
-    multiplier = random.random() * 3
+    # 抽奖概率：0-1倍50%，1-2倍40%，2-3倍10%
+    rand = random.random() * 100
+    if rand < 50:  # 50% 概率 0-1倍
+        multiplier = random.random()  # 0-1
+    elif rand < 90:  # 40% 概率 1-2倍
+        multiplier = 1 + random.random()  # 1-2
+    else:  # 10% 概率 2-3倍
+        multiplier = 2 + random.random()  # 2-3
+    
     gained = int(amount * multiplier)
     
     user.points += gained
