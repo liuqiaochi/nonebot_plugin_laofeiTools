@@ -9,12 +9,15 @@
 
 from nonebot import get_driver, require
 from nonebot.plugin import PluginMetadata
+from nonebot.log import logger
 
 require("nonebot_plugin_localstore")
+require("nonebot_plugin_apscheduler")
 
 from . import commands
 from . import points_commands
 from .config import Config, init_enabled_groups
+from .points_data import calculate_bank_interest
 
 __version__ = "0.2.0"
 
@@ -62,5 +65,19 @@ async def init_config():
     default_groups = getattr(config, "laofei_search_enabled_groups", set())
     if default_groups:
         init_enabled_groups(set(str(g) for g in default_groups))
-        from nonebot.log import logger
         logger.info(f"老肥工具箱: 已加载 {len(default_groups)} 个默认开启的群聊")
+    
+    # 启动时计算一次银行利息（如果今天还没计算）
+    calculate_bank_interest()
+    logger.info("老肥工具箱: 银行利息计算完成")
+
+
+# ========== 定时任务：每天0点计算银行利息 ==========
+from nonebot_plugin_apscheduler import scheduler
+
+
+@scheduler.scheduled_job("cron", hour=0, minute=0, id="bank_interest")
+async def daily_bank_interest():
+    """每天0点计算银行利息"""
+    calculate_bank_interest()
+    logger.info("老肥工具箱: 每日银行利息计算完成")

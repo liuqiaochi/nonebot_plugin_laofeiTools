@@ -31,7 +31,6 @@ from .points_data import (
     get_user_info,
     save_user,
     start_guess_game,
-    calculate_bank_interest,
 )
 from .config import is_points_enabled, enable_points, disable_points
 
@@ -300,9 +299,6 @@ async def handle_bank_deposit(
     
     user_id = str(event.user_id)
     
-    # 计算银行利息
-    calculate_bank_interest()
-    
     args_text = args.extract_plain_text().strip()
     if not args_text or not args_text.isdigit():
         await matcher.finish(Message([
@@ -354,9 +350,6 @@ async def handle_bank_withdraw(
             return
     
     user_id = str(event.user_id)
-    
-    # 计算银行利息
-    calculate_bank_interest()
     
     args_text = args.extract_plain_text().strip()
     if not args_text or not args_text.isdigit():
@@ -678,7 +671,8 @@ FEATURE_HELP = {
 描述：打劫别人的积分""",
     "银行": """【银行】
 指令：存入银行 积分/取出银行 积分
-描述：存入银行:将积分存入银行，每天计算利息;取出银行:将积分从银行取出""",
+描述：1.存入银行:将积分存入银行，每天计算利息;
+	 2.取出银行:将积分从银行取出""",
     "抢银行": """【抢银行】
 指令：抢银行
 描述：抢银行，有几率获得积分，也可能被扣分""",
