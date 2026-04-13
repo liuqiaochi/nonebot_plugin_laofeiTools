@@ -816,7 +816,7 @@ async def handle_rob(
         else:
             await matcher.finish(Message([
                 MessageSegment.reply(event.message_id),
-                MessageSegment.text(f"对方积分不足50（含银行存款），无法打劫")
+                MessageSegment.text("对方已经穷的吃不起饭了，你还打劫别人！")
             ]))
             return
     
