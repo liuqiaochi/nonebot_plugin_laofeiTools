@@ -856,7 +856,9 @@ async def handle_rob(
     else:  # 30% 失败扣分
         amount = random.randint(1, 50)
         user.points -= amount
+        target_user.points += amount
         save_user(user_id)
+        save_user(target_id)
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
             MessageSegment.text(f"打劫失败，被反杀，损失 {amount} 积分")
