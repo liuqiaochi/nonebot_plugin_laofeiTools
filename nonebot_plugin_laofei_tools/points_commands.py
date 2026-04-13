@@ -36,8 +36,8 @@ from .config import is_points_enabled, enable_points, disable_points
 
 
 # ========== 积分系统开关指令（超级用户） ==========
-enable_points_cmd = on_command("开启积分", permission=SUPERUSER, priority=5, block=True)
-disable_points_cmd = on_command("关闭积分", permission=SUPERUSER, priority=5, block=True)
+enable_points_cmd = on_command("开启积分", permission=SUPERUSER, priority=5, block=True, force_whitespace=True)
+disable_points_cmd = on_command("关闭积分", permission=SUPERUSER, priority=5, block=True, force_whitespace=True)
 
 
 @enable_points_cmd.handle()
@@ -93,7 +93,7 @@ async def handle_disable_points(matcher: Matcher, event: MessageEvent):
 
 
 # ========== 签到指令 ==========
-sign_cmd = on_command("签到", aliases={"打卡"}, priority=5, block=True)
+sign_cmd = on_command("签到", aliases={"打卡"}, priority=5, block=True, force_whitespace=True)
 
 
 @sign_cmd.handle()
@@ -137,7 +137,7 @@ async def handle_sign(matcher: Matcher, event: MessageEvent):
 
 
 # ========== 积分查询指令 ==========
-points_cmd = on_command("积分", aliases={"查积分", "我的积分"}, priority=5, block=True)
+points_cmd = on_command("积分", aliases={"查积分", "我的积分"}, priority=5, block=True, force_whitespace=True)
 
 
 @points_cmd.handle()
@@ -172,7 +172,7 @@ Exp: {info['current_exp']} / {info['exp_needed']}
 
 
 # ========== 转账指令 ==========
-transfer_cmd = on_command("转账", priority=5, block=True)
+transfer_cmd = on_command("转账", priority=5, block=True, force_whitespace=True)
 
 
 @transfer_cmd.handle()
@@ -277,8 +277,8 @@ async def handle_transfer(
 
 
 # ========== 银行指令 ==========
-bank_deposit_cmd = on_command("存入银行", priority=5, block=True)
-bank_withdraw_cmd = on_command("取出银行", priority=5, block=True)
+bank_deposit_cmd = on_command("存入银行", priority=5, block=True, force_whitespace=True)
+bank_withdraw_cmd = on_command("取出银行", priority=5, block=True, force_whitespace=True)
 
 
 @bank_deposit_cmd.handle()
@@ -386,7 +386,7 @@ async def handle_bank_withdraw(
 
 
 # ========== 抢银行指令 ==========
-rob_bank_cmd = on_command("抢银行", priority=5, block=True)
+rob_bank_cmd = on_command("抢银行", priority=5, block=True, force_whitespace=True)
 
 
 @rob_bank_cmd.handle()
@@ -447,7 +447,7 @@ async def handle_rob_bank(matcher: Matcher, event: MessageEvent):
 
 
 # ========== 抽奖指令 ==========
-lottery_cmd = on_command("抽奖", priority=5, block=True)
+lottery_cmd = on_command("抽奖", priority=5, block=True, force_whitespace=True)
 
 
 @lottery_cmd.handle()
@@ -516,8 +516,8 @@ async def handle_lottery(
 
 
 # ========== 猜数字指令 ==========
-guess_start_cmd = on_command("猜数字", priority=5, block=True)
-guess_play_cmd = on_command("我猜", priority=5, block=True)
+guess_start_cmd = on_command("猜数字", priority=5, block=True, force_whitespace=True)
+guess_play_cmd = on_command("我猜", priority=5, block=True, force_whitespace=True)
 
 
 @guess_start_cmd.handle()
@@ -660,7 +660,7 @@ async def handle_guess_play(
 
 
 # ========== 功能列表指令 ==========
-help_cmd = on_command("功能", priority=5, block=True)
+help_cmd = on_command("功能", priority=5, block=True, force_whitespace=True)
 
 # 功能详细描述
 FEATURE_HELP = {
@@ -739,7 +739,7 @@ async def handle_help(
 
 
 # ========== 打劫指令 ==========
-rob_cmd = on_command("打劫", priority=5, block=True)
+rob_cmd = on_command("打劫", priority=5, block=True, force_whitespace=True)
 
 
 @rob_cmd.handle()
@@ -851,7 +851,7 @@ async def handle_rob(
     elif rand < 70:  # 40% 逃跑
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text("打劫失败，对方跑掉了")
+            MessageSegment.text("打劫失败，对方跑掉了并对你竖了个中指")
         ]))
     else:  # 30% 失败扣分
         amount = random.randint(1, 50)
@@ -862,7 +862,7 @@ async def handle_rob(
             MessageSegment.text(f"打劫失败，被反杀，损失 {amount} 积分")
         ]))
 # ========== 发积分指令（超级用户隐藏指令） ==========
-give_points_cmd = on_command("发积分", permission=SUPERUSER, priority=5, block=True)
+give_points_cmd = on_command("发积分", permission=SUPERUSER, priority=5, block=True, force_whitespace=True)
 
 
 @give_points_cmd.handle()

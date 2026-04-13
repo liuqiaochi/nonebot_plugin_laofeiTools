@@ -31,6 +31,7 @@ search_image = on_command(
     "lf搜图",
     priority=5,
     block=True,
+    force_whitespace=True,
 )
 
 
@@ -102,6 +103,7 @@ enable_search = on_command(
     permission=SUPERUSER,
     priority=5,
     block=True,
+    force_whitespace=True,
 )
 
 
@@ -134,6 +136,7 @@ disable_search = on_command(
     permission=SUPERUSER,
     priority=5,
     block=True,
+    force_whitespace=True,
 )
 
 
@@ -357,7 +360,7 @@ async def download_and_blur_image(image_url: str, blur_radius: int = 10) -> str:
     
     return base64.b64encode(output.getvalue()).decode()
 # ========== 搜图帮助指令 ==========
-search_help_cmd = on_command("搜图帮助", priority=5, block=True)
+search_help_cmd = on_command("搜图帮助", priority=5, block=True, force_whitespace=True)
 
 
 @search_help_cmd.handle()
