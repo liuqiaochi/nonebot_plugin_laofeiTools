@@ -172,7 +172,7 @@ Exp: {info['current_exp']} / {info['exp_needed']}
 
 
 # ========== 转账指令 ==========
-transfer_cmd = on_command("转账", priority=5, block=True, force_whitespace=True)
+transfer_cmd = on_command("转账", priority=5, block=True)
 
 
 @transfer_cmd.handle()
@@ -277,8 +277,8 @@ async def handle_transfer(
 
 
 # ========== 银行指令 ==========
-bank_deposit_cmd = on_command("存入银行", priority=5, block=True, force_whitespace=True)
-bank_withdraw_cmd = on_command("取出银行", priority=5, block=True, force_whitespace=True)
+bank_deposit_cmd = on_command("存入银行", priority=5, block=True)
+bank_withdraw_cmd = on_command("取出银行", priority=5, block=True)
 
 
 @bank_deposit_cmd.handle()
@@ -447,7 +447,7 @@ async def handle_rob_bank(matcher: Matcher, event: MessageEvent):
 
 
 # ========== 抽奖指令 ==========
-lottery_cmd = on_command("抽奖", priority=5, block=True, force_whitespace=True)
+lottery_cmd = on_command("抽奖", priority=5, block=True)
 
 
 @lottery_cmd.handle()
@@ -516,8 +516,8 @@ async def handle_lottery(
 
 
 # ========== 猜数字指令 ==========
-guess_start_cmd = on_command("猜数字", priority=5, block=True, force_whitespace=True)
-guess_play_cmd = on_command("我猜", priority=5, block=True, force_whitespace=True)
+guess_start_cmd = on_command("猜数字", priority=5, block=True)
+guess_play_cmd = on_command("我猜", priority=5, block=True)
 
 
 @guess_start_cmd.handle()
@@ -739,7 +739,7 @@ async def handle_help(
 
 
 # ========== 打劫指令 ==========
-rob_cmd = on_command("打劫", priority=5, block=True, force_whitespace=True)
+rob_cmd = on_command("打劫", priority=5, block=True)
 
 
 @rob_cmd.handle()
@@ -864,7 +864,7 @@ async def handle_rob(
             MessageSegment.text(f"打劫失败，被反杀，损失 {amount} 积分")
         ]))
 # ========== 发积分指令（超级用户隐藏指令） ==========
-give_points_cmd = on_command("发积分", permission=SUPERUSER, priority=5, block=True, force_whitespace=True)
+give_points_cmd = on_command("发积分", permission=SUPERUSER, priority=5, block=True)
 
 
 @give_points_cmd.handle()
