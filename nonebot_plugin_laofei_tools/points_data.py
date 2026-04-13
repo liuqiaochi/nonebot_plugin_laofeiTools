@@ -337,8 +337,8 @@ def calculate_bank_interest():
     for user_id, user_data in data.items():
         bank_points = user_data.get("bank_points", 0)
         if bank_points > 0:
-            # 利息 = 银行积分 * 0.001 (每天0.1%)
-            interest = bank_points * 0.001
+            # 利息 = 银行积分 * 0.01 (每天1%)
+            interest = bank_points * 0.01
             hidden_interest = user_data.get("bank_interest_hidden", 0.0)
             total_hidden = hidden_interest + interest
             
