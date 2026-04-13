@@ -356,3 +356,24 @@ async def download_and_blur_image(image_url: str, blur_radius: int = 10) -> str:
     output.seek(0)
     
     return base64.b64encode(output.getvalue()).decode()
+# ========== 搜图帮助指令 ==========
+search_help_cmd = on_command("搜图帮助", priority=5, block=True)
+
+
+@search_help_cmd.handle()
+async def handle_search_help(matcher: Matcher, event: MessageEvent):
+    """处理搜图帮助指令"""
+    msg = """搜图功能帮助
+
+【搜图指令】
+lf搜图 - 引用图片进行搜索
+
+【管理指令】
+开启lf搜图 - 开启搜图功能(超管)
+关闭lf搜图 - 关闭搜图功能(超管)
+
+【使用说明】
+1. 需要超级用户先发送「开启lf搜图」开启功能
+2. 引用一张图片后发送「lf搜图」进行搜索
+3. 搜图功能仅在群聊可用"""
+    await matcher.finish(msg)

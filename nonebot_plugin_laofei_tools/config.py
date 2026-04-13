@@ -24,6 +24,7 @@ class Config(BaseModel):
 # 数据文件路径
 DATA_DIR = Path("data/laofei_tools")
 DATA_FILE = DATA_DIR / "enabled_groups.json"
+POINTS_DISABLED_FILE = DATA_DIR / "points_disabled_groups.json"
 
 
 def _ensure_data_dir():
@@ -55,8 +56,35 @@ def _save_enabled_groups(groups: Set[str]):
         logger.error(f"保存群聊配置失败: {e}")
 
 
+# ========== 积分系统开关 ==========
+
+def _load_points_disabled_groups() -> Set[str]:
+    """从文件加载已关闭积分系统的群聊列表"""
+    _ensure_data_dir()
+    if POINTS_DISABLED_FILE.exists():
+        try:
+            with open(POINTS_DISABLED_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return set(data.get("disabled_groups", []))
+        except Exception:
+            return set()
+    return set()
+
+
+def _save_points_disabled_groups(groups: Set[str]):
+    """保存已关闭积分系统的群聊列表到文件"""
+    _ensure_data_dir()
+    try:
+        with open(POINTS_DISABLED_FILE, "w", encoding="utf-8") as f:
+            json.dump({"disabled_groups": list(groups)}, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        from nonebot.log import logger
+        logger.error(f"保存积分系统配置失败: {e}")
+
+
 # 运行时状态存储（从文件加载）
 _enabled_groups: Set[str] = _load_enabled_groups()
+_points_disabled_groups: Set[str] = _load_points_disabled_groups()
 
 
 def is_group_enabled(group_id: str) -> bool:
@@ -74,6 +102,23 @@ def disable_group(group_id: str) -> None:
     """关闭群聊搜图功能"""
     _enabled_groups.discard(group_id)
     _save_enabled_groups(_enabled_groups)
+
+
+def is_points_enabled(group_id: str) -> bool:
+    """检查群聊是否开启了积分系统（默认开启）"""
+    return group_id not in _points_disabled_groups
+
+
+def enable_points(group_id: str) -> None:
+    """开启群聊积分系统"""
+    _points_disabled_groups.discard(group_id)
+    _save_points_disabled_groups(_points_disabled_groups)
+
+
+def disable_points(group_id: str) -> None:
+    """关闭群聊积分系统"""
+    _points_disabled_groups.add(group_id)
+    _save_points_disabled_groups(_points_disabled_groups)
 
 
 def init_enabled_groups(default_groups: Set[str]) -> None:
