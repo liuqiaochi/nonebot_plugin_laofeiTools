@@ -672,7 +672,7 @@ FEATURE_HELP = {
     "银行": """【银行】
 指令：存入银行 积分/取出银行 积分
 描述：1.存入银行:将积分存入银行，每天计算利息;
-	 2.取出银行:将积分从银行取出""",
+	  2.取出银行:将积分从银行取出""",
     "抢银行": """【抢银行】
 指令：抢银行
 描述：抢银行，有几率获得积分，也可能被扣分""",
@@ -804,10 +804,26 @@ async def handle_rob(
     
     target_user = get_user(target_id)
     
+    # 检查对方是否有积分账户或积分不足
+    total_points = target_user.points + target_user.bank_points
+    if total_points < 50:
+        if total_points < 1:
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("对方还没有积分账户，无法打劫")
+            ]))
+            return
+        else:
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text(f"对方积分不足50（含银行存款），无法打劫")
+            ]))
+            return
+    
     if target_user.points < 1:
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text("对方没有可打劫的积分")
+            MessageSegment.text("对方身上没有积分，无法打劫")
         ]))
         return
     
