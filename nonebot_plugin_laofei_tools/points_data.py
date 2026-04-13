@@ -155,6 +155,24 @@ def get_user(user_id: str) -> UserData:
     return _user_data[user_id]
 
 
+def reload_user(user_id: str) -> UserData:
+    """从文件重新加载用户数据"""
+    data = _load_user_data()
+    if user_id in data:
+        user = UserData()
+        user.points = data[user_id].get("points", 0)
+        user.exp = data[user_id].get("exp", 0)
+        user.bank_points = data[user_id].get("bank_points", 0)
+        user.total_sign_days = data[user_id].get("total_sign_days", 0)
+        user.continuous_sign_days = data[user_id].get("continuous_sign_days", 0)
+        user.last_sign_date = data[user_id].get("last_sign_date", "")
+        user.bank_interest_hidden = data[user_id].get("bank_interest_hidden", 0.0)
+        _user_data[user_id] = user
+    else:
+        _user_data[user_id] = UserData()
+    return _user_data[user_id]
+
+
 def save_user(user_id: str):
     """保存单个用户数据"""
     _save_user_data()
@@ -331,6 +349,10 @@ def calculate_bank_interest():
     
     _bank_last_interest_date = today
     
+    # 先保存缓存中的数据到文件
+    if _user_data:
+        _save_user_data()
+    
     # 加载所有用户数据
     data = _load_user_data()
     
@@ -354,5 +376,8 @@ def calculate_bank_interest():
     with open(USER_DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     
-    # 更新缓存
-    _user_data.clear()
+    # 更新缓存中的银行积分
+    for user_id, user_data in data.items():
+        if user_id in _user_data:
+            _user_data[user_id].bank_points = user_data.get("bank_points", 0)
+            _user_data[user_id].bank_interest_hidden = user_data.get("bank_interest_hidden", 0.0)
