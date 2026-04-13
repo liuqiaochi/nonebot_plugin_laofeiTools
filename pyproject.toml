@@ -1,7 +1,7 @@
 [project]
 name = "nonebot-plugin-laofei-tools"
-version = "0.1.0"
-description = "老肥工具箱 - NoneBot 插件，支持以图搜图等功能"
+version = "0.2.0"
+description = "老肥工具箱 - NoneBot 插件，支持以图搜图、积分系统等功能"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
