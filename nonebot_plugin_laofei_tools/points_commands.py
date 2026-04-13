@@ -844,3 +844,53 @@ async def handle_rob(
             MessageSegment.reply(event.message_id),
             MessageSegment.text(f"打劫失败，被反杀，损失 {amount} 积分")
         ]))
+# ========== 发积分指令（超级用户隐藏指令） ==========
+give_points_cmd = on_command("发积分", permission=SUPERUSER, priority=5, block=True)
+
+
+@give_points_cmd.handle()
+async def handle_give_points(
+    matcher: Matcher,
+    event: MessageEvent,
+    args: Message = CommandArg(),
+):
+    """超级用户发放积分"""
+    args_text = args.extract_plain_text().strip()
+    
+    # 解析参数：发积分 数量 @某人
+    parts = args_text.split()
+    if not parts or not parts[0].isdigit():
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("用法：发积分 数量 @某人")
+        ]))
+        return
+    
+    amount = int(parts[0])
+    if amount < 1 or amount > 500:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("积分范围是 1-500")
+        ]))
+        return
+    
+    # 获取目标用户
+    target_id = None
+    for seg in args:
+        if seg.type == "at":
+            target_id = seg.data.get("qq")
+            break
+    
+    # 如果没有@任何人，则发给自己
+    if not target_id:
+        target_id = str(event.user_id)
+    
+    # 发放积分
+    target_user = get_user(target_id)
+    target_user.points += amount
+    save_user(target_id)
+    
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(f"已发放 {amount} 积分")
+    ]))
