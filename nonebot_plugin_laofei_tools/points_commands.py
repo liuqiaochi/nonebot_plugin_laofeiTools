@@ -9,7 +9,8 @@ import random
 from datetime import datetime
 from typing import Union
 
-from nonebot import on_command
+from nonebot import on_command, logger
+from nonebot.adapters import Event
 from nonebot.adapters.onebot.v11 import (
     Bot,
     GroupMessageEvent,
@@ -1381,49 +1382,60 @@ pk_emoji_notice = on_notice(priority=5, block=True)
 async def handle_pk_emoji_like(
     matcher: Matcher,
     bot: Bot,
-    event: GroupMessageEvent,
+    event: Event,
 ):
     """处理群消息 emoji 回应事件：用于 PK 同意/拒绝
-    
-    NapCat 上报的 notice 事件结构示例：
+
+    NapCat 上报的事件数据（通过 Event 原始属性访问）：
     {
         "post_type": "notice",
         "notice_type": "group_msg_emoji_like",
         "group_id": 群号,
         "user_id": 操作者QQ,
         "message_id": 被回应的消息ID,
-        "likes": [{"emoji_id": "112"}]  或类似格式
+        "likes": [{"emoji_id": "120", "count": N}],
+        "is_add": True/False
     }
     """
-    # 仅处理 group_msg_emoji_like 类型的通知事件
-    if not hasattr(event, 'notice_type') or getattr(event, 'notice_type', '') != 'group_msg_emoji_like':
+    from nonebot.adapters.onebot.v11 import NoticeEvent
+
+    # 仅处理 notice 类型的通知事件
+    if not isinstance(event, NoticeEvent):
+        return
+
+    # 仅处理 group_msg_emoji_like 子类型
+    if getattr(event, 'notice_type', '') != 'group_msg_emoji_like':
         return
 
     # 忽略机器人自己的操作
-    if str(event.user_id) == str(bot.self_id):
+    user_id_str = str(event.get_user_id())
+    if user_id_str == str(bot.self_id):
         return
 
     # 查找是否有匹配的 PK 会话
-    message_id = int(getattr(event, 'message_id', 0))
+    message_id = int(getattr(event, 'message_id', 0) or 0)
     if message_id <= 0:
         return
 
     session = get_pk_session_by_bot_msg(message_id)
     if not session:
+        logger.debug(f"[PK-Emoji] message_id={message_id} 没有匹配的 PK 会话")
         return
 
-    invitee_id = str(event.user_id)
+    invitee_id = user_id_str
     inviter_id = session.inviter_id
     bet = session.bet
     group_id = session.group_id
 
     # 校验：只有被邀请人可以操作
     if invitee_id != session.invitee_id:
+        logger.debug(f"[PK-Emoji] 操作者 {invitee_id} 不是被邀请人 {session.invitee_id}, 忽略")
         return
 
     # 校验群组一致
-    event_group_id = str(getattr(event, 'group_id', 0))
+    event_group_id = str(getattr(event, 'group_id', None) or "")
     if event_group_id != group_id:
+        logger.debug(f"[PK-Emoji] 群组不匹配 {event_group_id} vs {group_id}")
         return
 
     # ---- 安全过滤：只处理拳头(120) / NO(123) ----
