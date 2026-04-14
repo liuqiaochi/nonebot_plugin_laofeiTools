@@ -1318,34 +1318,32 @@ async def handle_pk_emoji_like(
     if str(event.group_id) != group_id:
         return
 
-    # 解析表情：从 likes 列表获取第一个 emoji_id
-    emoji_ids = [like.get("emoji_id", "") for like in (event.likes or [])]
+    # ---- 安全过滤：只处理 ✅ / ❌ 类 emoji，其余全部忽略 ----
+    ACCEPT_EMOJI_IDS = {"112"}   # ✅ 系统确认表情 FaceID
+    REJECT_EMOJI_IDS = {"113"}   # ❌ 系统取消表情 FaceID
+
+    emoji_ids = [str(like.get("emoji_id", "")) for like in (event.likes or [])]
     if not emoji_ids:
         return
 
-    emoji_id = str(emoji_ids[0])
+    raw_emoji_id = emoji_ids[0]
 
-    # NapCat 的 ✅ emoji ID 通常为 112（系统确认表情）
-    # ❌ 通常为 113（系统取消表情）
-    # 也可能是其他格式，这里做兼容判断
-    is_accept = False
-    is_reject = False
-
-    if "112" in emoji_id or "check" in emoji_id.lower() or "+" in emoji_id:
-        is_accept = True
-    elif "113" in emoji_id or "cross" in emoji_id.lower() or "-" in emoji_id:
-        is_reject = True
-    else:
-        # 兜底：如果无法识别具体 emoji，按默认规则——✅类为同意，❌类为拒绝
-        # QQ 系统表情中偶数为正面(✅等)，奇数为负面(❌等)的大致规律
+    # 提取纯数字 ID（NapCat 格式如 "[FaceID:112]" 或纯数字）
+    clean_id = ""
+    if "[" in raw_emoji_id and "FaceID:" in raw_emoji_id:
         try:
-            eid = int(emoji_id.replace("[FaceID:", "").replace("]", ""))
-            if eid % 2 == 0:
-                is_accept = True
-            else:
-                is_reject = True
-        except ValueError:
+            clean_id = raw_emoji_id.split("FaceID:")[1].split("]")[0]
+        except (IndexError, ValueError):
             return
+    else:
+        clean_id = raw_emoji_id
+
+    is_accept = clean_id in ACCEPT_EMOJI_IDS
+    is_reject = clean_id in REJECT_EMOJI_IDS
+
+    # 非 ✅/❌ 的 emoji 一律忽略（别人点的 😂👍 等不触发任何操作）
+    if not is_accept and not is_reject:
+        return
 
     # 移除会话（取消超时任务）
     remove_pk_session(invitee_id)
