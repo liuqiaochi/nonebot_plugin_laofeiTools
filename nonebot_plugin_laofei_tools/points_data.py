@@ -4,6 +4,7 @@
 存储用户积分、经验、签到记录、银行数据等
 """
 
+import asyncio
 import json
 import random
 from datetime import datetime, timedelta
@@ -16,6 +17,7 @@ USER_DATA_FILE = DATA_DIR / "user_points.json"
 BANK_DATA_FILE = DATA_DIR / "bank_data.json"
 GUESS_GAME_FILE = DATA_DIR / "guess_games.json"
 GAME_LIMIT_FILE = DATA_DIR / "game_limits.json"
+PK_SESSION_FILE = DATA_DIR / "pk_sessions.json"
 
 # 每日游戏次数上限
 DAILY_GAME_LIMIT = 10
@@ -430,3 +432,51 @@ def consume_game_count(user_id: str, game_type: str) -> int:
     game_rec[today] = game_rec.get(today, 0) + 1
     _save_game_limits(data)
     return max(0, DAILY_GAME_LIMIT - game_rec[today])
+
+
+# ========== PK 对战会话 ==========
+class PKSession:
+    """PK 对战会话"""
+
+    def __init__(self):
+        self.inviter_id: str = ""       # 发起人 user_id
+        self.invitee_id: str = ""       # 被邀请人 user_id
+        self.bet: int = 0               # 双方下注积分
+        self.group_id: str = ""         # 所在群组
+        self.cancel_task: Optional[asyncio.Task] = None  # 超时取消任务（内存专用，不持久化）
+
+
+# 内存中维护的 PK 会话：key = invitee_id，保证每人同时只能被一个人邀请
+_pk_sessions: Dict[str, PKSession] = {}
+
+
+def get_pk_session_by_invitee(invitee_id: str) -> Optional[PKSession]:
+    """通过被邀请人 ID 获取待确认 PK 会话"""
+    return _pk_sessions.get(invitee_id)
+
+
+def get_pk_session_by_inviter(inviter_id: str) -> Optional[PKSession]:
+    """通过发起人 ID 获取待确认 PK 会话（防止重复发起）"""
+    for session in _pk_sessions.values():
+        if session.inviter_id == inviter_id:
+            return session
+    return None
+
+
+def create_pk_session(inviter_id: str, invitee_id: str, bet: int, group_id: str) -> PKSession:
+    """创建 PK 会话"""
+    session = PKSession()
+    session.inviter_id = inviter_id
+    session.invitee_id = invitee_id
+    session.bet = bet
+    session.group_id = group_id
+    _pk_sessions[invitee_id] = session
+    return session
+
+
+def remove_pk_session(invitee_id: str):
+    """移除 PK 会话"""
+    session = _pk_sessions.pop(invitee_id, None)
+    if session and session.cancel_task and not session.cancel_task.done():
+        session.cancel_task.cancel()
+    return session

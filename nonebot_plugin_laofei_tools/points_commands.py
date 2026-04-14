@@ -1,9 +1,10 @@
 """
 积分系统指令处理
 
-功能：签到、积分查询、转账、银行、抽奖、猜数字
+功能：签到、积分查询、转账、银行、抽奖、猜数字、PK对战
 """
 
+import asyncio
 import random
 from datetime import datetime
 from typing import Union
@@ -24,13 +25,17 @@ from nonebot.permission import SUPERUSER
 from .points_data import (
     calculate_level,
     consume_game_count,
+    create_pk_session,
     do_sign,
     end_guess_game,
     get_game_remaining,
     get_guess_game,
     get_level_title,
+    get_pk_session_by_invitee,
+    get_pk_session_by_inviter,
     get_user,
     get_user_info,
+    remove_pk_session,
     save_user,
     start_guess_game,
 )
@@ -715,6 +720,12 @@ FEATURE_HELP = {
     "猜数字": """【猜数字】
 指令：猜数字 积分 / 我猜 数字
 描述：消耗积分开始猜数字游戏，猜中则积分翻倍""",
+    "PK": """【PK对战】
+指令：PK 积分 @某人
+描述：邀请某人摇骰子PK，双方各下注相同积分
+      对方发送「同意PK」接受挑战
+      双方各摇2颗骰子（2-12），点数大的获得全部积分
+      平局则退回双方积分""",
 }
 
 
@@ -752,7 +763,7 @@ async def handle_help(
     # 无参数时显示功能列表
     msg = """【积分系统功能列表】
 签到   积分   转账   打劫 
-银行   抢银行  抽奖  猜数字
+银行   抢银行  抽奖  猜数字  PK
 
 发送「功能 功能名称」查看使用方法"""
     await matcher.finish(Message([
@@ -938,4 +949,267 @@ async def handle_give_points(
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
         MessageSegment.text(f"已发放 {amount} 积分")
+    ]))
+
+
+# ========== PK 对战指令 ==========
+pk_cmd = on_command("PK", aliases={"pk"}, priority=5, block=True)
+pk_accept_cmd = on_command("同意PK", aliases={"同意pk", "接受PK", "接受pk"}, priority=5, block=True, force_whitespace=True)
+
+
+@pk_cmd.handle()
+async def handle_pk(
+    matcher: Matcher,
+    bot: Bot,
+    event: MessageEvent,
+    args: Message = CommandArg(),
+):
+    """处理 PK 发起指令：PK 积分 @某人"""
+    # 仅限群聊
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("PK 功能仅在群聊可用")
+        ]))
+        return
+
+    group_id = str(event.group_id)
+
+    if not is_points_enabled(group_id):
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("本群积分系统已关闭")
+        ]))
+        return
+
+    inviter_id = str(event.user_id)
+
+    # 检查发起人是否已有待确认 PK
+    if get_pk_session_by_inviter(inviter_id):
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("你已有一场 PK 邀请等待对方确认，请稍候")
+        ]))
+        return
+
+    # 解析积分参数
+    args_text = args.extract_plain_text().strip()
+    parts = args_text.split()
+
+    if not parts or not parts[0].isdigit():
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("请使用「PK 积分 @某人」格式发起挑战")
+        ]))
+        return
+
+    bet = int(parts[0])
+    if bet < 1:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("下注积分不能少于 1")
+        ]))
+        return
+
+    # 获取目标用户
+    invitee_id = None
+    for seg in args:
+        if seg.type == "at":
+            invitee_id = seg.data.get("qq")
+            break
+
+    if not invitee_id:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("请@要挑战的对象")
+        ]))
+        return
+
+    if invitee_id == inviter_id:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("不能和自己 PK")
+        ]))
+        return
+
+    # 检查发起人积分
+    inviter = get_user(inviter_id)
+    if inviter.points < bet:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(f"积分不足，你只有 {inviter.points} 积分")
+        ]))
+        return
+
+    # 检查被邀请人积分
+    invitee = get_user(invitee_id)
+    if invitee.points < bet:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(f"对方积分不足（需要 {bet} 积分），无法发起挑战")
+        ]))
+        return
+
+    # 检查对方是否已有待确认的 PK
+    if get_pk_session_by_invitee(invitee_id):
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("对方已有一场待确认的 PK 邀请，请稍后再试")
+        ]))
+        return
+
+    # 先冻结发起人积分（预扣）
+    inviter.points -= bet
+    save_user(inviter_id)
+
+    # 创建会话
+    session = create_pk_session(inviter_id, invitee_id, bet, group_id)
+
+    # 发送邀请消息
+    await bot.send(event, Message([
+        MessageSegment.at(invitee_id),
+        MessageSegment.text(
+            f" 你被 {event.sender.nickname or inviter_id} 挑战了！\n"
+            f"下注积分：{bet}\n"
+            f"发送「同意PK」接受挑战（60秒内有效）"
+        )
+    ]))
+
+    # 60 秒超时自动取消
+    async def _timeout():
+        await asyncio.sleep(60)
+        removed = remove_pk_session(invitee_id)
+        if removed:
+            # 退回发起人积分
+            inv = get_user(inviter_id)
+            inv.points += bet
+            save_user(inviter_id)
+            try:
+                await bot.send_group_msg(
+                    group_id=int(group_id),
+                    message=Message([
+                        MessageSegment.at(inviter_id),
+                        MessageSegment.text(f" PK 邀请超时未被接受，已退回 {bet} 积分")
+                    ])
+                )
+            except Exception:
+                pass
+
+    task = asyncio.create_task(_timeout())
+    session.cancel_task = task
+
+
+@pk_accept_cmd.handle()
+async def handle_pk_accept(
+    matcher: Matcher,
+    bot: Bot,
+    event: MessageEvent,
+):
+    """处理同意 PK 指令"""
+    # 仅限群聊
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("PK 功能仅在群聊可用")
+        ]))
+        return
+
+    group_id = str(event.group_id)
+
+    if not is_points_enabled(group_id):
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("本群积分系统已关闭")
+        ]))
+        return
+
+    invitee_id = str(event.user_id)
+    session = get_pk_session_by_invitee(invitee_id)
+
+    if not session:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("你当前没有待接受的 PK 邀请")
+        ]))
+        return
+
+    # 校验群组一致
+    if session.group_id != group_id:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("请在发起 PK 的群聊中接受挑战")
+        ]))
+        return
+
+    # 移除会话（取消超时任务）
+    remove_pk_session(invitee_id)
+
+    inviter_id = session.inviter_id
+    bet = session.bet
+
+    # 扣除被邀请人积分
+    invitee = get_user(invitee_id)
+    if invitee.points < bet:
+        # 退回发起人积分
+        inv = get_user(inviter_id)
+        inv.points += bet
+        save_user(inviter_id)
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(f"你的积分不足（需要 {bet} 积分），PK 取消，已退回对方积分")
+        ]))
+        return
+
+    invitee.points -= bet
+    save_user(invitee_id)
+
+    # 摇骰子（各摇两颗，2-12）
+    inviter_roll = random.randint(1, 6) + random.randint(1, 6)
+    invitee_roll = random.randint(1, 6) + random.randint(1, 6)
+
+    inviter = get_user(inviter_id)
+    invitee_user = get_user(invitee_id)
+
+    # 获取昵称（尽量用群昵称）
+    try:
+        inviter_info = await bot.get_group_member_info(group_id=int(group_id), user_id=int(inviter_id))
+        inviter_name = inviter_info.get("card") or inviter_info.get("nickname") or inviter_id
+    except Exception:
+        inviter_name = inviter_id
+
+    try:
+        invitee_info = await bot.get_group_member_info(group_id=int(group_id), user_id=int(invitee_id))
+        invitee_name = invitee_info.get("card") or invitee_info.get("nickname") or invitee_id
+    except Exception:
+        invitee_name = invitee_id
+
+    total_pot = bet * 2
+
+    if inviter_roll > invitee_roll:
+        # 发起人胜
+        inviter.points += total_pot
+        save_user(inviter_id)
+        result_line = f"{inviter_name} 胜！获得 {total_pot} 积分"
+    elif invitee_roll > inviter_roll:
+        # 被邀请人胜
+        invitee_user.points += total_pot
+        save_user(invitee_id)
+        result_line = f"{invitee_name} 胜！获得 {total_pot} 积分"
+    else:
+        # 平局退回
+        inviter.points += bet
+        invitee_user.points += bet
+        save_user(inviter_id)
+        save_user(invitee_id)
+        result_line = "平局！积分已退回双方"
+
+    msg = (
+        f"🎲 PK 结果\n"
+        f"{result_line}\n"
+        f"{inviter_name}：{inviter_roll}  vs  {invitee_name}：{invitee_roll}"
+    )
+
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(msg)
     ]))
