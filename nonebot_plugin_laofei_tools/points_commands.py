@@ -1082,6 +1082,13 @@ async def handle_pk(
     # 保存机器人发出的消息 message_id（用于 emoji 回应匹配）
     session.bot_message_id = int(pk_msg["message_id"])
 
+    # 预置 ✅ 和 ❌ emoji 回应选项，方便对方直接点击
+    try:
+        await bot.call_api("set_msg_emoji_like", message_id=int(pk_msg["message_id"]), emoji_id="112")
+        await bot.call_api("set_msg_emoji_like", message_id=int(pk_msg["message_id"]), emoji_id="113")
+    except Exception:
+        pass  # 非 NapCat 端或不支持此 API 时静默忽略
+
     # 60 秒超时自动取消
     async def _timeout():
         await asyncio.sleep(60)
