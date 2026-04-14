@@ -1074,8 +1074,7 @@ async def handle_pk(
         MessageSegment.text(
             f" 你被 {event.sender.nickname or inviter_id} 挑战了！\n"
             f"下注积分：{bet}\n"
-            f"✅ 同意  ❌ 拒绝\n"
-            f"（点击上方 emoji 或发送「同意PK」/「拒绝PK」，60秒内有效）"
+            f"（点击下方 emoji 或发送「同意PK」/「拒绝PK」，60秒内有效）"
         )
     ]))
 
