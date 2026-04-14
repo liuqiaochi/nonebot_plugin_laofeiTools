@@ -1281,9 +1281,15 @@ async def handle_pk_reject(
     ]))
 
 
-# ========== PK emoji 回应事件监听 ==========
+# ========== PK emoji 回应事件监听（NapCat 扩展） ==========
+# 事件类型：notice.group_msg_emoji_like
+# 注意：
+#   1. 此事件不在 OneBot V11 标准中，是 NapCat 的扩展事件
+#   2. NapCat 只上报「自己（机器人）发出的消息被别人点 emoji」的事件
+#   3. 别人之间点的 emoji 不会报上来，所以这里只能收到被邀请人对机器人消息的操作
+#   4. 如果 NapCat 版本不支持此事件或配置未开启，文字指令「同意PK」/「拒绝PK」仍可正常使用
+
 from nonebot import on_notice
-from nonebot.adapters.onebot.v11 import GroupMessageEmojiLikeEvent
 
 
 pk_emoji_notice = on_notice(priority=5, block=True)
@@ -1293,15 +1299,34 @@ pk_emoji_notice = on_notice(priority=5, block=True)
 async def handle_pk_emoji_like(
     matcher: Matcher,
     bot: Bot,
-    event: GroupMessageEmojiLikeEvent,
+    event: GroupMessageEvent,
 ):
-    """处理群消息 emoji 回应事件：用于 PK 同意/拒绝"""
-    # 仅处理对机器人消息的回应
-    if event.user_id == int(bot.self_id):
+    """处理群消息 emoji 回应事件：用于 PK 同意/拒绝
+    
+    NapCat 上报的 notice 事件结构示例：
+    {
+        "post_type": "notice",
+        "notice_type": "group_msg_emoji_like",
+        "group_id": 群号,
+        "user_id": 操作者QQ,
+        "message_id": 被回应的消息ID,
+        "likes": [{"emoji_id": "112"}]  或类似格式
+    }
+    """
+    # 仅处理 group_msg_emoji_like 类型的通知事件
+    if not hasattr(event, 'notice_type') or getattr(event, 'notice_type', '') != 'group_msg_emoji_like':
+        return
+
+    # 忽略机器人自己的操作
+    if str(event.user_id) == str(bot.self_id):
         return
 
     # 查找是否有匹配的 PK 会话
-    session = get_pk_session_by_bot_msg(int(event.message_id))
+    message_id = int(getattr(event, 'message_id', 0))
+    if message_id <= 0:
+        return
+
+    session = get_pk_session_by_bot_msg(message_id)
     if not session:
         return
 
@@ -1315,18 +1340,19 @@ async def handle_pk_emoji_like(
         return
 
     # 校验群组一致
-    if str(event.group_id) != group_id:
+    event_group_id = str(getattr(event, 'group_id', 0))
+    if event_group_id != group_id:
         return
 
     # ---- 安全过滤：只处理 ✅ / ❌ 类 emoji，其余全部忽略 ----
     ACCEPT_EMOJI_IDS = {"112"}   # ✅ 系统确认表情 FaceID
     REJECT_EMOJI_IDS = {"113"}   # ❌ 系统取消表情 FaceID
 
-    emoji_ids = [str(like.get("emoji_id", "")) for like in (event.likes or [])]
-    if not emoji_ids:
+    likes = getattr(event, 'likes', None) or []
+    if not likes:
         return
 
-    raw_emoji_id = emoji_ids[0]
+    raw_emoji_id = str(likes[0].get("emoji_id", "") if isinstance(likes[0], dict) else "")
 
     # 提取纯数字 ID（NapCat 格式如 "[FaceID:112]" 或纯数字）
     clean_id = ""
@@ -1345,7 +1371,7 @@ async def handle_pk_emoji_like(
     if not is_accept and not is_reject:
         return
 
-    # 移除会话（取消超时任务）
+    # 移除会话（取消超时任务），防止重复处理
     remove_pk_session(invitee_id)
 
     if is_accept:
@@ -1459,7 +1485,7 @@ async def handle_pk_emoji_like(
                 message=Message([
                     MessageSegment.at(inviter_id),
                     MessageSegment.text(
-                        f" {invitee_name} 拒绝了你的 PK 邀请，已退回 {bet} 积分"
+                        f" {invitee_name} 拒绝了 your PK 邀请，已退回 {bet} 积分"
                     ),
                 ]),
             )
