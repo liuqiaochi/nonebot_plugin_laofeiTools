@@ -23,8 +23,10 @@ from nonebot.permission import SUPERUSER
 
 from .points_data import (
     calculate_level,
+    consume_game_count,
     do_sign,
     end_guess_game,
+    get_game_remaining,
     get_guess_game,
     get_level_title,
     get_user,
@@ -492,6 +494,15 @@ async def handle_lottery(
         ]))
         return
     
+    # 检查每日次数
+    remaining = get_game_remaining(user_id, "lottery")
+    if remaining <= 0:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("今日抽奖次数已用完（每天10次），明天再来~")
+        ]))
+        return
+    
     # 扣除积分
     user.points -= amount
     
@@ -509,9 +520,12 @@ async def handle_lottery(
     user.points += gained
     save_user(user_id)
     
+    # 消耗次数并获取剩余
+    left = consume_game_count(user_id, "lottery")
+    
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
-        MessageSegment.text(f"得分: {gained}\n现有积分: {user.points}")
+        MessageSegment.text(f"得分: {gained}\n现有积分: {user.points}\n今日抽奖剩余 {left} 次")
     ]))
 
 
@@ -571,15 +585,27 @@ async def handle_guess_start(
         ]))
         return
     
+    # 检查每日次数
+    remaining = get_game_remaining(user_id, "guess")
+    if remaining <= 0:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("今日猜数字次数已用完（每天10次），明天再来~")
+        ]))
+        return
+    
     # 扣除积分并开始游戏
     user.points -= amount
     save_user(user_id)
     
     game = start_guess_game(user_id, amount)
     
+    # 消耗次数并获取剩余
+    left = consume_game_count(user_id, "guess")
+    
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
-        MessageSegment.text(f"🎈猜数字开始~\n积分 -{amount}\n你有 {game.chances} 次机会\n请发送 我猜 xx")
+        MessageSegment.text(f"🎈猜数字开始~\n积分 -{amount}\n你有 {game.chances} 次机会\n今日猜数字剩余 {left} 次\n请发送 我猜 xx")
     ]))
 
 

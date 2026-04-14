@@ -15,6 +15,10 @@ DATA_DIR = Path("data/laofei_tools")
 USER_DATA_FILE = DATA_DIR / "user_points.json"
 BANK_DATA_FILE = DATA_DIR / "bank_data.json"
 GUESS_GAME_FILE = DATA_DIR / "guess_games.json"
+GAME_LIMIT_FILE = DATA_DIR / "game_limits.json"
+
+# 每日游戏次数上限
+DAILY_GAME_LIMIT = 10
 
 
 def _ensure_data_dir():
@@ -381,3 +385,48 @@ def calculate_bank_interest():
         if user_id in _user_data:
             _user_data[user_id].bank_points = user_data.get("bank_points", 0)
             _user_data[user_id].bank_interest_hidden = user_data.get("bank_interest_hidden", 0.0)
+
+
+# ========== 每日游戏次数限制 ==========
+def _load_game_limits() -> dict:
+    """加载每日游戏次数数据"""
+    _ensure_data_dir()
+    if GAME_LIMIT_FILE.exists():
+        try:
+            with open(GAME_LIMIT_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_game_limits(data: dict):
+    """保存每日游戏次数数据"""
+    _ensure_data_dir()
+    with open(GAME_LIMIT_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def get_game_remaining(user_id: str, game_type: str) -> int:
+    """
+    获取用户今日某游戏的剩余次数。
+    game_type: 'lottery' | 'guess'
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    data = _load_game_limits()
+    used = data.get(user_id, {}).get(game_type, {}).get(today, 0)
+    return max(0, DAILY_GAME_LIMIT - used)
+
+
+def consume_game_count(user_id: str, game_type: str) -> int:
+    """
+    消耗一次游戏次数，返回剩余次数。
+    game_type: 'lottery' | 'guess'
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    data = _load_game_limits()
+    user_rec = data.setdefault(user_id, {})
+    game_rec = user_rec.setdefault(game_type, {})
+    game_rec[today] = game_rec.get(today, 0) + 1
+    _save_game_limits(data)
+    return max(0, DAILY_GAME_LIMIT - game_rec[today])
