@@ -1127,8 +1127,8 @@ async def handle_pk(
     # 预置 👍(同意) 和 👎(拒绝) emoji 回应选项
     # 注意：emoji_id 取值因 QQ 客户端版本而异，以下为常见值
     #   如果贴出的表情不对，请用「测试emoji」指令获取真实 ID 后修改此处常量
-    PK_ACCEPT_EMOJI_ID = "1"    # 👍 点赞（表示同意）
-    PK_REJECT_EMOJI_ID = "2"    # 👎 踩（表示拒绝）
+    PK_ACCEPT_EMOJI_ID = "120"   # 拳头（表示同意）
+    PK_REJECT_EMOJI_ID = "123"    # NO（表示拒绝）
     try:
         await bot.call_api("set_msg_emoji_like", message_id=int(pk_msg["message_id"]), emoji_id=PK_ACCEPT_EMOJI_ID, set=True)
         await bot.call_api("set_msg_emoji_like", message_id=int(pk_msg["message_id"]), emoji_id=PK_REJECT_EMOJI_ID, set=True)
@@ -1398,8 +1398,8 @@ async def handle_pk_emoji_like(
         return
 
     # ---- 安全过滤：只处理 👍(同意) / 👎(拒绝) 类 emoji，其余全部忽略 ----
-    ACCEPT_EMOJI_IDS = {"1"}    # 👍 点赞（表示同意）
-    REJECT_EMOJI_IDS = {"2"}    # 👎 踩（表示拒绝）
+    ACCEPT_EMOJI_IDS = {"120"}  # 拳头（表示同意）
+    REJECT_EMOJI_IDS = {"123"}   # NO（表示拒绝）
 
     likes = getattr(event, 'likes', None) or []
     if not likes:
