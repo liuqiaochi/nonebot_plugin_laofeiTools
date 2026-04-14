@@ -1426,31 +1426,19 @@ async def handle_pk_emoji_like(
     if event_group_id != group_id:
         return
 
-    # ---- 安全过滤：只处理 👍(同意) / 👎(拒绝) 类 emoji，其余全部忽略 ----
-    ACCEPT_EMOJI_IDS = {"120"}  # 拳头（表示同意）
-    REJECT_EMOJI_IDS = {"123"}   # NO（表示拒绝）
-
+    # ---- 安全过滤：只处理拳头(120) / NO(123) ----
     likes = getattr(event, 'likes', None) or []
     if not likes:
         return
 
     raw_emoji_id = str(likes[0].get("emoji_id", "") if isinstance(likes[0], dict) else "")
 
-    # 提取纯数字 ID（NapCat 格式如 "[FaceID:112]" 或纯数字）
-    clean_id = ""
-    if "[" in raw_emoji_id and "FaceID:" in raw_emoji_id:
-        try:
-            clean_id = raw_emoji_id.split("FaceID:")[1].split("]")[0]
-        except (IndexError, ValueError):
-            return
-    else:
-        clean_id = raw_emoji_id
+    is_accept = (raw_emoji_id == PK_ACCEPT_EMOJI_ID)
+    is_reject = (raw_emoji_id == PK_REJECT_EMOJI_ID)
 
-    is_accept = clean_id in ACCEPT_EMOJI_IDS
-    is_reject = clean_id in REJECT_EMOJI_IDS
-
-    # 非 ✅/❌ 的 emoji 一律忽略（别人点的 😂👍 等不触发任何操作）
+    # 非 拳头/NO 的 emoji 一律忽略（别人点的 😂👍 等不触发任何操作）
     if not is_accept and not is_reject:
+        logger.debug(f"[PK-Emoji] 未识别的 emoji_id={raw_emoji_id}, 忽略")
         return
 
     # 移除会话（取消超时任务），防止重复处理
