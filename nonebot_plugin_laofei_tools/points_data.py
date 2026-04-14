@@ -443,6 +443,7 @@ class PKSession:
         self.invitee_id: str = ""       # 被邀请人 user_id
         self.bet: int = 0               # 双方下注积分
         self.group_id: str = ""         # 所在群组
+        self.bot_message_id: Optional[int] = None  # 机器人发出的邀请消息 ID（用于 emoji 回应）
         self.cancel_task: Optional[asyncio.Task] = None  # 超时取消任务（内存专用，不持久化）
 
 
@@ -459,6 +460,14 @@ def get_pk_session_by_inviter(inviter_id: str) -> Optional[PKSession]:
     """通过发起人 ID 获取待确认 PK 会话（防止重复发起）"""
     for session in _pk_sessions.values():
         if session.inviter_id == inviter_id:
+            return session
+    return None
+
+
+def get_pk_session_by_bot_msg(message_id: int) -> Optional[PKSession]:
+    """通过机器人发出的邀请消息 ID 查询 PK 会话（emoji 回应用）"""
+    for session in _pk_sessions.values():
+        if session.bot_message_id == message_id:
             return session
     return None
 

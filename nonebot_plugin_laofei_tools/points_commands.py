@@ -31,6 +31,7 @@ from .points_data import (
     get_game_remaining,
     get_guess_game,
     get_level_title,
+    get_pk_session_by_bot_msg,
     get_pk_session_by_invitee,
     get_pk_session_by_inviter,
     get_user,
@@ -723,8 +724,8 @@ FEATURE_HELP = {
     "PK": """【PK对战】
 指令：PK 积分 @某人
 描述：邀请某人摇骰子PK，双方各下注相同积分
-      对方发送「同意PK」接受挑战
-      对方发送「拒绝PK」拒绝挑战（积分退回）
+      对方点击 ✅ 接受挑战 / ❌ 拒绝挑战
+      或发送「同意PK」/「拒绝PK」
       双方各摇2颗骰子（2-12），点数大的获得全部积分
       平局则退回双方积分""",
 }
@@ -1068,16 +1069,18 @@ async def handle_pk(
     session = create_pk_session(inviter_id, invitee_id, bet, group_id)
 
     # 发送邀请消息
-    await bot.send(event, Message([
+    pk_msg = await bot.send(event, Message([
         MessageSegment.at(invitee_id),
         MessageSegment.text(
             f" 你被 {event.sender.nickname or inviter_id} 挑战了！\n"
             f"下注积分：{bet}\n"
-            f"发送「同意PK」接受挑战\n"
-            f"发送「拒绝PK」拒绝挑战\n"
-            f"（60秒内有效）"
+            f"✅ 同意  ❌ 拒绝\n"
+            f"（点击上方 emoji 或发送「同意PK」/「拒绝PK」，60秒内有效）"
         )
     ]))
+
+    # 保存机器人发出的消息 message_id（用于 emoji 回应匹配）
+    session.bot_message_id = int(pk_msg["message_id"])
 
     # 60 秒超时自动取消
     async def _timeout():
@@ -1276,3 +1279,192 @@ async def handle_pk_reject(
         MessageSegment.at(inviter_id),
         MessageSegment.text(f" {invitee_name} 拒绝了你的 PK 邀请，已退回 {bet} 积分")
     ]))
+
+
+# ========== PK emoji 回应事件监听 ==========
+from nonebot import on_notice
+from nonebot.adapters.onebot.v11 import GroupMessageEmojiLikeEvent
+
+
+pk_emoji_notice = on_notice(priority=5, block=True)
+
+
+@pk_emoji_notice.handle()
+async def handle_pk_emoji_like(
+    matcher: Matcher,
+    bot: Bot,
+    event: GroupMessageEmojiLikeEvent,
+):
+    """处理群消息 emoji 回应事件：用于 PK 同意/拒绝"""
+    # 仅处理对机器人消息的回应
+    if event.user_id == int(bot.self_id):
+        return
+
+    # 查找是否有匹配的 PK 会话
+    session = get_pk_session_by_bot_msg(int(event.message_id))
+    if not session:
+        return
+
+    invitee_id = str(event.user_id)
+    inviter_id = session.inviter_id
+    bet = session.bet
+    group_id = session.group_id
+
+    # 校验：只有被邀请人可以操作
+    if invitee_id != session.invitee_id:
+        return
+
+    # 校验群组一致
+    if str(event.group_id) != group_id:
+        return
+
+    # 解析表情：从 likes 列表获取第一个 emoji_id
+    emoji_ids = [like.get("emoji_id", "") for like in (event.likes or [])]
+    if not emoji_ids:
+        return
+
+    emoji_id = str(emoji_ids[0])
+
+    # NapCat 的 ✅ emoji ID 通常为 112（系统确认表情）
+    # ❌ 通常为 113（系统取消表情）
+    # 也可能是其他格式，这里做兼容判断
+    is_accept = False
+    is_reject = False
+
+    if "112" in emoji_id or "check" in emoji_id.lower() or "+" in emoji_id:
+        is_accept = True
+    elif "113" in emoji_id or "cross" in emoji_id.lower() or "-" in emoji_id:
+        is_reject = True
+    else:
+        # 兜底：如果无法识别具体 emoji，按默认规则——✅类为同意，❌类为拒绝
+        # QQ 系统表情中偶数为正面(✅等)，奇数为负面(❌等)的大致规律
+        try:
+            eid = int(emoji_id.replace("[FaceID:", "").replace("]", ""))
+            if eid % 2 == 0:
+                is_accept = True
+            else:
+                is_reject = True
+        except ValueError:
+            return
+
+    # 移除会话（取消超时任务）
+    remove_pk_session(invitee_id)
+
+    if is_accept:
+        # ---- 执行同意逻辑（复用 pk_accept 的核心流程）----
+        invitee = get_user(invitee_id)
+        if invitee.points < bet:
+            inv = get_user(inviter_id)
+            inv.points += bet
+            save_user(inviter_id)
+            try:
+                await bot.send_group_msg(
+                    group_id=int(group_id),
+                    message=Message([
+                        MessageSegment.at(invitee_id),
+                        MessageSegment.text(
+                            f" 你的积分不足（需要 {bet} 积分），PK 取消，已退回对方积分"
+                        ),
+                    ]),
+                )
+            except Exception:
+                pass
+            await matcher.finish()
+
+        invitee.points -= bet
+        save_user(invitee_id)
+
+        # 摇骰子
+        inviter_roll = random.randint(1, 6) + random.randint(1, 6)
+        invitee_roll = random.randint(1, 6) + random.randint(1, 6)
+
+        inviter = get_user(inviter_id)
+        invitee_user = get_user(invitee_id)
+
+        try:
+            inviter_info = await bot.get_group_member_info(
+                group_id=int(group_id), user_id=int(inviter_id)
+            )
+            inviter_name = (
+                inviter_info.get("card")
+                or inviter_info.get("nickname")
+                or inviter_id
+            )
+        except Exception:
+            inviter_name = inviter_id
+
+        try:
+            invitee_info = await bot.get_group_member_info(
+                group_id=int(group_id), user_id=int(invitee_id)
+            )
+            invitee_name = (
+                invitee_info.get("card")
+                or invitee_info.get("nickname")
+                or invitee_id
+            )
+        except Exception:
+            invitee_name = invitee_id
+
+        total_pot = bet * 2
+
+        if inviter_roll > invitee_roll:
+            inviter.points += total_pot
+            save_user(inviter_id)
+            result_line = f"{inviter_name} 胜！获得 {total_pot} 积分"
+        elif invitee_roll > inviter_roll:
+            invitee_user.points += total_pot
+            save_user(invitee_id)
+            result_line = f"{invitee_name} 胜！获得 {total_pot} 积分"
+        else:
+            inviter.points += bet
+            invitee_user.points += bet
+            save_user(inviter_id)
+            save_user(invitee_id)
+            result_line = "平局！积分已退回双方"
+
+        msg = (
+            f"🎲 PK 结果\n"
+            f"{result_line}\n"
+            f"{inviter_name}：{inviter_roll}  vs  {invitee_name}：{invitee_roll}"
+        )
+
+        try:
+            await bot.send_group_msg(
+                group_id=int(group_id),
+                message=Message([MessageSegment.text(msg)]),
+            )
+        except Exception:
+            pass
+        await matcher.finish()
+
+    elif is_reject:
+        # ---- 执行拒绝逻辑 ----
+        inviter = get_user(inviter_id)
+        inviter.points += bet
+        save_user(inviter_id)
+
+        try:
+            invitee_info = await bot.get_group_member_info(
+                group_id=int(group_id), user_id=int(invitee_id)
+            )
+            invitee_name = (
+                invitee_info.get("card")
+                or invitee_info.get("nickname")
+                or invitee_id
+            )
+        except Exception:
+            invitee_name = invitee_id
+
+        try:
+            await bot.send_group_msg(
+                group_id=int(group_id),
+                message=Message([
+                    MessageSegment.at(inviter_id),
+                    MessageSegment.text(
+                        f" {invitee_name} 拒绝了你的 PK 邀请，已退回 {bet} 积分"
+                    ),
+                ]),
+            )
+        except Exception:
+            pass
+        await matcher.finish()
