@@ -959,6 +959,49 @@ pk_cmd = on_command("PK", aliases={"pk"}, priority=5, block=True)
 pk_accept_cmd = on_command("同意PK", aliases={"同意pk", "接受PK", "接受pk"}, priority=5, block=True, force_whitespace=True)
 pk_reject_cmd = on_command("拒绝PK", aliases={"拒绝pk", "拒绝对战"}, priority=5, block=True, force_whitespace=True)
 
+# ========== 调试：测试 emoji ID（仅 SUPERUSER）==========
+test_emoji_cmd = on_command("测试emoji", aliases={"test_emoji", "测试表情"}, priority=5, block=True, permission=SUPERUSER)
+
+
+@test_emoji_cmd.handle()
+async def handle_test_emoji(
+    matcher: Matcher,
+    bot: Bot,
+    event: GroupMessageEvent,
+    arg: Message = CommandArg(),
+):
+    """调试指令：在当前群发送一条消息并贴上指定 ID 的 emoji，用于获取真实 emoji_id"""
+    raw_text = arg.extract_plain_text().strip()
+    if not raw_text:
+        await matcher.finish("用法：测试emoji <emoji_id>\n示例：测试emoji 1\n示例：测试emoji 112")
+
+    # 发送一条测试消息
+    test_msg = await bot.send_group_msg(
+        group_id=event.group_id,
+        message=Message([
+            MessageSegment.text(f"🔧 Emoji 测试 - ID: {raw_text}"),
+        ]),
+    )
+
+    msg_id = int(test_msg["message_id"])
+
+    # 尝试给这条消息贴上指定的 emoji
+    try:
+        ret = await bot.call_api(
+            "set_msg_emoji_like",
+            message_id=msg_id,
+            emoji_id=raw_text,
+            set=True,
+        )
+        result_info = f"✅ 成功！已为消息设置 emoji_id={raw_text}\n返回值: {ret}"
+    except Exception as e:
+        result_info = f"❌ 失败！emoji_id={raw_text} 无效或 API 不支持\n错误: {e}"
+
+    await matcher.finish(result_info)
+
+
+@test_emoji_cmd.handle()
+
 
 @pk_cmd.handle()
 async def handle_pk(
@@ -1081,10 +1124,14 @@ async def handle_pk(
     # 保存机器人发出的消息 message_id（用于 emoji 回应匹配）
     session.bot_message_id = int(pk_msg["message_id"])
 
-    # 预置 ✅ 和 ❌ emoji 回应选项，方便对方直接点击
+    # 预置 👍(同意) 和 👎(拒绝) emoji 回应选项
+    # 注意：emoji_id 取值因 QQ 客户端版本而异，以下为常见值
+    #   如果贴出的表情不对，请用「测试emoji」指令获取真实 ID 后修改此处常量
+    PK_ACCEPT_EMOJI_ID = "1"    # 👍 点赞（表示同意）
+    PK_REJECT_EMOJI_ID = "2"    # 👎 踩（表示拒绝）
     try:
-        await bot.call_api("set_msg_emoji_like", message_id=int(pk_msg["message_id"]), emoji_id="112")
-        await bot.call_api("set_msg_emoji_like", message_id=int(pk_msg["message_id"]), emoji_id="113")
+        await bot.call_api("set_msg_emoji_like", message_id=int(pk_msg["message_id"]), emoji_id=PK_ACCEPT_EMOJI_ID, set=True)
+        await bot.call_api("set_msg_emoji_like", message_id=int(pk_msg["message_id"]), emoji_id=PK_REJECT_EMOJI_ID, set=True)
     except Exception:
         pass  # 非 NapCat 端或不支持此 API 时静默忽略
 
@@ -1350,9 +1397,9 @@ async def handle_pk_emoji_like(
     if event_group_id != group_id:
         return
 
-    # ---- 安全过滤：只处理 ✅ / ❌ 类 emoji，其余全部忽略 ----
-    ACCEPT_EMOJI_IDS = {"112"}   # ✅ 系统确认表情 FaceID
-    REJECT_EMOJI_IDS = {"113"}   # ❌ 系统取消表情 FaceID
+    # ---- 安全过滤：只处理 👍(同意) / 👎(拒绝) 类 emoji，其余全部忽略 ----
+    ACCEPT_EMOJI_IDS = {"1"}    # 👍 点赞（表示同意）
+    REJECT_EMOJI_IDS = {"2"}    # 👎 踩（表示拒绝）
 
     likes = getattr(event, 'likes', None) or []
     if not likes:
