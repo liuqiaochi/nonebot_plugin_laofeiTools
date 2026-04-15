@@ -7,6 +7,7 @@
 import asyncio
 import random
 from datetime import datetime
+from pathlib import Path
 from typing import Union
 
 from nonebot import on_command, logger
@@ -44,6 +45,9 @@ from .points_data import (
     start_guess_game,
 )
 from .config import is_points_enabled, enable_points, disable_points
+
+# 抽签图片目录
+FORTUNE_IMAGE_DIR = Path(__file__).parent / "image"
 
 
 # ========== 积分系统开关指令（超级用户） ==========
@@ -174,16 +178,17 @@ async def handle_fortune(matcher: Matcher, event: MessageEvent):
         return
 
     fortune = result["fortune"]
-    msg = f"""你今日的抽签结果是：
+    text_msg = f"『{fortune['level']}』{fortune['text']}"
 
-『{fortune['level']}』
+    # 构建消息：文本 + 图片
+    msg_chain = [MessageSegment.reply(event.message_id), MessageSegment.text(text_msg)]
 
-{fortune['text']}"""
+    # 查找对应签的图片
+    image_path = FORTUNE_IMAGE_DIR / f"{fortune['level']}.png"
+    if image_path.exists():
+        msg_chain.append(MessageSegment.image(f"file://{image_path}"))
 
-    await matcher.finish(Message([
-        MessageSegment.reply(event.message_id),
-        MessageSegment.text(msg)
-    ]))
+    await matcher.finish(Message(msg_chain))
 
 
 # ========== 积分查询指令 ==========
