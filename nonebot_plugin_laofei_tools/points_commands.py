@@ -1408,7 +1408,7 @@ async def handle_pk_emoji_like(
         return
 
     # 忽略机器人自己的操作
-    user_id_str = str(event.get_user_id())
+    user_id_str = str(event.user_id)
     if user_id_str == str(bot.self_id):
         return
 
