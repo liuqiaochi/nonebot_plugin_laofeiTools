@@ -17,7 +17,7 @@ require("nonebot_plugin_apscheduler")
 from . import commands
 from . import points_commands
 from .config import Config, init_enabled_groups
-from .points_data import calculate_bank_interest
+from .points_data import calculate_bank_interest, init_data
 
 __version__ = "0.2.0"
 
@@ -59,6 +59,9 @@ driver = get_driver()
 @driver.on_startup
 async def init_config():
     """插件启动时初始化配置"""
+    # 加载所有用户数据到缓存（修复重启后数据丢失问题）
+    init_data()
+
     config = driver.config
     
     # 从配置中读取默认开启的群聊

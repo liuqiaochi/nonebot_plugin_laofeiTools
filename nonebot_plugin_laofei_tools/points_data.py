@@ -141,23 +141,38 @@ def _save_bank_data(data: dict):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
+def init_data():
+    """初始化：从文件加载所有用户数据到缓存（插件启动时调用）"""
+    _ensure_data_dir()
+    if USER_DATA_FILE.exists():
+        try:
+            with open(USER_DATA_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            for user_id, user_data in data.items():
+                user = UserData()
+                user.points = user_data.get("points", 0)
+                user.exp = user_data.get("exp", 0)
+                user.bank_points = user_data.get("bank_points", 0)
+                user.total_sign_days = user_data.get("total_sign_days", 0)
+                user.continuous_sign_days = user_data.get("continuous_sign_days", 0)
+                user.last_sign_date = user_data.get("last_sign_date", "")
+                user.bank_interest_hidden = user_data.get("bank_interest_hidden", 0.0)
+                _user_data[user_id] = user
+            logger.info(f"[积分系统] 已加载 {len(_user_data)} 位用户数据")
+        except Exception as e:
+            logger.error(f"[积分系统] 加载用户数据失败: {e}")
+    else:
+        logger.info("[积分系统] 数据文件不存在，将创建新数据")
+
+    # 初始化银行利息日期
+    global _bank_last_interest_date
+    _bank_last_interest_date = datetime.now().strftime("%Y-%m-%d")
+
+
 def get_user(user_id: str) -> UserData:
     """获取用户数据，不存在则创建"""
     if user_id not in _user_data:
-        # 尝试从文件加载
-        data = _load_user_data()
-        if user_id in data:
-            user = UserData()
-            user.points = data[user_id].get("points", 0)
-            user.exp = data[user_id].get("exp", 0)
-            user.bank_points = data[user_id].get("bank_points", 0)
-            user.total_sign_days = data[user_id].get("total_sign_days", 0)
-            user.continuous_sign_days = data[user_id].get("continuous_sign_days", 0)
-            user.last_sign_date = data[user_id].get("last_sign_date", "")
-            user.bank_interest_hidden = data[user_id].get("bank_interest_hidden", 0.0)
-            _user_data[user_id] = user
-        else:
-            _user_data[user_id] = UserData()
+        _user_data[user_id] = UserData()
     return _user_data[user_id]
 
 
