@@ -960,6 +960,10 @@ pk_cmd = on_command("PK", aliases={"pk"}, priority=5, block=True)
 pk_accept_cmd = on_command("同意PK", aliases={"同意pk", "接受PK", "接受pk"}, priority=5, block=True, force_whitespace=True)
 pk_reject_cmd = on_command("拒绝PK", aliases={"拒绝pk", "拒绝对战"}, priority=5, block=True, force_whitespace=True)
 
+# PK 表情回应 emoji_id（QQ NT 表情编号）
+PK_ACCEPT_EMOJI_ID = "120"   # 拳头（表示同意）
+PK_REJECT_EMOJI_ID = "123"    # NO（表示拒绝）
+
 # ========== 调试：测试 emoji ID（仅 SUPERUSER）==========
 test_emoji_cmd = on_command("测试emoji", aliases={"test_emoji", "测试表情"}, priority=5, block=True, permission=SUPERUSER)
 
@@ -1128,8 +1132,6 @@ async def handle_pk(
     # 预置 👍(同意) 和 👎(拒绝) emoji 回应选项
     # 注意：emoji_id 取值因 QQ 客户端版本而异，以下为常见值
     #   如果贴出的表情不对，请用「测试emoji」指令获取真实 ID 后修改此处常量
-    PK_ACCEPT_EMOJI_ID = "120"   # 拳头（表示同意）
-    PK_REJECT_EMOJI_ID = "123"    # NO（表示拒绝）
     try:
         await bot.call_api("set_msg_emoji_like", message_id=int(pk_msg["message_id"]), emoji_id=PK_ACCEPT_EMOJI_ID, set=True)
         await bot.call_api("set_msg_emoji_like", message_id=int(pk_msg["message_id"]), emoji_id=PK_REJECT_EMOJI_ID, set=True)
