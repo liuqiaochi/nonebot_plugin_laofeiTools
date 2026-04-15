@@ -29,6 +29,7 @@ from .points_data import (
     create_pk_session,
     do_sign,
     end_guess_game,
+    get_all_user_ids,
     get_game_remaining,
     get_guess_game,
     get_level_title,
@@ -725,7 +726,7 @@ FEATURE_HELP = {
     "PK": """【PK对战】
 指令：PK 积分 @某人
 描述：邀请某人摇骰子PK，双方各下注相同积分
-      对方点击 ✅ 接受挑战 / ❌ 拒绝挑战
+      对方点击✊🏻 /🖕🏻接受或拒绝挑战
       或发送「同意PK」/「拒绝PK」
       双方各摇2颗骰子（2-12），点数大的获得全部积分
       平局则退回双方积分""",
@@ -913,18 +914,18 @@ async def handle_give_points(
     event: MessageEvent,
     args: Message = CommandArg(),
 ):
-    """超级用户发放积分"""
+    """超级用户发放积分，支持单人或全体"""
     args_text = args.extract_plain_text().strip()
-    
-    # 解析参数：发积分 数量 @某人
+
+    # 解析参数：发积分 数量 [全体] [@某人]
     parts = args_text.split()
     if not parts or not parts[0].isdigit():
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text("用法：发积分 数量 @某人")
+            MessageSegment.text("用法：发积分 数量 @某人\n      发积分 数量 全体")
         ]))
         return
-    
+
     amount = int(parts[0])
     if amount < 1 or amount > 500:
         await matcher.finish(Message([
@@ -932,23 +933,47 @@ async def handle_give_points(
             MessageSegment.text("积分范围是 1-500")
         ]))
         return
-    
-    # 获取目标用户
+
+    # 检查是否为全体发放
+    is_all = len(parts) >= 2 and "全体" in parts[1]
+
+    if is_all:
+        # 全体发放
+        all_ids = get_all_user_ids()
+        if not all_ids:
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("暂无已注册用户")
+            ]))
+            return
+
+        for uid in all_ids:
+            user = get_user(uid)
+            user.points += amount
+            save_user(uid)
+
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(f"已向全体 {len(all_ids)} 位用户发放 {amount} 积分")
+        ]))
+        return
+
+    # 单人发放：获取目标用户
     target_id = None
     for seg in args:
         if seg.type == "at":
             target_id = seg.data.get("qq")
             break
-    
+
     # 如果没有@任何人，则发给自己
     if not target_id:
         target_id = str(event.user_id)
-    
+
     # 发放积分
     target_user = get_user(target_id)
     target_user.points += amount
     save_user(target_id)
-    
+
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
         MessageSegment.text(f"已发放 {amount} 积分")

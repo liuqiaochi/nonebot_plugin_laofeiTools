@@ -161,6 +161,16 @@ def get_user(user_id: str) -> UserData:
     return _user_data[user_id]
 
 
+def get_all_user_ids() -> list:
+    """获取所有已注册用户 ID 列表（从缓存 + 文件合并）"""
+    # 确保缓存中有所有用户
+    data = _load_user_data()
+    for uid in data:
+        if uid not in _user_data:
+            get_user(uid)
+    return list(_user_data.keys())
+
+
 def reload_user(user_id: str) -> UserData:
     """从文件重新加载用户数据"""
     data = _load_user_data()
