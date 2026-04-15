@@ -1585,13 +1585,15 @@ async def handle_pk_emoji_like(
             result_line = "平局！积分已退回双方"
 
         msg = (
-            f"🎲 PK 结果\n"
-            f"{result_line}\n"
-            f"{inviter_name}：{inviter_roll}  vs  {invitee_name}：{invitee_roll}"
+            f" PK结果（下注 {bet}）\n"
+            f"🎲 {inviter_name} 摇出了 {inviter_roll} 点\n"
+            f"🎲 {invitee_name} 摇出了 {invitee_roll} 点\n"
+            f"{'━' * 10}\n"
+            f"{result_line}"
         )
 
         # 引用发起人的 PK 指令消息回复结果
-        reply_segments = [MessageSegment.reply(session.inviter_message_id), MessageSegment.text(msg)] if session.inviter_message_id else [MessageSegment.text(msg)]
+        reply_segments = [MessageSegment.reply(session.inviter_message_id), MessageSegment.at(inviter_id), MessageSegment.text(msg)] if session.inviter_message_id else [MessageSegment.at(inviter_id), MessageSegment.text(msg)]
 
         try:
             await bot.send_group_msg(
