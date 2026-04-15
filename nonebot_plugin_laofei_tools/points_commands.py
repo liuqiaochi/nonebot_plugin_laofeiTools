@@ -1115,6 +1115,7 @@ async def handle_pk(
 
     # 创建会话
     session = create_pk_session(inviter_id, invitee_id, bet, group_id)
+    session.inviter_message_id = event.message_id
 
     # 发送邀请消息
     pk_msg = await bot.send(event, Message([
@@ -1267,7 +1268,7 @@ async def handle_pk_accept(
         result_line = "平局！积分已退回双方"
 
     await matcher.finish(Message([
-        MessageSegment.reply(event.message_id),
+        MessageSegment.reply(session.inviter_message_id),
         MessageSegment.text(msg)
     ]))
 
@@ -1332,6 +1333,7 @@ async def handle_pk_reject(
         invitee_name = invitee_id
 
     await matcher.finish(Message([
+        MessageSegment.reply(session.inviter_message_id),
         MessageSegment.at(inviter_id),
         MessageSegment.text(f" {invitee_name} 拒绝了你的 PK 邀请，已退回 {bet} 积分")
     ]))
@@ -1536,10 +1538,13 @@ async def handle_pk_emoji_like(
             f"{inviter_name}：{inviter_roll}  vs  {invitee_name}：{invitee_roll}"
         )
 
+        # 引用发起人的 PK 指令消息回复结果
+        reply_segments = [MessageSegment.reply(session.inviter_message_id), MessageSegment.text(msg)] if session.inviter_message_id else [MessageSegment.text(msg)]
+
         try:
             await bot.send_group_msg(
                 group_id=int(group_id),
-                message=Message([MessageSegment.text(msg)]),
+                message=Message(reply_segments),
             )
         except Exception:
             pass
@@ -1563,15 +1568,22 @@ async def handle_pk_emoji_like(
         except Exception:
             invitee_name = invitee_id
 
+        reject_msg = (
+            f"{invitee_name} 拒绝了 PK 邀请，已退回 {bet} 积分"
+        )
+        reject_segments = [
+            MessageSegment.reply(session.inviter_message_id),
+            MessageSegment.at(inviter_id),
+            MessageSegment.text(f" {reject_msg}"),
+        ] if session.inviter_message_id else [
+            MessageSegment.at(inviter_id),
+            MessageSegment.text(f" {reject_msg}"),
+        ]
+
         try:
             await bot.send_group_msg(
                 group_id=int(group_id),
-                message=Message([
-                    MessageSegment.at(inviter_id),
-                    MessageSegment.text(
-                        f" {invitee_name} 拒绝了 your PK 邀请，已退回 {bet} 积分"
-                    ),
-                ]),
+                message=Message(reject_segments),
             )
         except Exception:
             pass

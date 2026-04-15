@@ -444,6 +444,7 @@ class PKSession:
         self.bet: int = 0               # 双方下注积分
         self.group_id: str = ""         # 所在群组
         self.bot_message_id: Optional[int] = None  # 机器人发出的邀请消息 ID（用于 emoji 回应）
+        self.inviter_message_id: Optional[int] = None  # 发起人发出的 PK 指令消息 ID（用于引用回复）
         self.cancel_task: Optional[asyncio.Task] = None  # 超时取消任务（内存专用，不持久化）
 
 
