@@ -1343,7 +1343,14 @@ async def handle_pk_accept(
 
     await matcher.finish(Message([
         MessageSegment.reply(session.inviter_message_id),
-        MessageSegment.text(msg)
+        MessageSegment.at(inviter_id),
+        MessageSegment.text(
+            f" PK结果（下注 {bet}）\n"
+            f"🎲 {inviter_name} 摇出了 {inviter_roll} 点\n"
+            f"🎲 {invitee_name} 摇出了 {invitee_roll} 点\n"
+            f"{'━' * 10}\n"
+            f"{result_line}"
+        )
     ]))
 
 
@@ -1422,35 +1429,6 @@ async def handle_pk_reject(
 #   4. 如果 NapCat 版本不支持此事件或配置未开启，文字指令「同意PK」/「拒绝PK」仍可正常使用
 
 from nonebot import on_notice
-
-
-# ========== 全量 notice 事件调试（捕获所有 notice 事件，打印原始数据）==========
-# 临时调试用，确认 NapCat 上报的 emoji_like 事件实际格式
-debug_notice = on_notice(priority=5, block=True)
-
-
-@debug_notice.handle()
-async def handle_debug_notice(matcher: Matcher, bot: Bot, event: GroupMessageEvent):
-    """调试：打印所有 notice 事件的原始内容"""
-    # 尝试获取事件的所有属性
-    event_dict = {}
-    for attr in dir(event):
-        if not attr.startswith('_') and attr not in ('get_message', 'get_user_id', 'get_session_id', 'is_tome', 'to_me'):
-            try:
-                val = getattr(event, attr)
-                if not callable(val):
-                    event_dict[attr] = val
-            except Exception:
-                pass
-
-    # 打印到日志
-    logger.info(f"[DEBUG] 收到 notice 事件: {event_dict}")
-    logger.info(f"[DEBUG] post_type={getattr(event, 'post_type', '?')}, notice_type={getattr(event, 'notice_type', '?')}")
-
-    # 如果是 emoji_like 相关的事件，额外详细输出
-    nt = str(getattr(event, 'notice_type', ''))
-    if 'emoji' in nt.lower() or 'like' in nt.lower() or 'react' in nt.lower():
-        logger.warning(f"[DEBUG-EMOJI] 捕获到 emoji 事件！完整数据: {event_dict}")
 
 
 pk_emoji_notice = on_notice(priority=5, block=True)
