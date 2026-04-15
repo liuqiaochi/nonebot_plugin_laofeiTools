@@ -28,6 +28,7 @@ from .points_data import (
     consume_game_count,
     create_pk_session,
     do_sign,
+    draw_fortune,
     end_guess_game,
     get_all_user_ids,
     get_game_remaining,
@@ -140,6 +141,45 @@ async def handle_sign(matcher: Matcher, event: MessageEvent):
 连续签到: {result['continuous_sign_days']} 天
 {result['date']}"""
     
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(msg)
+    ]))
+
+
+# ========== 抽签指令 ==========
+fortune_cmd = on_command("抽签", aliases={"今日运气"}, priority=5, block=True, force_whitespace=True)
+
+
+@fortune_cmd.handle()
+async def handle_fortune(matcher: Matcher, event: MessageEvent):
+    """处理每日抽签指令"""
+    # 检查群聊是否开启了积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
+
+    user_id = str(event.user_id)
+    result = draw_fortune(user_id)
+
+    if not result["success"]:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(result["message"])
+        ]))
+        return
+
+    fortune = result["fortune"]
+    msg = f"""你今日的抽签结果是：
+
+『{fortune['level']}』
+
+{fortune['text']}"""
+
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
         MessageSegment.text(msg)
@@ -701,6 +741,9 @@ FEATURE_HELP = {
     "签到": """【签到】
 指令：签到 或 打卡
 描述：每日签到，连续签到都有积分加成~""",
+    "抽签": """【抽签】
+指令：抽签 或 今日运气
+描述：每日抽签一次，获取今日气运信息""",
     "积分": """【积分】
 指令：积分 或 查积分 或 我的积分
 描述：查看自己所拥有的积分""",
@@ -767,7 +810,8 @@ async def handle_help(
     # 无参数时显示功能列表
     msg = """【积分系统功能列表】
 签到   积分   转账   打劫 
-银行   抢银行  抽奖  猜数字  PK
+银行   抢银行  抽奖  猜数字  
+PK    抽签   
 
 发送「功能 功能名称」查看使用方法"""
     await matcher.finish(Message([

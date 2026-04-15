@@ -461,6 +461,63 @@ def consume_game_count(user_id: str, game_type: str) -> int:
     return max(0, DAILY_GAME_LIMIT - game_rec[today])
 
 
+# ========== 抽签系统 ==========
+FORTUNE_TEXTS = [
+    {"level": "撞大运", "text": "时来天地皆同力，横财喜事双双至。"},
+    {"level": "大吉", "text": "诸事顺遂无阻碍，前程锦绣万事兴。"},
+    {"level": "中吉", "text": "稳步前行多顺遂，小福常伴日子安。"},
+    {"level": "小吉", "text": "浅福相伴皆安稳，平淡日子有惊喜。"},
+    {"level": "平签", "text": "万事平平无起落，顺其自然自安然。"},
+    {"level": "凶", "text": "稍遇波折不足惧，静心慎行可化解。"},
+    {"level": "大凶", "text": "低谷只是一时境，守心蓄力迎新生。"},
+]
+
+# 每日抽签记录文件
+FORTUNE_FILE = DATA_DIR / "daily_fortune.json"
+
+
+def _load_fortune_data() -> dict:
+    """加载每日抽签记录"""
+    _ensure_data_dir()
+    if FORTUNE_FILE.exists():
+        try:
+            with open(FORTUNE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_fortune_data(data: dict):
+    """保存每日抽签记录"""
+    _ensure_data_dir()
+    with open(FORTUNE_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def draw_fortune(user_id: str) -> dict:
+    """
+    每日抽签，每人每天限一次。
+    返回 {"success": bool, "fortune": dict|str}
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    data = _load_fortune_data()
+
+    # 检查今日是否已抽签，已抽则返回当日结果
+    user_rec = data.get(user_id, {})
+    if user_rec.get("date") == today and user_rec.get("fortune"):
+        return {"success": True, "fortune": user_rec["fortune"]}
+
+    # 随机抽取签文
+    fortune = random.choice(FORTUNE_TEXTS)
+
+    # 记录
+    data[user_id] = {"date": today, "fortune": fortune}
+    _save_fortune_data(data)
+
+    return {"success": True, "fortune": fortune}
+
+
 # ========== PK 对战会话 ==========
 class PKSession:
     """PK 对战会话"""
