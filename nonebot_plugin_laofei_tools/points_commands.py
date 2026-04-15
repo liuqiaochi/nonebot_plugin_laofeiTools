@@ -976,10 +976,10 @@ async def handle_give_points(
         return
 
     amount = int(parts[0])
-    if amount < 1 or amount > 500:
+    if amount < 1 or amount > 99999:
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text("积分范围是 1-500")
+            MessageSegment.text("积分范围是 1-99999")
         ]))
         return
 
