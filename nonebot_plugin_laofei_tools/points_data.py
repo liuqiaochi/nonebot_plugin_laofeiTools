@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Optional
 
+from loguru import logger
+
 # 数据文件路径
 DATA_DIR = Path("data/laofei_tools")
 USER_DATA_FILE = DATA_DIR / "user_points.json"
