@@ -34,7 +34,6 @@ class SoutubotClient:
 
     def __init__(self, user_agent: str = DEFAULT_UA):
         self.user_agent = user_agent
-        self.global_m: Optional[int] = None
         self._client = httpx.AsyncClient(
             headers={
                 "User-Agent": user_agent,
@@ -73,12 +72,11 @@ class SoutubotClient:
         return encoded[::-1].replace("=", "")
 
     async def _get_headers(self) -> dict:
-        """获取带 X-API-KEY 的请求头"""
-        if self.global_m is None:
-            self.global_m = await self._fetch_global_m()
+        """获取带 X-API-KEY 的请求头（每次都重新获取 global_m）"""
+        global_m = await self._fetch_global_m()
         
         unix_ts = int(time.time())
-        api_key = self._generate_api_key(unix_ts, self.global_m)
+        api_key = self._generate_api_key(unix_ts, global_m)
         
         return {
             "X-API-KEY": api_key,
