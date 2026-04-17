@@ -910,18 +910,19 @@ async def handle_rob(
         ]))
         return
     
+    # 检查对方身上有没有积分
+    if target_user.points < 1:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("对方身上没有积分，无法打劫")
+        ]))
+        return
+    
     # 检查对方总积分是否不足50
     if total_points < 50:
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
             MessageSegment.text("对方已经穷的吃不起饭了，你还打劫别人！")
-        ]))
-        return
-    
-    if target_user.points < 1:
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("对方身上没有积分，无法打劫")
         ]))
         return
     
