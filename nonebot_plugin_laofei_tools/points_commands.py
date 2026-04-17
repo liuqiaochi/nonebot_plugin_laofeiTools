@@ -901,21 +901,22 @@ async def handle_rob(
     
     target_user = get_user(target_id)
     
-    # 检查对方是否有积分账户或积分不足
+    # 检查对方是否有积分账户（总积分和经验都为0说明没有账户）
     total_points = target_user.points + target_user.bank_points
+    if total_points == 0 and target_user.exp == 0:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("对方还没有积分账户，无法打劫")
+        ]))
+        return
+    
+    # 检查对方总积分是否不足50
     if total_points < 50:
-        if total_points < 1:
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("对方还没有积分账户，无法打劫")
-            ]))
-            return
-        else:
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("对方已经穷的吃不起饭了，你还打劫别人！")
-            ]))
-            return
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("对方已经穷的吃不起饭了，你还打劫别人！")
+        ]))
+        return
     
     if target_user.points < 1:
         await matcher.finish(Message([
