@@ -44,3 +44,4 @@ data/
 test_*.py
 pet.md
 .kiro/
+.pytest_cache/
