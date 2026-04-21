@@ -16,8 +16,10 @@ require("nonebot_plugin_apscheduler")
 
 from . import commands
 from . import points_commands
+from . import pet_commands
 from .config import Config, init_enabled_groups
 from .points_data import calculate_bank_interest, init_data
+from .pet_data import init_pet_data, refresh_all_stamina
 
 __version__ = "0.2.0"
 
@@ -42,6 +44,19 @@ __plugin_meta__ = PluginMetadata(
         我猜 数字 - 猜数字
         打劫 @某人 - 打劫他人积分
     
+    宠物指令：
+        我的宠物 - 查看宠物信息/领养宠物
+        领养 宠物名 - 领养指定宠物
+        宠物散步 - 散步获取经验和道具
+        宠物抚摸 - 每日抚摸提升好感度
+        宠物喂食 食物名 - 喂食恢复体力和好感度
+        宠物pk @某人 - 与他人宠物PK
+        宠物商店 - 查看商店商品
+        购买 商品名 - 购买商品
+        宠物佩戴 配饰名 - 佩戴配饰
+        宠物背包 - 查看道具背包
+        宠物帮助 - 查看宠物帮助
+
     说明：
         - 搜图功能仅在群聊可用
         - 默认关闭，需超级用户发送「开启lf搜图」开启
@@ -61,6 +76,10 @@ async def init_config():
     """插件启动时初始化配置"""
     # 加载所有用户数据到缓存（修复重启后数据丢失问题）
     init_data()
+
+    # 加载宠物系统数据
+    init_pet_data()
+    logger.info("老肥工具箱: 宠物系统数据加载完成")
 
     config = driver.config
     
@@ -84,3 +103,10 @@ async def daily_bank_interest():
     """每天0点计算银行利息"""
     calculate_bank_interest()
     logger.info("老肥工具箱: 每日银行利息计算完成")
+
+
+@scheduler.scheduled_job("cron", hour=0, minute=0, id="pet_stamina_refresh")
+async def daily_stamina_refresh():
+    """每天0点刷新所有宠物体力"""
+    refresh_all_stamina()
+    logger.info("老肥工具箱: 宠物体力刷新完成")

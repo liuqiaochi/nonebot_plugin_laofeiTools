@@ -42,3 +42,5 @@ data/
 
 # Test files
 test_*.py
+pet.md
+.kiro/
