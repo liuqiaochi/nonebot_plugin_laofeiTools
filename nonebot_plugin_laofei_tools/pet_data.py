@@ -825,4 +825,6 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
         "win_rate": win_rate,
         "attacker_won": attacker_won,
         "reward_food": reward_food,
+        "attacker_stamina": a_pet.stamina,
+        "defender_stamina": b_pet.stamina,
     }

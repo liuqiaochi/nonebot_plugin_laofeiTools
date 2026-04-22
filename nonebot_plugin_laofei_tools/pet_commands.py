@@ -85,14 +85,13 @@ async def handle_my_pet(matcher: Matcher, event: MessageEvent):
     acc_text = pet.accessory if pet.accessory else "无"
 
     msg = f"🐾 {pet_info['name']}\n"
-    msg += f"等级: Lv.{level}\n"
 
     # 计算当前经验和升级所需经验
     remaining_exp = pet.exp
     for lv in range(1, level):
         remaining_exp -= lv * 50
     next_level_exp = level * 50
-    msg += f"经验: {remaining_exp}/{next_level_exp}\n"
+    msg += f"等级: Lv.{level}（{remaining_exp}/{next_level_exp}）\n"
 
     msg += f"好感度: Lv.{aff_level}（{pet.affection}点）\n"
     msg += f"体力: {pet.stamina}/{pet.max_stamina}\n"
@@ -197,19 +196,21 @@ pet_help_cmd = on_command("宠物帮助", priority=5, block=True, force_whitespa
 @pet_help_cmd.handle()
 async def handle_pet_help(matcher: Matcher, event: MessageEvent):
     """展示宠物系统帮助信息（图片版）"""
+    help_b64 = None
     try:
         from .shop_image import generate_help_image
         help_b64 = generate_help_image()
+    except Exception as e:
+        logger.error(f"生成帮助图片失败: {e}")
+
+    if help_b64:
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
             MessageSegment.image(f"base64://{help_b64}"),
         ]))
-        return
-    except Exception as e:
-        logger.error(f"生成帮助图片失败: {e}")
-
-    # 降级为文字版
-    msg = """【宠物系统指令】
+    else:
+        # 降级为文字版
+        msg = """【宠物系统指令】
 我的宠物 - 查看宠物信息/领养宠物
 领养 宠物名 - 领养指定宠物
 宠物散步 - 消耗体力散步获取经验和道具
@@ -222,10 +223,10 @@ async def handle_pet_help(matcher: Matcher, event: MessageEvent):
 宠物背包 - 查看道具背包
 宠物帮助 - 查看本帮助信息"""
 
-    await matcher.finish(Message([
-        MessageSegment.reply(event.message_id),
-        MessageSegment.text(msg)
-    ]))
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(msg)
+        ]))
 
 
 # ========== 宠物背包指令 ==========
@@ -519,8 +520,8 @@ async def handle_pk(matcher: Matcher, event: MessageEvent, args: Message = Comma
         return
 
     msg = f"⚔️ 宠物PK\n"
-    msg += f"🔴 {result['attacker_name']}（武力:{result['attacker_force']} 幸运:{result['attacker_luck']}）\n"
-    msg += f"🔵 {result['defender_name']}（武力:{result['defender_force']} 幸运:{result['defender_luck']}）\n"
+    msg += f"🔴 {result['attacker_name']}（武力:{result['attacker_force']} 幸运:{result['attacker_luck']}）体力-20\n"
+    msg += f"🔵 {result['defender_name']}（武力:{result['defender_force']} 幸运:{result['defender_luck']}）体力-10\n"
     if result["attacker_won"]:
         msg += f"🎉 {result['attacker_name']} 获胜！\n"
         msg += f"🎁 奖励: {result['reward_food']}"
@@ -554,16 +555,19 @@ async def handle_shop(matcher: Matcher, event: MessageEvent):
         ]))
         return
 
+    shop_b64 = None
     try:
         from .shop_image import generate_shop_image
         shop_b64 = generate_shop_image()
+    except Exception as e:
+        logger.error(f"生成商店图片失败: {e}")
+
+    if shop_b64:
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
             MessageSegment.image(f"base64://{shop_b64}"),
         ]))
-        return
-    except Exception as e:
-        logger.error(f"生成商店图片失败: {e}")
+    else:
         # 降级为文字版
         msg = "🏪 宠物商店\n"
 
