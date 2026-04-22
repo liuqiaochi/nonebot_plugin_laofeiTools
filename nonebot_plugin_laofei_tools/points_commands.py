@@ -644,34 +644,41 @@ async def handle_ten_lottery(
         ]))
         return
 
-    total_cost = amount * 10
+    # 检查今日抽奖次数
+    remaining = get_game_remaining(user_id, "lottery")
+    if remaining <= 0:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("今日抽奖次数已用完，明天再来~")
+        ]))
+        return
+
+    # 按剩余次数抽，最多10次
+    actual_count = min(10, remaining)
+    total_cost = amount * actual_count
 
     # 检查积分是否足够
     user = get_user(user_id)
     if user.points < total_cost:
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text(f"积分不足，十抽需要 {total_cost} 积分，你只有 {user.points} 积分")
-        ]))
-        return
-
-    # 检查今日抽奖次数是否有完整10次
-    remaining = get_game_remaining(user_id, "lottery")
-    if remaining < 10:
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text(f"今日抽奖剩余次数不足10次（剩余 {remaining} 次），无法使用十抽")
-        ]))
-        return
+        # 按积分能抽的次数
+        affordable = user.points // amount
+        if affordable <= 0:
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text(f"积分不足，至少需要 {amount} 积分")
+            ]))
+            return
+        actual_count = min(actual_count, affordable)
+        total_cost = amount * actual_count
 
     # 扣除积分
     user.points -= total_cost
     save_user(user_id)
 
-    # 执行10次抽奖并汇总
+    # 执行抽奖并汇总
     results = []
     total_gained = 0
-    for i in range(10):
+    for i in range(actual_count):
         gained, _ = _do_one_lottery(amount)
         total_gained += gained
         results.append(gained)
@@ -687,7 +694,7 @@ async def handle_ten_lottery(
     lines = [f"第{i+1}抽: {r} 积分" for i, r in enumerate(results)]
     summary = "\n".join(lines)
     msg = (
-        f"🎰 十抽结果（每抽 {amount} 积分）\n"
+        f"🎰 抽奖结果（每抽 {amount} 积分，共{actual_count}抽）\n"
         f"{summary}\n"
         f"{'━' * 12}\n"
         f"总消耗: {total_cost}  总得分: {total_gained}\n"
