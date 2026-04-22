@@ -783,9 +783,13 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     if a_pet.stamina < 20:
         return {"success": False, "message": f"你的宠物体力不足（当前体力: {a_pet.stamina}，需要20）"}
 
-    # 4. 扣除双方体力
+    # 4. 检查防守方体力
+    if b_pet.stamina < 10:
+        return {"success": False, "message": f"对方宠物体力不足，无法PK"}
+
+    # 5. 扣除双方体力
     a_pet.stamina -= 20
-    b_pet.stamina = max(0, b_pet.stamina - 20)
+    b_pet.stamina -= 10
     save_pet(attacker_id)
     save_pet(defender_id)
 
