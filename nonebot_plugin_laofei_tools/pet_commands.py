@@ -314,6 +314,8 @@ async def handle_walk(matcher: Matcher, event: MessageEvent):
     msg = f"🐾 {result['pet_name']} 散步归来~\n"
     msg += f"体力: {result['stamina_before']} → {result['stamina_after']}\n"
     msg += f"经验: +20\n"
+    if result.get("phoebe_stamina_restore", 0) > 0:
+        msg += f"✨ 卖萌成功！恢复了 {result['phoebe_stamina_restore']} 体力\n"
     if result["dropped"]:
         msg += f"🎁 捡到了 {result['dropped_item']}！"
     else:

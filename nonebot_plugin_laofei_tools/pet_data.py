@@ -64,6 +64,15 @@ PET_TYPES = {
         "image": "pet-long.gif",
         "fav_food": "冰淇淋",
     },
+    "phoebe": {
+        "name": "菲比啾比",
+        "luck": 22,
+        "force": 12,
+        "talent": "卖萌",
+        "talent_desc": "散步有20%概率恢复20体力",
+        "image": "pet-phoebe.gif",
+        "fav_food": "菠萝披萨",
+    },
 }
 
 # ========== 食物定义 ==========
@@ -73,6 +82,7 @@ FOODS = {
     "骨头": {"price": 100, "image": "food-bone.png"},
     "小鱼干": {"price": 100, "image": "food-fish.png"},
     "冰淇淋": {"price": 100, "image": "food-icecream.png"},
+    "菠萝披萨": {"price": 100, "image": "food-pizza.png"},
 }
 
 # ========== 配饰定义 ==========
@@ -606,10 +616,16 @@ def do_walk(user_id: str) -> dict:
         pet_name = PET_TYPES[pet.pet_type]["name"]
         message = random.choice(WALK_NO_DROP_MESSAGES).format(name=pet_name)
 
-    # 9. 保存宠物数据
+    # 9. 菲比啾比天赋：散步有20%概率恢复20体力
+    phoebe_stamina_restore = 0
+    if pet.pet_type == "phoebe" and random.random() < 0.2:
+        phoebe_stamina_restore = 20
+        pet.stamina = min(pet.stamina + 20, pet.max_stamina)
+
+    # 10. 保存宠物数据
     save_pet(user_id)
 
-    # 10. 返回结果
+    # 11. 返回结果
     return {
         "success": True,
         "stamina_before": old_stamina,
@@ -621,6 +637,7 @@ def do_walk(user_id: str) -> dict:
         "dropped_item_type": dropped_item_type,
         "message": message,
         "pet_name": PET_TYPES[pet.pet_type]["name"],
+        "phoebe_stamina_restore": phoebe_stamina_restore,
     }
 
 
