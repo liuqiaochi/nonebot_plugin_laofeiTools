@@ -520,13 +520,13 @@ async def handle_pk(matcher: Matcher, event: MessageEvent, args: Message = Comma
         return
 
     msg = f"⚔️ 宠物PK\n"
-    msg += f"🔴 {result['attacker_name']}（武力:{result['attacker_force']} 幸运:{result['attacker_luck']}）体力-20\n"
-    msg += f"🔵 {result['defender_name']}（武力:{result['defender_force']} 幸运:{result['defender_luck']}）体力-10\n"
+    msg += f"🔴 {result['attacker_name']} 体力-20\n"
+    msg += f"🔵 {result['defender_name']} 体力-10\n"
     if result["attacker_won"]:
         msg += f"🎉 {result['attacker_name']} 获胜！\n"
-        msg += f"🎁 奖励: {result['reward_food']}"
     else:
-        msg += f"😢 {result['defender_name']} 获胜！"
+        msg += f"😢 {result['defender_name']} 获胜！\n"
+    msg += f"🎁 胜者奖励: {result['reward_food']}"
 
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
