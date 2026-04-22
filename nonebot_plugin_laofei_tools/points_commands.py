@@ -460,6 +460,15 @@ async def handle_rob_bank(matcher: Matcher, event: MessageEvent):
     user_id = str(event.user_id)
     user = get_user(user_id)
     
+    # 检查每日次数
+    remaining = get_game_remaining(user_id, "rob_bank")
+    if remaining <= 0:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("今日抢银行次数已用完（每日10次）")
+        ]))
+        return
+    
     # 检查是否有50积分
     if user.points < 50:
         await matcher.finish(Message([
@@ -467,6 +476,9 @@ async def handle_rob_bank(matcher: Matcher, event: MessageEvent):
             MessageSegment.text("积分不足50，无法抢银行")
         ]))
         return
+    
+    # 消耗次数
+    consume_game_count(user_id, "rob_bank")
     
     # 随机结果
     rand = random.random() * 100
@@ -1027,6 +1039,15 @@ async def handle_rob(
     
     user = get_user(user_id)
     
+    # 检查每日次数
+    remaining = get_game_remaining(user_id, "rob")
+    if remaining <= 0:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("今日打劫次数已用完（每日10次）")
+        ]))
+        return
+    
     # 检查是否有50积分
     if user.points < 50:
         await matcher.finish(Message([
@@ -1061,6 +1082,9 @@ async def handle_rob(
             MessageSegment.text("对方已经穷的吃不起饭了，你还打劫别人！")
         ]))
         return
+    
+    # 消耗次数
+    consume_game_count(user_id, "rob")
     
     # 随机结果
     rand = random.random() * 100
