@@ -383,7 +383,7 @@ lf搜图 - 引用图片进行搜索
 
 
 # ========== 重启通知指令（超级用户隐藏指令） ==========
-restart_notify_cmd = on_command("重启nb", permission=SUPERUSER, priority=1, block=True, force_whitespace=True)
+restart_notify_cmd = on_command("准备重启", permission=SUPERUSER, priority=1, block=True, force_whitespace=True)
 
 
 @restart_notify_cmd.handle()
