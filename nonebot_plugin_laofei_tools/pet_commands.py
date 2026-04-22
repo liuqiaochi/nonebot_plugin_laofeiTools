@@ -398,24 +398,45 @@ async def handle_feed(matcher: Matcher, event: MessageEvent, args: Message = Com
     if not food_name:
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text("请使用「宠物喂食 食物名」格式，如：宠物喂食 橘子")
+            MessageSegment.text("请使用「宠物喂食 食物名」或「宠物喂食 食物名 数量」格式")
         ]))
         return
 
-    result = do_feed(user_id, food_name)
+    # 解析名称和数量
+    parts = food_name.rsplit(None, 1)
+    count = 1
+    if len(parts) == 2 and parts[1].isdigit():
+        food_name = parts[0]
+        count = int(parts[1])
+    if count < 1:
+        count = 1
 
-    if not result["success"]:
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text(result["message"])
-        ]))
-        return
+    # 逐个喂食，累计结果
+    total_stamina_gain = 0
+    total_affection_gain = 0
+    fed_count = 0
+    last_result = None
 
-    msg = f"🐾 你喂了 {result['pet_name']} 一个 {result['food_name']}~\n"
-    msg += f"体力: {result['stamina_before']} → {result['stamina_after']}（+{result['stamina_gain']}）\n"
-    msg += f"好感度: {result['affection_before']} → {result['affection_after']}（+{result['affection_gain']}）"
-    if result["is_favorite"]:
-        msg += f"\n💕 {result['pet_name']} 最爱吃 {result['food_name']}！"
+    for _ in range(count):
+        result = do_feed(user_id, food_name)
+        if not result["success"]:
+            if fed_count == 0:
+                await matcher.finish(Message([
+                    MessageSegment.reply(event.message_id),
+                    MessageSegment.text(result["message"])
+                ]))
+                return
+            break
+        fed_count += 1
+        total_stamina_gain += result["stamina_gain"]
+        total_affection_gain += result["affection_gain"]
+        last_result = result
+
+    msg = f"🐾 你喂了 {last_result['pet_name']} {fed_count}个 {last_result['food_name']}~\n"
+    msg += f"体力: +{total_stamina_gain}\n"
+    msg += f"好感度: +{total_affection_gain}"
+    if last_result["is_favorite"]:
+        msg += f"\n💕 {last_result['pet_name']} 最爱吃 {last_result['food_name']}！"
 
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
@@ -605,9 +626,18 @@ async def handle_buy(matcher: Matcher, event: MessageEvent, args: Message = Comm
     if not item_name:
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text("请使用「购买 商品名」格式，如：购买 小刀")
+            MessageSegment.text("请使用「购买 商品名」或「购买 商品名 数量」格式")
         ]))
         return
+
+    # 解析名称和数量
+    parts = item_name.rsplit(None, 1)
+    count = 1
+    if len(parts) == 2 and parts[1].isdigit():
+        item_name = parts[0]
+        count = int(parts[1])
+    if count < 1:
+        count = 1
 
     # 查找商品及价格
     item_type = None
@@ -625,24 +655,26 @@ async def handle_buy(matcher: Matcher, event: MessageEvent, args: Message = Comm
         ]))
         return
 
+    total_price = price * count
+
     # 检查积分
     points_user = get_points_user(user_id)
-    if points_user.points < price:
+    if points_user.points < total_price:
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text(f"积分不足，{item_name} 需要 {price} 积分，你只有 {points_user.points} 积分")
+            MessageSegment.text(f"积分不足，{item_name}×{count} 需要 {total_price} 积分，你只有 {points_user.points} 积分")
         ]))
         return
 
     # 扣除积分
-    points_user.points -= price
+    points_user.points -= total_price
     save_points_user(user_id)
 
     # 添加到背包
-    add_item(user_id, item_type, item_name)
+    add_item(user_id, item_type, item_name, count)
 
-    msg = f"✅ 成功购买 {item_name}！\n"
-    msg += f"消耗 {price} 积分，剩余 {points_user.points} 积分"
+    msg = f"✅ 成功购买 {item_name}×{count}！\n"
+    msg += f"消耗 {total_price} 积分，剩余 {points_user.points} 积分"
 
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
@@ -730,11 +762,21 @@ async def handle_sell(matcher: Matcher, event: MessageEvent, args: Message = Com
     if not args_text:
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text("请使用「出售 物品名」格式，如：出售 小刀")
+            MessageSegment.text("请使用「出售 物品名」或「出售 物品名 数量」格式")
         ]))
         return
 
-    item_name = args_text
+    # 解析名称和数量
+    parts = args_text.rsplit(None, 1)
+    count = 1
+    if len(parts) == 2 and parts[1].isdigit():
+        item_name = parts[0]
+        count = int(parts[1])
+    else:
+        item_name = args_text
+    if count < 1:
+        count = 1
+
     inv = get_inventory(user_id)
 
     # 查找物品和价格
@@ -744,6 +786,7 @@ async def handle_sell(matcher: Matcher, event: MessageEvent, args: Message = Com
     if item_name in FOODS and inv.foods.get(item_name, 0) > 0:
         item_type = "food"
         sell_price = FOODS[item_name]["price"] // 4
+        available = inv.foods.get(item_name, 0)
     elif item_name in ACCESSORIES and inv.accessories.get(item_name, 0) > 0:
         # 不能出售正在佩戴的配饰
         if pet.accessory == item_name:
@@ -754,6 +797,7 @@ async def handle_sell(matcher: Matcher, event: MessageEvent, args: Message = Com
             return
         item_type = "accessory"
         sell_price = ACCESSORIES[item_name]["price"] // 4
+        available = inv.accessories.get(item_name, 0)
     else:
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
@@ -761,15 +805,21 @@ async def handle_sell(matcher: Matcher, event: MessageEvent, args: Message = Com
         ]))
         return
 
+    # 限制数量不超过拥有数
+    if count > available:
+        count = available
+
+    total_sell_price = sell_price * count
+
     # 移除物品
-    remove_item(user_id, item_type, item_name)
+    remove_item(user_id, item_type, item_name, count)
 
     # 增加积分
     points_user = get_points_user(user_id)
-    points_user.points += sell_price
+    points_user.points += total_sell_price
     save_points_user(user_id)
 
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
-        MessageSegment.text(f"成功出售「{item_name}」，获得 {sell_price} 积分")
+        MessageSegment.text(f"成功出售「{item_name}」×{count}，获得 {total_sell_price} 积分")
     ]))
