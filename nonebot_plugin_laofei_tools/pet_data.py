@@ -807,12 +807,15 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     # 7. 掷骰子判断胜负
     attacker_won = random.random() * 100 < win_rate
 
-    # 8. 胜利奖励（胜利方获得食物）
+    # 8. 胜利奖励（胜利方获得食物）+ 防守方经验
     reward_food = random.choice(list(FOODS.keys()))
     if attacker_won:
         add_item(attacker_id, "food", reward_food)
+        b_pet.exp += 5  # 防守方输了获得5点经验
     else:
         add_item(defender_id, "food", reward_food)
+        b_pet.exp += 10  # 防守方赢了获得10点经验
+    save_pet(defender_id)
 
     # 9. 返回结果
     return {
