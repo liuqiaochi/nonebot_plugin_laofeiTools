@@ -760,6 +760,7 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
 
     根据双方宠物的武力和幸运计算胜率，随机决定胜负。
     胜利方获得随机 1 个食物奖励。
+    双方各扣除 20 点体力。
 
     Args:
         attacker_id: 发起方用户 ID
@@ -778,27 +779,37 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     if b_pet is None:
         return {"success": False, "message": "对方还没有领养宠物"}
 
-    # 3. 计算双方有效属性
+    # 3. 检查攻击方体力
+    if a_pet.stamina < 20:
+        return {"success": False, "message": f"你的宠物体力不足（当前体力: {a_pet.stamina}，需要20）"}
+
+    # 4. 扣除双方体力
+    a_pet.stamina -= 20
+    b_pet.stamina = max(0, b_pet.stamina - 20)
+    save_pet(attacker_id)
+    save_pet(defender_id)
+
+    # 5. 计算双方有效属性
     a_force = get_effective_force(a_pet)
     a_luck = get_effective_luck(a_pet)
     b_force = get_effective_force(b_pet)
 
-    # 4. 计算胜率
+    # 6. 计算胜率
     win_rate = 50 + (a_force - b_force) * 5 + a_luck / 5 * 5
     if a_pet.pet_type == "dog":  # 刀盾狗天赋
         win_rate += 5
     win_rate = max(5, min(95, win_rate))  # clamp to [5%, 95%]
 
-    # 5. 掷骰子判断胜负
+    # 7. 掷骰子判断胜负
     attacker_won = random.random() * 100 < win_rate
 
-    # 6. 胜利奖励
+    # 8. 胜利奖励
     reward_food = None
     if attacker_won:
         reward_food = random.choice(list(FOODS.keys()))
         add_item(attacker_id, "food", reward_food)
 
-    # 7. 返回结果
+    # 9. 返回结果
     return {
         "success": True,
         "attacker_name": PET_TYPES[a_pet.pet_type]["name"],
