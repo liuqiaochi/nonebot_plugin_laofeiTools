@@ -747,3 +747,81 @@ async def handle_equip(matcher: Matcher, event: MessageEvent, args: Message = Co
         MessageSegment.reply(event.message_id),
         MessageSegment.text(msg)
     ]))
+
+# ========== 出售指令 ==========
+sell_cmd = on_command("出售", priority=5, block=True)
+
+
+@sell_cmd.handle()
+async def handle_sell(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()):
+    """出售背包中的物品"""
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("宠物功能仅在群聊可用")
+        ]))
+        return
+
+    if not is_points_enabled(str(event.group_id)):
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("本群积分系统已关闭")
+        ]))
+        return
+
+    user_id = str(event.user_id)
+    pet = get_pet(user_id)
+    if pet is None:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("你还没有领养宠物，请先发送「我的宠物」领养一只")
+        ]))
+        return
+
+    args_text = args.extract_plain_text().strip()
+    if not args_text:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("请使用「出售 物品名」格式，如：出售 小刀")
+        ]))
+        return
+
+    item_name = args_text
+    inv = get_inventory(user_id)
+
+    # 查找物品和价格
+    sell_price = 0
+    item_type = ""
+
+    if item_name in FOODS and inv.foods.get(item_name, 0) > 0:
+        item_type = "food"
+        sell_price = FOODS[item_name]["price"] // 4
+    elif item_name in ACCESSORIES and inv.accessories.get(item_name, 0) > 0:
+        # 不能出售正在佩戴的配饰
+        if pet.accessory == item_name:
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text(f"请先卸下「{item_name}」再出售")
+            ]))
+            return
+        item_type = "accessory"
+        sell_price = ACCESSORIES[item_name]["price"] // 4
+    else:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(f"背包中没有「{item_name}」")
+        ]))
+        return
+
+    # 移除物品
+    remove_item(user_id, item_type, item_name)
+
+    # 增加积分
+    points_user = get_points_user(user_id)
+    points_user.points += sell_price
+    save_points_user(user_id)
+
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(f"成功出售「{item_name}」，获得 {sell_price} 积分")
+    ]))
