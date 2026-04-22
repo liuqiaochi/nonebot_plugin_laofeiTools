@@ -41,21 +41,14 @@ my_pet_cmd = on_command("我的宠物", priority=5, block=True, force_whitespace
 @my_pet_cmd.handle()
 async def handle_my_pet(matcher: Matcher, event: MessageEvent):
     """查看宠物信息 / 未领养时展示领养列表"""
-    # 检查私聊
-    if isinstance(event, PrivateMessageEvent):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("宠物功能仅在群聊可用")
-        ]))
-        return
-
     # 检查群聊是否开启积分系统
-    if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
-        return
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
 
     user_id = str(event.user_id)
     pet = get_pet(user_id)
@@ -120,21 +113,14 @@ adopt_cmd = on_command("领养", priority=5, block=True)
 @adopt_cmd.handle()
 async def handle_adopt(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()):
     """领养宠物"""
-    # 检查私聊
-    if isinstance(event, PrivateMessageEvent):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("宠物功能仅在群聊可用")
-        ]))
-        return
-
     # 检查群聊是否开启积分系统
-    if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
-        return
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
 
     user_id = str(event.user_id)
 
@@ -236,19 +222,14 @@ pet_inventory_cmd = on_command("宠物背包", priority=5, block=True, force_whi
 @pet_inventory_cmd.handle()
 async def handle_inventory(matcher: Matcher, event: MessageEvent):
     """查看道具背包"""
-    if isinstance(event, PrivateMessageEvent):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("宠物功能仅在群聊可用")
-        ]))
-        return
-
-    if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
-        return
+    # 检查群聊是否开启积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
 
     user_id = str(event.user_id)
     pet = get_pet(user_id)
@@ -303,19 +284,14 @@ pet_walk_cmd = on_command("宠物散步", priority=5, block=True, force_whitespa
 @pet_walk_cmd.handle()
 async def handle_walk(matcher: Matcher, event: MessageEvent):
     """宠物散步"""
-    if isinstance(event, PrivateMessageEvent):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("宠物功能仅在群聊可用")
-        ]))
-        return
-
-    if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
-        return
+    # 检查群聊是否开启积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
 
     user_id = str(event.user_id)
     pet = get_pet(user_id)
@@ -356,19 +332,14 @@ pet_pat_cmd = on_command("宠物抚摸", priority=5, block=True, force_whitespac
 @pet_pat_cmd.handle()
 async def handle_pat(matcher: Matcher, event: MessageEvent):
     """抚摸宠物"""
-    if isinstance(event, PrivateMessageEvent):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("宠物功能仅在群聊可用")
-        ]))
-        return
-
-    if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
-        return
+    # 检查群聊是否开启积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
 
     user_id = str(event.user_id)
     pet = get_pet(user_id)
@@ -405,19 +376,14 @@ pet_feed_cmd = on_command("宠物喂食", priority=5, block=True)
 @pet_feed_cmd.handle()
 async def handle_feed(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()):
     """喂食宠物"""
-    if isinstance(event, PrivateMessageEvent):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("宠物功能仅在群聊可用")
-        ]))
-        return
-
-    if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
-        return
+    # 检查群聊是否开启积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
 
     user_id = str(event.user_id)
     pet = get_pet(user_id)
@@ -464,19 +430,21 @@ pet_pk_cmd = on_command("宠物pk", aliases={"宠物PK"}, priority=5, block=True
 @pet_pk_cmd.handle()
 async def handle_pk(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()):
     """宠物PK对战"""
+    # PK需要@人，仅群聊可用
     if isinstance(event, PrivateMessageEvent):
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text("宠物功能仅在群聊可用")
+            MessageSegment.text("宠物PK仅在群聊可用")
         ]))
         return
 
+    # 检查群聊是否开启积分系统
     if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
-        return
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
 
     user_id = str(event.user_id)
     pet = get_pet(user_id)
@@ -541,19 +509,14 @@ pet_shop_cmd = on_command("宠物商店", priority=5, block=True, force_whitespa
 @pet_shop_cmd.handle()
 async def handle_shop(matcher: Matcher, event: MessageEvent):
     """查看宠物商店"""
-    if isinstance(event, PrivateMessageEvent):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("宠物功能仅在群聊可用")
-        ]))
-        return
-
-    if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
-        return
+    # 检查群聊是否开启积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
 
     shop_b64 = None
     try:
@@ -620,19 +583,14 @@ buy_cmd = on_command("购买", priority=5, block=True)
 @buy_cmd.handle()
 async def handle_buy(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()):
     """购买商品"""
-    if isinstance(event, PrivateMessageEvent):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("宠物功能仅在群聊可用")
-        ]))
-        return
-
-    if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
-        return
+    # 检查群聊是否开启积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
 
     user_id = str(event.user_id)
     pet = get_pet(user_id)
@@ -699,19 +657,14 @@ pet_equip_cmd = on_command("宠物佩戴", priority=5, block=True)
 @pet_equip_cmd.handle()
 async def handle_equip(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()):
     """佩戴配饰"""
-    if isinstance(event, PrivateMessageEvent):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("宠物功能仅在群聊可用")
-        ]))
-        return
-
-    if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
-        return
+    # 检查群聊是否开启积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
 
     user_id = str(event.user_id)
     pet = get_pet(user_id)
@@ -755,19 +708,14 @@ sell_cmd = on_command("出售", priority=5, block=True)
 @sell_cmd.handle()
 async def handle_sell(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()):
     """出售背包中的物品"""
-    if isinstance(event, PrivateMessageEvent):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("宠物功能仅在群聊可用")
-        ]))
-        return
-
-    if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
-        return
+    # 检查群聊是否开启积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
 
     user_id = str(event.user_id)
     pet = get_pet(user_id)
