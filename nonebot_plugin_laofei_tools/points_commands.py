@@ -40,6 +40,7 @@ from .points_data import (
     get_pk_session_by_inviter,
     get_user,
     get_user_info,
+    get_points_ranking,
     remove_pk_session,
     save_user,
     start_guess_game,
@@ -841,6 +842,43 @@ async def handle_guess_play(
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
         MessageSegment.text(f"{hint}，比 {guess} {'大' if guess < game.target else '小'}\n剩余 {game.chances} 次机会")
+    ]))
+
+
+# ========== 积分排行榜指令 ==========
+ranking_cmd = on_command("积分排行", aliases={"排行榜"}, priority=5, block=True, force_whitespace=True)
+
+
+@ranking_cmd.handle()
+async def handle_ranking(matcher: Matcher, bot: Bot, event: MessageEvent):
+    """查看积分排行榜"""
+    ranking = get_points_ranking(10)
+    
+    if not ranking:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("暂无排行数据")
+        ]))
+        return
+    
+    msg = "🏆 积分排行榜 TOP10\n"
+    for i, (user_id, total, points, bank) in enumerate(ranking, 1):
+        # 尝试获取用户昵称
+        try:
+            if isinstance(event, GroupMessageEvent):
+                info = await bot.get_group_member_info(group_id=event.group_id, user_id=int(user_id))
+                name = info.get("card") or info.get("nickname") or user_id
+            else:
+                name = user_id
+        except Exception:
+            name = user_id
+        
+        medal = ["🥇", "🥈", "🥉"][i - 1] if i <= 3 else f"{i}."
+        msg += f"{medal} {name}  {total}分（身上:{points} 银行:{bank}）\n"
+    
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(msg)
     ]))
 
 

@@ -416,6 +416,30 @@ def calculate_bank_interest():
             _user_data[user_id].bank_interest_hidden = user_data.get("bank_interest_hidden", 0.0)
 
 
+# ========== 积分排行榜 ==========
+def get_points_ranking(top_n: int = 10) -> list:
+    """
+    获取积分排行榜（身上积分+银行积分）
+    
+    Returns:
+        [(user_id, total_points, points, bank_points), ...]
+    """
+    # 先保存缓存
+    if _user_data:
+        _save_user_data()
+    
+    data = _load_user_data()
+    ranking = []
+    for user_id, user_data in data.items():
+        points = user_data.get("points", 0)
+        bank_points = user_data.get("bank_points", 0)
+        total = points + bank_points
+        ranking.append((user_id, total, points, bank_points))
+    
+    ranking.sort(key=lambda x: x[1], reverse=True)
+    return ranking[:top_n]
+
+
 # ========== 每日游戏次数限制 ==========
 def _load_game_limits() -> dict:
     """加载每日游戏次数数据"""
