@@ -389,9 +389,9 @@ restart_notify_cmd = on_command("#准备重启", permission=SUPERUSER, priority=
 @restart_notify_cmd.handle()
 async def handle_restart_notify(matcher: Matcher, bot: Bot, event: MessageEvent):
     """超级用户发送重启通知到所有群"""
+    sent_count = 0
     try:
         group_list = await bot.get_group_list()
-        sent_count = 0
         for group in group_list:
             group_id = group.get("group_id")
             if group_id:
@@ -400,14 +400,15 @@ async def handle_restart_notify(matcher: Matcher, bot: Bot, event: MessageEvent)
                     sent_count += 1
                 except Exception as e:
                     logger.warning(f"发送重启通知到群 {group_id} 失败: {e}")
-        
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text(f"已向 {sent_count} 个群发送重启通知")
-        ]))
     except Exception as e:
         logger.error(f"获取群列表失败: {e}")
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text(f"发送失败: {e}")
+            MessageSegment.text(f"获取群列表失败: {e}")
         ]))
+        return
+
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(f"已向 {sent_count} 个群发送重启通知")
+    ]))
