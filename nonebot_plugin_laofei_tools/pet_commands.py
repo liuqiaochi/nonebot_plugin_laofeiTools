@@ -521,7 +521,6 @@ async def handle_pk(matcher: Matcher, event: MessageEvent, args: Message = Comma
     msg = f"⚔️ 宠物PK\n"
     msg += f"🔴 {result['attacker_name']}（武力:{result['attacker_force']} 幸运:{result['attacker_luck']}）\n"
     msg += f"🔵 {result['defender_name']}（武力:{result['defender_force']} 幸运:{result['defender_luck']}）\n"
-    msg += f"胜率: {result['win_rate']:.1f}%\n"
     if result["attacker_won"]:
         msg += f"🎉 {result['attacker_name']} 获胜！\n"
         msg += f"🎁 奖励: {result['reward_food']}"
