@@ -535,51 +535,58 @@ async def handle_shop(matcher: Matcher, event: MessageEvent):
         ]))
         return
 
-    msg = "🏪 宠物商店\n"
+    try:
+        from .shop_image import generate_shop_image
+        shop_b64 = generate_shop_image()
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.image(f"base64://{shop_b64}"),
+        ]))
+    except Exception as e:
+        logger.error(f"生成商店图片失败: {e}")
+        # 降级为文字版
+        msg = "🏪 宠物商店\n"
 
-    # 食物区
-    msg += "\n【食物】\n"
-    for food_name, food_info in FOODS.items():
-        msg += f"  {food_name} - {food_info['price']} 积分\n"
+        msg += "\n【食物】\n"
+        for food_name, food_info in FOODS.items():
+            msg += f"  {food_name} - {food_info['price']} 积分\n"
 
-    # 普通配饰区
-    msg += "\n【普通配饰】\n"
-    for acc_name, acc_info in ACCESSORIES.items():
-        if acc_info["droppable"]:
-            effects = []
-            if acc_info["force"] > 0:
-                effects.append(f"武力+{acc_info['force']}")
-            if acc_info["luck"] > 0:
-                effects.append(f"幸运+{acc_info['luck']}")
-            if acc_info["stamina"] > 0:
-                effects.append(f"体力+{acc_info['stamina']}")
-            if acc_info["special"] == "pat_bonus_10":
-                effects.append("抚摸好感+10")
-            effect_str = "、".join(effects) if effects else "无"
-            msg += f"  {acc_name}（{effect_str}）- {acc_info['price']} 积分\n"
+        msg += "\n【普通配饰】\n"
+        for acc_name, acc_info in ACCESSORIES.items():
+            if acc_info["droppable"]:
+                effects = []
+                if acc_info["force"] > 0:
+                    effects.append(f"武力+{acc_info['force']}")
+                if acc_info["luck"] > 0:
+                    effects.append(f"幸运+{acc_info['luck']}")
+                if acc_info["stamina"] > 0:
+                    effects.append(f"体力+{acc_info['stamina']}")
+                if acc_info["special"] == "pat_bonus_10":
+                    effects.append("抚摸好感+10")
+                effect_str = "、".join(effects) if effects else "无"
+                msg += f"  {acc_name}（{effect_str}）- {acc_info['price']} 积分\n"
 
-    # 特殊配饰区
-    msg += "\n【特殊配饰】\n"
-    for acc_name, acc_info in ACCESSORIES.items():
-        if not acc_info["droppable"]:
-            effects = []
-            if acc_info["force"] > 0:
-                effects.append(f"武力+{acc_info['force']}")
-            if acc_info["luck"] > 0:
-                effects.append(f"幸运+{acc_info['luck']}")
-            if acc_info["stamina"] > 0:
-                effects.append(f"体力+{acc_info['stamina']}")
-            if acc_info["special"] == "affection_1.2x":
-                effects.append("好感提升1.2倍")
-            effect_str = "、".join(effects) if effects else "无"
-            msg += f"  {acc_name}（{effect_str}）- {acc_info['price']} 积分\n"
+        msg += "\n【特殊配饰】\n"
+        for acc_name, acc_info in ACCESSORIES.items():
+            if not acc_info["droppable"]:
+                effects = []
+                if acc_info["force"] > 0:
+                    effects.append(f"武力+{acc_info['force']}")
+                if acc_info["luck"] > 0:
+                    effects.append(f"幸运+{acc_info['luck']}")
+                if acc_info["stamina"] > 0:
+                    effects.append(f"体力+{acc_info['stamina']}")
+                if acc_info["special"] == "affection_1.2x":
+                    effects.append("好感提升1.2倍")
+                effect_str = "、".join(effects) if effects else "无"
+                msg += f"  {acc_name}（{effect_str}）- {acc_info['price']} 积分\n"
 
-    msg += "\n发送「购买 商品名」购买"
+        msg += "\n发送「购买 商品名」购买"
 
-    await matcher.finish(Message([
-        MessageSegment.reply(event.message_id),
-        MessageSegment.text(msg)
-    ]))
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(msg)
+        ]))
 
 
 # ========== 购买指令 ==========

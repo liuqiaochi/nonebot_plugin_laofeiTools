@@ -68,23 +68,23 @@ PET_TYPES = {
 
 # ========== 食物定义 ==========
 FOODS = {
-    "橘子": {"price": 100},
-    "汉堡": {"price": 100},
-    "骨头": {"price": 100},
-    "小鱼干": {"price": 100},
-    "冰淇淋": {"price": 100},
+    "橘子": {"price": 100, "image": "food-orange.png"},
+    "汉堡": {"price": 100, "image": "food-hamburger.png"},
+    "骨头": {"price": 100, "image": "food-bone.png"},
+    "小鱼干": {"price": 100, "image": "food-fish.png"},
+    "冰淇淋": {"price": 100, "image": "food-icecream.png"},
 }
 
 # ========== 配饰定义 ==========
 ACCESSORIES = {
-    "小刀": {"force": 10, "luck": 0, "stamina": 0, "price": 500, "special": None, "droppable": True},
-    "短剑": {"force": 5, "luck": 5, "stamina": 0, "price": 500, "special": None, "droppable": True},
-    "四叶草": {"force": 0, "luck": 20, "stamina": 0, "price": 1000, "special": None, "droppable": True},
-    "草帽": {"force": 0, "luck": 0, "stamina": 0, "price": 1000, "special": "pat_bonus_10", "droppable": True},
-    "滑板车": {"force": 0, "luck": 0, "stamina": 25, "price": 1000, "special": None, "droppable": True},
-    "彩虹戒指": {"force": 0, "luck": 50, "stamina": 0, "price": 2500, "special": None, "droppable": False},
-    "青龙偃月刀": {"force": 30, "luck": 0, "stamina": 0, "price": 5000, "special": None, "droppable": False},
-    "超人披风": {"force": 10, "luck": 10, "stamina": 20, "price": 6666, "special": "affection_1.2x", "droppable": False},
+    "小刀": {"force": 10, "luck": 0, "stamina": 0, "price": 500, "special": None, "droppable": True, "image": "accessories-knife.png"},
+    "短剑": {"force": 5, "luck": 5, "stamina": 0, "price": 500, "special": None, "droppable": True, "image": "accessories-stiletto.png"},
+    "四叶草": {"force": 0, "luck": 20, "stamina": 0, "price": 1000, "special": None, "droppable": True, "image": "accessories-four-leafclover.png"},
+    "草帽": {"force": 0, "luck": 0, "stamina": 0, "price": 1000, "special": "pat_bonus_10", "droppable": True, "image": "accessories-hat.png"},
+    "滑板车": {"force": 0, "luck": 0, "stamina": 25, "price": 1000, "special": None, "droppable": True, "image": "accessories-scooter.png"},
+    "彩虹戒指": {"force": 0, "luck": 50, "stamina": 0, "price": 2500, "special": None, "droppable": False, "image": "accessories-ring.png"},
+    "青龙偃月刀": {"force": 30, "luck": 0, "stamina": 0, "price": 5000, "special": None, "droppable": False, "image": "accessories-dragonBlade.png"},
+    "超人披风": {"force": 10, "luck": 10, "stamina": 20, "price": 6666, "special": "affection_1.2x", "droppable": False, "image": "accessories-cloak.png"},
 }
 
 # ========== 好感度等级经验需求 ==========
