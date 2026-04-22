@@ -304,6 +304,19 @@ def save_pet(user_id: str) -> None:
     _save_pet_data()
 
 
+def abandon_pet(user_id: str) -> bool:
+    """弃养宠物，删除宠物数据但保留背包"""
+    if user_id in _pet_cache:
+        # 如果有配饰佩戴中，先放回背包
+        pet = _pet_cache[user_id]
+        if pet.accessory:
+            add_item(user_id, "accessory", pet.accessory)
+        del _pet_cache[user_id]
+        _save_pet_data()
+        return True
+    return False
+
+
 # ========== 背包管理函数 ==========
 
 def get_inventory(user_id: str) -> InventoryData:

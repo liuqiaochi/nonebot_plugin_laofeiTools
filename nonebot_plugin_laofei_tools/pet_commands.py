@@ -22,7 +22,7 @@ from .config import is_points_enabled
 from .points_data import get_user as get_points_user, save_user as save_points_user
 from .pet_data import (
     PET_TYPES, FOODS, ACCESSORIES, AFFECTION_LEVELS,
-    get_pet, create_pet, save_pet,
+    get_pet, create_pet, save_pet, abandon_pet,
     get_pet_level, get_affection_level, get_effective_force, get_effective_luck,
     get_inventory, add_item, remove_item, save_inventory,
     equip_accessory, unequip_accessory,
@@ -32,6 +32,9 @@ from .pet_data import (
 
 # 宠物图片目录
 PET_IMAGE_DIR = Path(__file__).parent / "image"
+
+# 弃养确认缓存：user_id -> True（等待确认中）
+_abandon_confirm: dict = {}
 
 
 # ========== 我的宠物指令 ==========
@@ -824,4 +827,81 @@ async def handle_sell(matcher: Matcher, event: MessageEvent, args: Message = Com
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
         MessageSegment.text(f"成功出售「{item_name}」×{count}，获得 {total_sell_price} 积分")
+    ]))
+
+
+# ========== 宠物弃养指令 ==========
+pet_abandon_cmd = on_command("宠物弃养", priority=5, block=True, force_whitespace=True)
+pet_abandon_confirm_cmd = on_command("确认弃养", priority=5, block=True, force_whitespace=True)
+
+
+@pet_abandon_cmd.handle()
+async def handle_abandon(matcher: Matcher, event: MessageEvent):
+    """宠物弃养（第一步：发起确认）"""
+    # 检查群聊是否开启积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
+
+    user_id = str(event.user_id)
+    pet = get_pet(user_id)
+    if pet is None:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("你还没有领养宠物")
+        ]))
+        return
+
+    pet_info = PET_TYPES[pet.pet_type]
+    level = get_pet_level(pet.exp)
+
+    # 标记等待确认
+    _abandon_confirm[user_id] = True
+
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(
+            f"⚠️ 你确定要弃养 {pet_info['name']}（Lv.{level}）吗？\n"
+            f"弃养后宠物数据将被清除，食物和配饰会保留。\n"
+            f"请发送「确认弃养」确认，或忽略取消。"
+        )
+    ]))
+
+
+@pet_abandon_confirm_cmd.handle()
+async def handle_abandon_confirm(matcher: Matcher, event: MessageEvent):
+    """宠物弃养（第二步：确认执行）"""
+    user_id = str(event.user_id)
+
+    # 检查是否有待确认的弃养
+    if user_id not in _abandon_confirm:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("没有待确认的弃养操作，请先发送「宠物弃养」")
+        ]))
+        return
+
+    # 移除确认标记
+    del _abandon_confirm[user_id]
+
+    pet = get_pet(user_id)
+    if pet is None:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("你还没有领养宠物")
+        ]))
+        return
+
+    pet_name = PET_TYPES[pet.pet_type]["name"]
+
+    # 执行弃养
+    abandon_pet(user_id)
+
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(f"😢 你弃养了 {pet_name}，它独自离开了...\n发送「我的宠物」可以重新领养一只新宠物")
     ]))
