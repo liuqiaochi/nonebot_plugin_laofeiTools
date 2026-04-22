@@ -862,19 +862,10 @@ async def handle_ranking(matcher: Matcher, bot: Bot, event: MessageEvent):
         return
     
     msg = "🏆 积分排行榜 TOP10\n"
-    for i, (user_id, total, points, bank) in enumerate(ranking, 1):
-        # 尝试获取用户昵称
-        try:
-            if isinstance(event, GroupMessageEvent):
-                info = await bot.get_group_member_info(group_id=event.group_id, user_id=int(user_id))
-                name = info.get("card") or info.get("nickname") or user_id
-            else:
-                name = user_id
-        except Exception:
-            name = user_id
-        
-        medal = ["🥇", "🥈", "🥉"][i - 1] if i <= 3 else f"{i}."
-        msg += f"{medal} {name}  {total}分（身上:{points} 银行:{bank}）\n"
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+    for i, (user_id, total, points, bank) in enumerate(ranking):
+        medal = medals[i] if i < len(medals) else f"{i+1}."
+        msg += f"{medal} {user_id}  {total}分\n"
     
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
