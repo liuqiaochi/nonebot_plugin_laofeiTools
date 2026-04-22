@@ -23,7 +23,7 @@ PET_TYPES = {
         "name": "Doro",
         "luck": 10,
         "force": 10,
-        "talent": "哦润橘",
+        "talent": "欧润橘",
         "talent_desc": "好感提升速度1.2倍",
         "image": "pet-doro.gif",
         "fav_food": "橘子",

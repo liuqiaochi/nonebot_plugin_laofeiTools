@@ -210,3 +210,67 @@ def generate_shop_image() -> str:
     img.save(output, format="PNG")
     output.seek(0)
     return base64.b64encode(output.getvalue()).decode()
+
+
+# ========== 帮助指令定义 ==========
+HELP_ITEMS = [
+    ("我的宠物", "查看宠物信息或领养宠物"),
+    ("领养 宠物名", "领养指定宠物"),
+    ("宠物散步", "消耗体力散步获取经验和道具"),
+    ("宠物抚摸", "每日抚摸提升好感度"),
+    ("宠物喂食 食物名", "喂食恢复体力和好感度"),
+    ("宠物pk @某人", "与他人宠物PK对战"),
+    ("宠物商店", "查看商店商品"),
+    ("购买 商品名", "使用积分购买商品"),
+    ("宠物佩戴 配饰名", "佩戴配饰"),
+    ("宠物背包", "查看道具背包"),
+    ("宠物帮助", "查看本帮助信息"),
+]
+
+
+def generate_help_image() -> str:
+    """
+    生成宠物帮助图片
+
+    Returns:
+        base64编码的PNG图片数据
+    """
+    font_header = _try_load_font(28)
+    font_cmd = _try_load_font(20)
+    font_desc = _try_load_font(14)
+
+    # 布局
+    width = 500
+    item_height = 55
+    header_height = 60
+    padding = 25
+    total_height = padding + header_height + len(HELP_ITEMS) * item_height + padding
+
+    img = Image.new("RGB", (width, total_height), BG_COLOR)
+    draw = ImageDraw.Draw(img)
+
+    y = padding
+
+    # 标题
+    title = "🐾 宠物系统帮助"
+    title_bbox = draw.textbbox((0, 0), title, font=font_header)
+    title_w = title_bbox[2] - title_bbox[0]
+    draw.text(((width - title_w) // 2, y), title, fill=TITLE_COLOR, font=font_header)
+    y += header_height
+
+    # 分隔线
+    draw.line([(padding, y - 10), (width - padding, y - 10)], fill=DIVIDER_COLOR, width=1)
+
+    # 指令列表
+    for cmd, desc in HELP_ITEMS:
+        # 指令名（大字体）
+        draw.text((padding, y), cmd, fill=TEXT_COLOR, font=font_cmd)
+        # 说明（小字体，次行）
+        draw.text((padding + 10, y + 26), desc, fill=(160, 160, 180), font=font_desc)
+        y += item_height
+
+    # 输出为base64
+    output = BytesIO()
+    img.save(output, format="PNG")
+    output.seek(0)
+    return base64.b64encode(output.getvalue()).decode()
