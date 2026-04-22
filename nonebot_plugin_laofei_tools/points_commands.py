@@ -762,7 +762,7 @@ async def handle_guess_start(
     if remaining <= 0:
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text("今日猜数字次数已用完（每天10次），明天再来~")
+            MessageSegment.text("今日猜数字次数已用完（每天3次），明天再来~")
         ]))
         return
     

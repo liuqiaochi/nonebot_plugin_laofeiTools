@@ -23,6 +23,12 @@ PK_SESSION_FILE = DATA_DIR / "pk_sessions.json"
 
 # 每日游戏次数上限
 DAILY_GAME_LIMIT = 10
+DAILY_GAME_LIMITS = {
+    "lottery": 10,
+    "guess": 3,
+    "rob": 10,
+    "rob_bank": 10,
+}
 
 
 def _ensure_data_dir():
@@ -468,7 +474,8 @@ def get_game_remaining(user_id: str, game_type: str) -> int:
     today = datetime.now().strftime("%Y-%m-%d")
     data = _load_game_limits()
     used = data.get(user_id, {}).get(game_type, {}).get(today, 0)
-    return max(0, DAILY_GAME_LIMIT - used)
+    limit = DAILY_GAME_LIMITS.get(game_type, DAILY_GAME_LIMIT)
+    return max(0, limit - used)
 
 
 def consume_game_count(user_id: str, game_type: str) -> int:
@@ -482,7 +489,8 @@ def consume_game_count(user_id: str, game_type: str) -> int:
     game_rec = user_rec.setdefault(game_type, {})
     game_rec[today] = game_rec.get(today, 0) + 1
     _save_game_limits(data)
-    return max(0, DAILY_GAME_LIMIT - game_rec[today])
+    limit = DAILY_GAME_LIMITS.get(game_type, DAILY_GAME_LIMIT)
+    return max(0, limit - game_rec[today])
 
 
 # ========== 抽签系统 ==========
