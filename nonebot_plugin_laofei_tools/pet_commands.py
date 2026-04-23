@@ -428,6 +428,16 @@ async def handle_feed(matcher: Matcher, event: MessageEvent, args: Message = Com
     last_result = None
 
     for _ in range(count):
+        # 体力已满则停止喂食
+        current_pet = get_pet(user_id)
+        if current_pet and current_pet.stamina >= current_pet.max_stamina:
+            if fed_count == 0:
+                await matcher.finish(Message([
+                    MessageSegment.reply(event.message_id),
+                    MessageSegment.text("宠物体力已满，不需要喂食")
+                ]))
+                return
+            break
         result = do_feed(user_id, food_name)
         if not result["success"]:
             if fed_count == 0:
@@ -441,9 +451,6 @@ async def handle_feed(matcher: Matcher, event: MessageEvent, args: Message = Com
         total_stamina_gain += result["stamina_gain"]
         total_affection_gain += result["affection_gain"]
         last_result = result
-        # 体力已满则停止喂食
-        if result["stamina_after"] >= get_pet(user_id).max_stamina:
-            break
 
     msg = f"🐾 你喂了 {last_result['pet_name']} {fed_count}个 {last_result['food_name']}~\n"
     msg += f"体力: +{total_stamina_gain}\n"
