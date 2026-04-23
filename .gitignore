@@ -45,3 +45,4 @@ test_*.py
 pet.md
 .kiro/
 .pytest_cache/
+指令别名配置.md

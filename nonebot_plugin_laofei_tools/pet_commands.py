@@ -40,7 +40,7 @@ _abandon_confirm: dict = {}
 
 
 # ========== 我的宠物指令 ==========
-my_pet_cmd = on_command("我的宠物", priority=5, block=True, force_whitespace=True)
+my_pet_cmd = on_command("我的宠物", aliases={"宠物"}, priority=5, block=True, force_whitespace=True)
 
 
 @my_pet_cmd.handle()
@@ -115,7 +115,7 @@ async def handle_my_pet(matcher: Matcher, event: MessageEvent):
 
 
 # ========== 领养指令 ==========
-adopt_cmd = on_command("领养", priority=5, block=True)
+adopt_cmd = on_command("领养", aliases={"宠物领养", "领养宠物"}, priority=5, block=True)
 
 
 @adopt_cmd.handle()
@@ -290,7 +290,7 @@ async def handle_inventory(matcher: Matcher, event: MessageEvent):
 
 
 # ========== 宠物散步指令 ==========
-pet_walk_cmd = on_command("宠物散步", priority=5, block=True, force_whitespace=True)
+pet_walk_cmd = on_command("宠物散步", aliases={"宠物溜达", "宠物出门"}, priority=5, block=True, force_whitespace=True)
 
 
 @pet_walk_cmd.handle()
@@ -340,7 +340,7 @@ async def handle_walk(matcher: Matcher, event: MessageEvent):
 
 
 # ========== 宠物抚摸指令 ==========
-pet_pat_cmd = on_command("宠物抚摸", priority=5, block=True, force_whitespace=True)
+pet_pat_cmd = on_command("宠物抚摸", aliases={"摸宠物", "疼爱宠物"}, priority=5, block=True, force_whitespace=True)
 
 
 @pet_pat_cmd.handle()
@@ -384,7 +384,7 @@ async def handle_pat(matcher: Matcher, event: MessageEvent):
 
 
 # ========== 宠物喂食指令 ==========
-pet_feed_cmd = on_command("宠物喂食", priority=5, block=True)
+pet_feed_cmd = on_command("宠物喂食", aliases={"宠物喂养", "喂养宠物"}, priority=5, block=True)
 
 
 @pet_feed_cmd.handle()
@@ -469,7 +469,7 @@ async def handle_feed(matcher: Matcher, event: MessageEvent, args: Message = Com
 
 
 # ========== 宠物PK指令 ==========
-pet_pk_cmd = on_command("宠物pk", aliases={"宠物PK"}, priority=5, block=True)
+pet_pk_cmd = on_command("宠物pk", aliases={"宠物PK", "宠物Pk", "宠物pK"}, priority=5, block=True)
 
 
 @pet_pk_cmd.handle()
@@ -548,7 +548,7 @@ async def handle_pk(matcher: Matcher, event: MessageEvent, args: Message = Comma
 
 
 # ========== 宠物商店指令 ==========
-pet_shop_cmd = on_command("宠物商店", priority=5, block=True, force_whitespace=True)
+pet_shop_cmd = on_command("宠物商店", aliases={"宠物店", "宠物店铺"}, priority=5, block=True, force_whitespace=True)
 
 
 @pet_shop_cmd.handle()
@@ -707,7 +707,7 @@ async def handle_buy(matcher: Matcher, event: MessageEvent, args: Message = Comm
 
 
 # ========== 宠物佩戴指令 ==========
-pet_equip_cmd = on_command("宠物佩戴", priority=5, block=True)
+pet_equip_cmd = on_command("宠物佩戴", aliases={"宠物穿戴", "宠物装备", "使用配饰", "穿配饰"}, priority=5, block=True)
 
 
 @pet_equip_cmd.handle()

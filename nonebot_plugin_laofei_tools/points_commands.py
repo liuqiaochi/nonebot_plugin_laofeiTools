@@ -109,7 +109,7 @@ async def handle_disable_points(matcher: Matcher, event: MessageEvent):
 
 
 # ========== 签到指令 ==========
-sign_cmd = on_command("签到", aliases={"打卡"}, priority=5, block=True, force_whitespace=True)
+sign_cmd = on_command("签到", aliases={"打卡", "积分签到", "日常签到"}, priority=5, block=True, force_whitespace=True)
 
 
 @sign_cmd.handle()
@@ -153,7 +153,7 @@ async def handle_sign(matcher: Matcher, event: MessageEvent):
 
 
 # ========== 抽签指令 ==========
-fortune_cmd = on_command("抽签", aliases={"今日运气"}, priority=5, block=True, force_whitespace=True)
+fortune_cmd = on_command("抽签", aliases={"今日运气", "今日抽签", "今日气运"}, priority=5, block=True, force_whitespace=True)
 
 
 @fortune_cmd.handle()
@@ -228,7 +228,7 @@ Exp: {info['current_exp']} / {info['exp_needed']}
 
 
 # ========== 转账指令 ==========
-transfer_cmd = on_command("转账", priority=5, block=True)
+transfer_cmd = on_command("转账", aliases={"转积分", "给积分"}, priority=5, block=True)
 
 
 @transfer_cmd.handle()
@@ -333,8 +333,8 @@ async def handle_transfer(
 
 
 # ========== 银行指令 ==========
-bank_deposit_cmd = on_command("存入银行", priority=5, block=True)
-bank_withdraw_cmd = on_command("取出银行", priority=5, block=True)
+bank_deposit_cmd = on_command("存入银行", aliases={"存入积分", "存积分", "存银行"}, priority=5, block=True)
+bank_withdraw_cmd = on_command("取出银行", aliases={"取出积分", "取积分", "取银行"}, priority=5, block=True)
 
 
 @bank_deposit_cmd.handle()
@@ -515,7 +515,7 @@ async def handle_rob_bank(matcher: Matcher, event: MessageEvent):
 
 
 # ========== 抽奖指令 ==========
-lottery_cmd = on_command("抽奖", priority=5, block=True)
+lottery_cmd = on_command("抽奖", aliases={"抽积分"}, priority=5, block=True)
 
 
 @lottery_cmd.handle()
@@ -596,7 +596,7 @@ async def handle_lottery(
 
 
 # ========== 十抽快捷指令 ==========
-ten_lottery_cmd = on_command("十抽", priority=5, block=True)
+ten_lottery_cmd = on_command("十抽", aliases={"十连抽", "十连抽奖"}, priority=5, block=True)
 
 
 def _do_one_lottery(amount: int) -> tuple[int, float]:
@@ -865,7 +865,7 @@ async def handle_guess_play(
 
 
 # ========== 积分排行榜指令 ==========
-ranking_cmd = on_command("积分排行", aliases={"排行榜"}, priority=5, block=True, force_whitespace=True)
+ranking_cmd = on_command("积分排行", aliases={"排行榜", "今日排行"}, priority=5, block=True, force_whitespace=True)
 
 
 @ranking_cmd.handle()
@@ -984,7 +984,7 @@ PK    抽签
 
 
 # ========== 打劫指令 ==========
-rob_cmd = on_command("打劫", priority=5, block=True)
+rob_cmd = on_command("打劫", aliases={"抢积分", "抢劫"}, priority=5, block=True)
 
 
 @rob_cmd.handle()
