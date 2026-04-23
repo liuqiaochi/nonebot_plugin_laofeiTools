@@ -1811,3 +1811,47 @@ async def handle_pk_emoji_like(
         except Exception:
             pass
         await matcher.finish()
+
+# ========== 新手大礼包指令 ==========
+newbie_cmd = on_command("新手大礼包", aliases={"领取新手大礼包"}, priority=5, block=True, force_whitespace=True)
+
+
+@newbie_cmd.handle()
+async def handle_newbie(matcher: Matcher, event: MessageEvent):
+    """领取新手大礼包"""
+    # 检查群聊是否开启了积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
+
+    user_id = str(event.user_id)
+    user = get_user(user_id)
+
+    # 检查是否已领取
+    if user.newbie_claimed:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("你已经领取过新手大礼包了")
+        ]))
+        return
+
+    # 发放500积分
+    user.points += 500
+    user.newbie_claimed = True
+    save_user(user_id)
+
+    # 发放每种食物各一个
+    from .pet_data import FOODS as PET_FOODS, add_item
+    food_names = list(PET_FOODS.keys())
+    for food in food_names:
+        add_item(user_id, "food", food)
+
+    food_list = "、".join(food_names)
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(f"🎁 新手大礼包领取成功！\n获得 500 积分\n获得食物：{food_list} 各1个")
+    ]))

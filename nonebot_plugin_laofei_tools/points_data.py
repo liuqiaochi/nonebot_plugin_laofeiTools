@@ -93,6 +93,7 @@ class UserData:
         self.continuous_sign_days: int = 0  # 连续签到天数
         self.last_sign_date: str = ""  # 上次签到日期 YYYY-MM-DD
         self.bank_interest_hidden: float = 0.0  # 银行隐藏利息累计
+        self.newbie_claimed: bool = False  # 是否已领取新手大礼包
 
 
 # 全局用户数据缓存
@@ -125,6 +126,7 @@ def _save_user_data():
             "continuous_sign_days": user.continuous_sign_days,
             "last_sign_date": user.last_sign_date,
             "bank_interest_hidden": user.bank_interest_hidden,
+            "newbie_claimed": user.newbie_claimed,
         }
     with open(USER_DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -165,6 +167,7 @@ def init_data():
                 user.continuous_sign_days = user_data.get("continuous_sign_days", 0)
                 user.last_sign_date = user_data.get("last_sign_date", "")
                 user.bank_interest_hidden = user_data.get("bank_interest_hidden", 0.0)
+                user.newbie_claimed = user_data.get("newbie_claimed", False)
                 _user_data[user_id] = user
             logger.info(f"[积分系统] 已加载 {len(_user_data)} 位用户数据")
         except Exception as e:
