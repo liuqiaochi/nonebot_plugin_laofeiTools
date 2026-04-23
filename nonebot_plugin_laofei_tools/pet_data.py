@@ -126,6 +126,7 @@ class PetData:
 
     def __init__(self):
         self.pet_type: str = ""           # 宠物种类 key（doro/penguin/dog/cat/dragon）
+        self.nickname: str = ""           # 宠物昵称（空字符串表示使用默认名）
         self.affection: int = 0           # 好感度点数
         self.exp: int = 0                 # 经验值
         self.stamina: int = 100           # 当前体力
@@ -177,6 +178,7 @@ def _save_pet_data():
     for user_id, pet in _pet_cache.items():
         data[user_id] = {
             "pet_type": pet.pet_type,
+            "nickname": pet.nickname,
             "affection": pet.affection,
             "exp": pet.exp,
             "stamina": pet.stamina,
@@ -228,6 +230,7 @@ def init_pet_data():
             for user_id, pet_data in data.items():
                 pet = PetData()
                 pet.pet_type = pet_data.get("pet_type", "")
+                pet.nickname = pet_data.get("nickname", "")
                 pet.affection = pet_data.get("affection", 0)
                 pet.exp = pet_data.get("exp", 0)
                 pet.stamina = pet_data.get("stamina", 100)
@@ -829,7 +832,7 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     b_force = get_effective_force(b_pet)
 
     # 6. 计算胜率
-    win_rate = 50 + (a_force - b_force) * 5 + a_luck / 5 * 5
+    win_rate = 50 + (a_force - b_force) * 2 + a_luck / 5 * 5
     if a_pet.pet_type == "dog":  # 刀盾狗天赋
         win_rate += 5
     win_rate = max(5, min(95, win_rate))  # clamp to [5%, 95%]

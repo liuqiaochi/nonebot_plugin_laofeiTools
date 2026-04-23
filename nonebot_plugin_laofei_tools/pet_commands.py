@@ -80,7 +80,10 @@ async def handle_my_pet(matcher: Matcher, event: MessageEvent):
 
     acc_text = pet.accessory if pet.accessory else "无"
 
-    msg = f"🐾 {pet_info['name']}\n"
+    # 使用昵称或默认名
+    display_name = pet.nickname if pet.nickname else pet_info['name']
+
+    msg = f"🐾 {display_name}\n"
 
     # 计算当前经验和升级所需经验
     remaining_exp = pet.exp
@@ -438,6 +441,9 @@ async def handle_feed(matcher: Matcher, event: MessageEvent, args: Message = Com
         total_stamina_gain += result["stamina_gain"]
         total_affection_gain += result["affection_gain"]
         last_result = result
+        # 体力已满则停止喂食
+        if result["stamina_after"] >= get_pet(user_id).max_stamina:
+            break
 
     msg = f"🐾 你喂了 {last_result['pet_name']} {fed_count}个 {last_result['food_name']}~\n"
     msg += f"体力: +{total_stamina_gain}\n"
@@ -795,13 +801,6 @@ async def handle_sell(matcher: Matcher, event: MessageEvent, args: Message = Com
         sell_price = FOODS[item_name]["price"] // 4
         available = inv.foods.get(item_name, 0)
     elif item_name in ACCESSORIES and inv.accessories.get(item_name, 0) > 0:
-        # 不能出售正在佩戴的配饰
-        if pet.accessory == item_name:
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text(f"请先卸下「{item_name}」再出售")
-            ]))
-            return
         item_type = "accessory"
         sell_price = ACCESSORIES[item_name]["price"] // 4
         available = inv.accessories.get(item_name, 0)
@@ -906,4 +905,67 @@ async def handle_abandon_confirm(matcher: Matcher, event: MessageEvent):
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
         MessageSegment.text(f"😢 你弃养了 {pet_name}，它独自离开了...\n发送「我的宠物」可以重新领养一只新宠物")
+    ]))
+
+
+# ========== 宠物改名指令 ==========
+pet_rename_cmd = on_command("宠物改名", priority=5, block=True)
+
+
+@pet_rename_cmd.handle()
+async def handle_rename(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()):
+    """宠物改名（消耗500积分）"""
+    # 检查群聊是否开启积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
+
+    user_id = str(event.user_id)
+    pet = get_pet(user_id)
+    if pet is None:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("你还没有领养宠物，请先发送「我的宠物」领养一只")
+        ]))
+        return
+
+    new_name = args.extract_plain_text().strip()
+    if not new_name:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("请使用「宠物改名 新名字」格式，消耗500积分")
+        ]))
+        return
+
+    if len(new_name) > 10:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("名字最长10个字")
+        ]))
+        return
+
+    # 检查积分
+    points_user = get_points_user(user_id)
+    if points_user.points < 500:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(f"积分不足，改名需要500积分，你只有 {points_user.points} 积分")
+        ]))
+        return
+
+    # 扣除积分
+    points_user.points -= 500
+    save_points_user(user_id)
+
+    old_name = pet.nickname if pet.nickname else PET_TYPES[pet.pet_type]["name"]
+    pet.nickname = new_name
+    save_pet(user_id)
+
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(f"✅ 改名成功！{old_name} → {new_name}\n消耗500积分")
     ]))
