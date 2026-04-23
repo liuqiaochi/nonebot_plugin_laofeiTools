@@ -136,6 +136,7 @@ class PetData:
         self.accessory: str = ""          # 当前佩戴配饰名称（空字符串表示无）
         self.last_pat_date: str = ""      # 上次抚摸日期 YYYY-MM-DD
         self.last_stamina_date: str = ""  # 上次体力刷新日期
+        self.last_work_time: str = ""     # 上次打工时间 YYYY-MM-DD HH:MM:SS
 
 
 # ========== 背包数据类 ==========
@@ -188,6 +189,7 @@ def _save_pet_data():
             "accessory": pet.accessory,
             "last_pat_date": pet.last_pat_date,
             "last_stamina_date": pet.last_stamina_date,
+            "last_work_time": pet.last_work_time,
         }
     with open(PET_DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -240,6 +242,7 @@ def init_pet_data():
                 pet.accessory = pet_data.get("accessory", "")
                 pet.last_pat_date = pet_data.get("last_pat_date", "")
                 pet.last_stamina_date = pet_data.get("last_stamina_date", "")
+                pet.last_work_time = pet_data.get("last_work_time", "")
                 _pet_cache[user_id] = pet
             logger.info(f"[宠物系统] 已加载 {len(_pet_cache)} 位用户宠物数据")
         except Exception as e:
@@ -522,6 +525,11 @@ def get_effective_luck(pet: PetData) -> int:
     return pet.base_luck + acc_bonus
 
 
+def get_display_name(pet: PetData) -> str:
+    """获取宠物显示名（昵称优先，无昵称则用种类名）"""
+    return pet.nickname if pet.nickname else PET_TYPES[pet.pet_type]["name"]
+
+
 # ========== 体力刷新函数 ==========
 
 def refresh_stamina_if_needed(user_id: str) -> None:
@@ -629,7 +637,7 @@ def do_walk(user_id: str) -> dict:
         add_item(user_id, dropped_item_type, dropped_item)
     else:
         # 8. 未掉落，随机趣味文案
-        pet_name = PET_TYPES[pet.pet_type]["name"]
+        pet_name = get_display_name(pet)
         message = random.choice(WALK_NO_DROP_MESSAGES).format(name=pet_name)
 
     # 9. 菲比啾比天赋：散步有20%概率恢复20体力
@@ -652,7 +660,7 @@ def do_walk(user_id: str) -> dict:
         "dropped_item": dropped_item,
         "dropped_item_type": dropped_item_type,
         "message": message,
-        "pet_name": PET_TYPES[pet.pet_type]["name"],
+        "pet_name": get_display_name(pet),
         "phoebe_stamina_restore": phoebe_stamina_restore,
     }
 
@@ -707,7 +715,7 @@ def do_pat(user_id: str) -> dict:
         "affection_gain": base_gain,
         "affection_before": old_affection,
         "affection_after": pet.affection,
-        "pet_name": PET_TYPES[pet.pet_type]["name"],
+        "pet_name": get_display_name(pet),
     }
 
 
@@ -782,7 +790,77 @@ def do_feed(user_id: str, food_name: str) -> dict:
         "affection_gain": affection_gain,
         "affection_before": old_affection,
         "affection_after": pet.affection,
-        "pet_name": PET_TYPES[pet.pet_type]["name"],
+        "pet_name": get_display_name(pet),
+    }
+
+
+# ========== 打工逻辑 ==========
+
+def do_work(user_id: str) -> dict:
+    """宠物打工逻辑
+
+    消耗30体力，获得120积分，间隔4小时。
+    10%概率获得随机食物，3%概率掉落普通配饰。
+
+    Args:
+        user_id: 用户 ID
+
+    Returns:
+        dict: 打工结果
+    """
+    # 1. 先刷新体力
+    refresh_stamina_if_needed(user_id)
+
+    # 2. 获取宠物
+    pet = get_pet(user_id)
+    if pet is None:
+        return {"success": False, "message": "你还没有领养宠物"}
+
+    # 3. 检查打工间隔（4小时）
+    now = datetime.now()
+    if pet.last_work_time:
+        last_work = datetime.strptime(pet.last_work_time, "%Y-%m-%d %H:%M:%S")
+        diff = (now - last_work).total_seconds()
+        if diff < 4 * 3600:
+            remaining_min = int((4 * 3600 - diff) / 60)
+            hours = remaining_min // 60
+            mins = remaining_min % 60
+            return {"success": False, "message": f"宠物还在休息中，{hours}小时{mins}分钟后可以继续打工"}
+
+    # 4. 检查体力
+    if pet.stamina < 30:
+        return {"success": False, "message": f"宠物体力不足，无法打工（当前体力: {pet.stamina}，需要30）"}
+
+    # 5. 扣除体力，记录时间
+    pet.stamina -= 30
+    pet.last_work_time = now.strftime("%Y-%m-%d %H:%M:%S")
+
+    # 6. 掉落判定
+    dropped_items = []
+
+    # 10% 概率获得随机食物
+    if random.random() < 0.10:
+        food = random.choice(list(FOODS.keys()))
+        add_item(user_id, "food", food)
+        dropped_items.append(food)
+
+    # 3% 概率掉落普通配饰
+    if random.random() < 0.03:
+        droppable_acc = [name for name, info in ACCESSORIES.items() if info["droppable"]]
+        if droppable_acc:
+            acc = random.choice(droppable_acc)
+            add_item(user_id, "accessory", acc)
+            dropped_items.append(acc)
+
+    # 7. 保存宠物数据
+    save_pet(user_id)
+
+    return {
+        "success": True,
+        "pet_name": get_display_name(pet),
+        "stamina_after": pet.stamina,
+        "points_earned": 120,
+        "dropped_items": dropped_items,
     }
 
 
@@ -853,8 +931,8 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     # 9. 返回结果
     return {
         "success": True,
-        "attacker_name": PET_TYPES[a_pet.pet_type]["name"],
-        "defender_name": PET_TYPES[b_pet.pet_type]["name"],
+        "attacker_name": get_display_name(a_pet),
+        "defender_name": get_display_name(b_pet),
         "attacker_force": a_force,
         "attacker_luck": a_luck,
         "defender_force": b_force,

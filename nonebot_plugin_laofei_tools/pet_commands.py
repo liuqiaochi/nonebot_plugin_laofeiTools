@@ -24,10 +24,12 @@ from .pet_data import (
     PET_TYPES, FOODS, ACCESSORIES, AFFECTION_LEVELS,
     get_pet, create_pet, save_pet, abandon_pet,
     get_pet_level, get_affection_level, get_effective_force, get_effective_luck,
+    get_display_name,
     get_inventory, add_item, remove_item, save_inventory,
     equip_accessory, unequip_accessory,
     do_walk, do_pat, do_feed, do_pk,
     refresh_stamina_if_needed,
+    do_work,
 )
 
 # 宠物图片目录
@@ -835,6 +837,57 @@ async def handle_sell(matcher: Matcher, event: MessageEvent, args: Message = Com
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
         MessageSegment.text(f"成功出售「{item_name}」×{count}，获得 {total_sell_price} 积分")
+    ]))
+
+
+# ========== 宠物打工指令 ==========
+pet_work_cmd = on_command("宠物打工", priority=5, block=True, force_whitespace=True)
+
+
+@pet_work_cmd.handle()
+async def handle_work(matcher: Matcher, event: MessageEvent):
+    """宠物打工"""
+    # 检查群聊是否开启积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
+
+    user_id = str(event.user_id)
+    pet = get_pet(user_id)
+    if pet is None:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("你还没有领养宠物，请先发送「我的宠物」领养一只")
+        ]))
+        return
+
+    result = do_work(user_id)
+
+    if not result["success"]:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(result["message"])
+        ]))
+        return
+
+    # 发放积分
+    points_user = get_points_user(user_id)
+    points_user.points += result["points_earned"]
+    save_points_user(user_id)
+
+    msg = f"💼 {result['pet_name']} 打工归来~\n"
+    msg += f"获得 {result['points_earned']} 积分\n"
+    msg += f"体力: {result['stamina_after']}"
+    if result["dropped_items"]:
+        msg += f"\n🎁 额外获得: {'、'.join(result['dropped_items'])}"
+
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(msg)
     ]))
 
 
