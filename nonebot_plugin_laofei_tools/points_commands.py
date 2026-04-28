@@ -617,7 +617,7 @@ async def handle_ten_lottery(
     event: MessageEvent,
     args: Message = CommandArg(),
 ):
-    """处理十抽指令：一次消耗10次机会，汇总发送结果"""
+    """处理十抽指令：逐抽执行，每抽结算后再下一抽"""
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
             await matcher.finish(Message([
@@ -632,7 +632,7 @@ async def handle_ten_lottery(
     if not args_text or not args_text.isdigit():
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text("请使用「十抽 积分」格式，积分范围 10-500\n例：十抽 500（消耗5000积分）")
+            MessageSegment.text("请使用「十抽 积分」格式，积分范围 10-500\n例：十抽 500")
         ]))
         return
 
@@ -644,48 +644,47 @@ async def handle_ten_lottery(
         ]))
         return
 
-    # 检查今日抽奖次数
-    remaining = get_game_remaining(user_id, "lottery")
-    if remaining <= 0:
+    user = get_user(user_id)
+
+    # 只需要有一抽的积分即可开始
+    if user.points < amount:
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text("今日抽奖次数已用完，明天再来~")
+            MessageSegment.text(f"积分不足，至少需要 {amount} 积分")
         ]))
         return
 
-    # 按剩余次数抽，最多10次
-    actual_count = min(10, remaining)
-    total_cost = amount * actual_count
-
-    # 检查积分是否足够
-    user = get_user(user_id)
-    if user.points < total_cost:
-        # 按积分能抽的次数
-        affordable = user.points // amount
-        if affordable <= 0:
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text(f"积分不足，至少需要 {amount} 积分")
-            ]))
-            return
-        actual_count = min(actual_count, affordable)
-        total_cost = amount * actual_count
-
-    # 扣除积分
-    user.points -= total_cost
-    save_user(user_id)
-
-    # 执行抽奖并汇总
+    # 逐抽执行，每抽结算后再判断下一抽
     results = []
+    total_cost = 0
     total_gained = 0
-    for i in range(actual_count):
+
+    for i in range(10):
+        # 检查次数
+        remaining = get_game_remaining(user_id, "lottery")
+        if remaining <= 0:
+            break
+        # 检查积分
+        if user.points < amount:
+            break
+        # 扣除积分
+        user.points -= amount
+        total_cost += amount
+        # 抽奖
         gained, _ = _do_one_lottery(amount)
         total_gained += gained
+        user.points += gained
         results.append(gained)
         consume_game_count(user_id, "lottery")
 
-    user.points += total_gained
     save_user(user_id)
+
+    if not results:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("今日抽奖次数已用完或积分不足")
+        ]))
+        return
 
     net = total_gained - total_cost
     net_str = f"+{net}" if net >= 0 else str(net)
@@ -694,7 +693,7 @@ async def handle_ten_lottery(
     lines = [f"第{i+1}抽: {r} 积分" for i, r in enumerate(results)]
     summary = "\n".join(lines)
     msg = (
-        f"🎰 抽奖结果（每抽 {amount} 积分，共{actual_count}抽）\n"
+        f"🎰 抽奖结果（每抽 {amount} 积分，共{len(results)}抽）\n"
         f"{summary}\n"
         f"{'━' * 12}\n"
         f"总消耗: {total_cost}  总得分: {total_gained}\n"
@@ -744,15 +743,15 @@ async def handle_guess_start(
     if not args_text or not args_text.isdigit():
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text("请使用「猜数字 积分」格式开始游戏，积分范围 10-500")
+            MessageSegment.text("请使用「猜数字 积分」格式开始游戏，积分范围 10-9999")
         ]))
         return
     
     amount = int(args_text)
-    if amount < 10 or amount > 500:
+    if amount < 10 or amount > 9999:
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text("下注积分范围是 10-500")
+            MessageSegment.text("下注积分范围是 10-9999")
         ]))
         return
     
