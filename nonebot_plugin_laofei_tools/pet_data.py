@@ -78,27 +78,37 @@ PET_TYPES = {
 
 # ========== 食物定义 ==========
 FOODS = {
-    "橘子": {"price": 100, "image": "food-orange.png"},
-    "汉堡": {"price": 100, "image": "food-hamburger.png"},
-    "骨头": {"price": 100, "image": "food-bone.png"},
-    "小鱼干": {"price": 100, "image": "food-fish.png"},
-    "冰淇淋": {"price": 100, "image": "food-icecream.png"},
-    "菠萝披萨": {"price": 100, "image": "food-pizza.png"},
+    "橘子": {"price": 100, "image": "food-orange.png", "id": "f1"},
+    "汉堡": {"price": 100, "image": "food-hamburger.png", "id": "f2"},
+    "骨头": {"price": 100, "image": "food-bone.png", "id": "f3"},
+    "小鱼干": {"price": 100, "image": "food-fish.png", "id": "f4"},
+    "冰淇淋": {"price": 100, "image": "food-icecream.png", "id": "f5"},
+    "菠萝披萨": {"price": 100, "image": "food-pizza.png", "id": "f6"},
 }
 
 # ========== 配饰定义 ==========
 ACCESSORIES = {
-    "小刀": {"force": 10, "luck": 0, "stamina": 0, "price": 500, "special": None, "droppable": True, "image": "accessories-knife.png"},
-    "短剑": {"force": 5, "luck": 5, "stamina": 0, "price": 500, "special": None, "droppable": True, "image": "accessories-stiletto.png"},
-    "四叶草": {"force": 0, "luck": 20, "stamina": 0, "price": 1000, "special": None, "droppable": True, "image": "accessories-four-leafclover.png"},
-    "草帽": {"force": 0, "luck": 0, "stamina": 0, "price": 1000, "special": "pat_bonus_10", "droppable": True, "image": "accessories-hat.png"},
-    "滑板车": {"force": 0, "luck": 0, "stamina": 25, "price": 1000, "special": None, "droppable": True, "image": "accessories-scooter.png"},
-    "彩虹戒指": {"force": 0, "luck": 50, "stamina": 0, "price": 2500, "special": None, "droppable": False, "image": "accessories-ring.png"},
-    "青龙偃月刀": {"force": 30, "luck": 0, "stamina": 0, "price": 5000, "special": None, "droppable": False, "image": "accessories-dragonBlade.png"},
-    "超人披风": {"force": 10, "luck": 10, "stamina": 20, "price": 6666, "special": "affection_1.2x", "droppable": False, "image": "accessories-cloak.png"},
+    "小刀": {"force": 10, "luck": 0, "stamina": 0, "price": 500, "special": None, "droppable": True, "image": "accessories-knife.png", "id": "a1"},
+    "短剑": {"force": 5, "luck": 5, "stamina": 0, "price": 500, "special": None, "droppable": True, "image": "accessories-stiletto.png", "id": "a2"},
+    "四叶草": {"force": 0, "luck": 20, "stamina": 0, "price": 1000, "special": None, "droppable": True, "image": "accessories-four-leafclover.png", "id": "a3"},
+    "草帽": {"force": 0, "luck": 0, "stamina": 0, "price": 1000, "special": "pat_bonus_10", "droppable": True, "image": "accessories-hat.png", "id": "a4"},
+    "滑板车": {"force": 0, "luck": 0, "stamina": 25, "price": 1000, "special": None, "droppable": True, "image": "accessories-scooter.png", "id": "a5"},
+    "彩虹戒指": {"force": 0, "luck": 50, "stamina": 0, "price": 2500, "special": None, "droppable": False, "image": "accessories-ring.png", "id": "a6"},
+    "青龙偃月刀": {"force": 30, "luck": 0, "stamina": 0, "price": 5000, "special": None, "droppable": False, "image": "accessories-dragonBlade.png", "id": "a7"},
+    "超人披风": {"force": 10, "luck": 10, "stamina": 20, "price": 6666, "special": "affection_1.2x", "droppable": False, "image": "accessories-cloak.png", "id": "a8"},
 }
 
-# ========== 好感度等级经验需求 ==========
+
+# 编号到物品名的映射
+def get_item_by_id(item_id: str) -> tuple:
+    """通过编号获取物品名和类型，返回 (name, type) 或 (None, None)"""
+    for name, info in FOODS.items():
+        if info["id"] == item_id:
+            return name, "food"
+    for name, info in ACCESSORIES.items():
+        if info["id"] == item_id:
+            return name, "accessory"
+    return None, None# ========== 好感度等级经验需求 ==========
 AFFECTION_LEVELS = {
     1: 0,
     2: 50,
@@ -860,8 +870,94 @@ def do_work(user_id: str) -> dict:
         "success": True,
         "pet_name": get_display_name(pet),
         "stamina_after": pet.stamina,
-        "points_earned": 120,
+        "points_earned": random.randint(100, 200),
         "dropped_items": dropped_items,
+    }
+
+
+# ========== 偷窃技能：飞龙探云手 ==========
+STEAL_RECORD_FILE = DATA_DIR / "steal_records.json"
+
+
+def _load_steal_records() -> dict:
+    _ensure_data_dir()
+    if STEAL_RECORD_FILE.exists():
+        try:
+            with open(STEAL_RECORD_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_steal_records(data: dict):
+    _ensure_data_dir()
+    with open(STEAL_RECORD_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def do_steal(attacker_id: str, target_id: str) -> dict:
+    """飞龙探云手：每日一次，25%概率偷取对方食物或未装备配饰"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    records = _load_steal_records()
+
+    # 检查今日是否已使用
+    user_rec = records.get(attacker_id, {})
+    if user_rec.get("date") == today:
+        return {"success": False, "message": "今日已使用过飞龙探云手，明天再来~"}
+
+    # 获取双方宠物
+    a_pet = get_pet(attacker_id)
+    if a_pet is None:
+        return {"success": False, "message": "你还没有领养宠物"}
+    b_pet = get_pet(target_id)
+    if b_pet is None:
+        return {"success": False, "message": "对方还没有领养宠物"}
+
+    # 记录使用
+    records[attacker_id] = {"date": today}
+    _save_steal_records(records)
+
+    # 25%概率成功
+    if random.random() > 0.25:
+        return {
+            "success": True,
+            "stolen": False,
+            "message": "飞龙探云手失败了，什么都没偷到...",
+            "pet_name": get_display_name(a_pet),
+        }
+
+    # 构建对方可偷物品池
+    target_inv = get_inventory(target_id)
+    steal_pool = []
+
+    for food_name, count in target_inv.foods.items():
+        if count > 0:
+            steal_pool.append(("food", food_name))
+
+    for acc_name, count in target_inv.accessories.items():
+        if count > 0 and acc_name != b_pet.accessory:
+            steal_pool.append(("accessory", acc_name))
+
+    if not steal_pool:
+        return {
+            "success": True,
+            "stolen": False,
+            "message": "对方背包空空如也，什么都偷不到~",
+            "pet_name": get_display_name(a_pet),
+        }
+
+    # 随机偷一个
+    item_type, item_name = random.choice(steal_pool)
+    remove_item(target_id, item_type, item_name)
+    add_item(attacker_id, item_type, item_name)
+
+    return {
+        "success": True,
+        "stolen": True,
+        "item_name": item_name,
+        "pet_name": get_display_name(a_pet),
+        "target_pet_name": get_display_name(b_pet),
     }
 
 

@@ -29,7 +29,7 @@ from .pet_data import (
     equip_accessory, unequip_accessory,
     do_walk, do_pat, do_feed, do_pk,
     refresh_stamina_if_needed,
-    do_work,
+    do_work, do_steal, get_item_by_id,
 )
 
 # 宠物图片目录
@@ -663,10 +663,19 @@ async def handle_buy(matcher: Matcher, event: MessageEvent, args: Message = Comm
     if count < 1:
         count = 1
 
-    # 查找商品及价格
+    # 查找商品及价格（支持编号或名称）
     item_type = None
     price = 0
-    if item_name in FOODS:
+    # 先尝试编号匹配
+    resolved_name, resolved_type = get_item_by_id(item_name)
+    if resolved_name:
+        item_name = resolved_name
+        item_type = resolved_type
+        if item_type == "food":
+            price = FOODS[item_name]["price"]
+        else:
+            price = ACCESSORIES[item_name]["price"]
+    elif item_name in FOODS:
         item_type = "food"
         price = FOODS[item_name]["price"]
     elif item_name in ACCESSORIES:
@@ -803,6 +812,11 @@ async def handle_sell(matcher: Matcher, event: MessageEvent, args: Message = Com
 
     inv = get_inventory(user_id)
 
+    # 支持编号匹配
+    resolved_name, _ = get_item_by_id(item_name)
+    if resolved_name:
+        item_name = resolved_name
+
     # 查找物品和价格
     sell_price = 0
     item_type = ""
@@ -886,6 +900,71 @@ async def handle_work(matcher: Matcher, event: MessageEvent):
     msg += f"体力: {result['stamina_after']}"
     if result["dropped_items"]:
         msg += f"\n🎁 额外获得: {'、'.join(result['dropped_items'])}"
+
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(msg)
+    ]))
+
+
+# ========== 飞龙探云手（偷窃技能）指令 ==========
+pet_steal_cmd = on_command("飞龙探云手", aliases={"宠物偷窃"}, priority=5, block=True)
+
+
+@pet_steal_cmd.handle()
+async def handle_steal(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()):
+    """飞龙探云手：每日一次，25%概率偷取对方物品"""
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("飞龙探云手仅在群聊可用")
+        ]))
+        return
+
+    if not is_points_enabled(str(event.group_id)):
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("本群积分系统已关闭")
+        ]))
+        return
+
+    user_id = str(event.user_id)
+
+    # 解析@目标
+    target_id = None
+    for seg in args:
+        if seg.type == "at":
+            target_id = seg.data.get("qq")
+            break
+
+    if not target_id:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("请使用「飞龙探云手 @某人」格式")
+        ]))
+        return
+
+    target_id = str(target_id)
+    if target_id == user_id:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("不能对自己使用飞龙探云手")
+        ]))
+        return
+
+    result = do_steal(user_id, target_id)
+
+    if not result["success"]:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(result["message"])
+        ]))
+        return
+
+    if result["stolen"]:
+        msg = f"🤫 {result['pet_name']} 使出飞龙探云手！\n成功从 {result['target_pet_name']} 那里偷到了「{result['item_name']}」！"
+    else:
+        msg = f"🤫 {result['pet_name']} 使出飞龙探云手！\n{result['message']}"
 
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),

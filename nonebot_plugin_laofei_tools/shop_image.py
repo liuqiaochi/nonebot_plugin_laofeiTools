@@ -152,11 +152,14 @@ def generate_shop_image() -> str:
                 img.paste(icon, (icon_x, icon_y), icon)
 
             # 名称
-            name_bbox = draw.textbbox((0, 0), name, font=font_name)
+            # 名称（含编号）
+            item_id = info.get("id", "")
+            display_name = f"[{item_id}] {name}" if item_id else name
+            name_bbox = draw.textbbox((0, 0), display_name, font=font_name)
             name_w = name_bbox[2] - name_bbox[0]
             draw.text(
                 (x + (CARD_WIDTH - name_w) // 2, card_y + 10 + ICON_SIZE + 8),
-                name,
+                display_name,
                 fill=TEXT_COLOR,
                 font=font_name,
             )
