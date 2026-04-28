@@ -908,7 +908,7 @@ async def handle_work(matcher: Matcher, event: MessageEvent):
 
 
 # ========== 飞龙探云手（偷窃技能）指令 ==========
-pet_steal_cmd = on_command("飞龙探云手", aliases={"宠物偷窃"}, priority=5, block=True)
+pet_steal_cmd = on_command("飞龙探云手", aliases={"宠物偷窃", "我偷"}, priority=5, block=True)
 
 
 @pet_steal_cmd.handle()

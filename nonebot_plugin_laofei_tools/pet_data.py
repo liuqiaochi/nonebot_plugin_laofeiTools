@@ -78,24 +78,24 @@ PET_TYPES = {
 
 # ========== 食物定义 ==========
 FOODS = {
-    "橘子": {"price": 100, "image": "food-orange.png", "id": "f1"},
-    "汉堡": {"price": 100, "image": "food-hamburger.png", "id": "f2"},
-    "骨头": {"price": 100, "image": "food-bone.png", "id": "f3"},
-    "小鱼干": {"price": 100, "image": "food-fish.png", "id": "f4"},
-    "冰淇淋": {"price": 100, "image": "food-icecream.png", "id": "f5"},
-    "菠萝披萨": {"price": 100, "image": "food-pizza.png", "id": "f6"},
+    "橘子": {"price": 100, "image": "food-orange.png", "id": "1"},
+    "汉堡": {"price": 100, "image": "food-hamburger.png", "id": "2"},
+    "骨头": {"price": 100, "image": "food-bone.png", "id": "3"},
+    "小鱼干": {"price": 100, "image": "food-fish.png", "id": "4"},
+    "冰淇淋": {"price": 100, "image": "food-icecream.png", "id": "5"},
+    "菠萝披萨": {"price": 100, "image": "food-pizza.png", "id": "6"},
 }
 
 # ========== 配饰定义 ==========
 ACCESSORIES = {
-    "小刀": {"force": 10, "luck": 0, "stamina": 0, "price": 500, "special": None, "droppable": True, "image": "accessories-knife.png", "id": "a1"},
-    "短剑": {"force": 5, "luck": 5, "stamina": 0, "price": 500, "special": None, "droppable": True, "image": "accessories-stiletto.png", "id": "a2"},
-    "四叶草": {"force": 0, "luck": 20, "stamina": 0, "price": 1000, "special": None, "droppable": True, "image": "accessories-four-leafclover.png", "id": "a3"},
-    "草帽": {"force": 0, "luck": 0, "stamina": 0, "price": 1000, "special": "pat_bonus_10", "droppable": True, "image": "accessories-hat.png", "id": "a4"},
-    "滑板车": {"force": 0, "luck": 0, "stamina": 25, "price": 1000, "special": None, "droppable": True, "image": "accessories-scooter.png", "id": "a5"},
-    "彩虹戒指": {"force": 0, "luck": 50, "stamina": 0, "price": 2500, "special": None, "droppable": False, "image": "accessories-ring.png", "id": "a6"},
-    "青龙偃月刀": {"force": 30, "luck": 0, "stamina": 0, "price": 5000, "special": None, "droppable": False, "image": "accessories-dragonBlade.png", "id": "a7"},
-    "超人披风": {"force": 10, "luck": 10, "stamina": 20, "price": 6666, "special": "affection_1.2x", "droppable": False, "image": "accessories-cloak.png", "id": "a8"},
+    "小刀": {"force": 10, "luck": 0, "stamina": 0, "price": 500, "special": None, "droppable": True, "image": "accessories-knife.png", "id": "7"},
+    "短剑": {"force": 5, "luck": 5, "stamina": 0, "price": 500, "special": None, "droppable": True, "image": "accessories-stiletto.png", "id": "8"},
+    "四叶草": {"force": 0, "luck": 20, "stamina": 0, "price": 1000, "special": None, "droppable": True, "image": "accessories-four-leafclover.png", "id": "9"},
+    "草帽": {"force": 0, "luck": 0, "stamina": 0, "price": 1000, "special": "pat_bonus_10", "droppable": True, "image": "accessories-hat.png", "id": "10"},
+    "滑板车": {"force": 0, "luck": 0, "stamina": 25, "price": 1000, "special": None, "droppable": True, "image": "accessories-scooter.png", "id": "11"},
+    "彩虹戒指": {"force": 0, "luck": 50, "stamina": 0, "price": 2500, "special": None, "droppable": False, "image": "accessories-ring.png", "id": "12"},
+    "青龙偃月刀": {"force": 30, "luck": 0, "stamina": 0, "price": 5000, "special": None, "droppable": False, "image": "accessories-dragonBlade.png", "id": "13"},
+    "超人披风": {"force": 10, "luck": 10, "stamina": 20, "price": 6666, "special": "affection_1.2x", "droppable": False, "image": "accessories-cloak.png", "id": "14"},
 }
 
 
