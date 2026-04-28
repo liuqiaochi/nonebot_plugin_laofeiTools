@@ -987,8 +987,12 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     a_luck = get_effective_luck(a_pet)
     b_force = get_effective_force(b_pet)
 
-    # 6. 计算胜率
-    win_rate = 50 + (a_force - b_force) * 2 + a_luck / 5 * 5
+    # 8. 计算胜率
+    # 幸运值采用递减比例：幸运越高，每点转换的胜率越低
+    # luck=10 → ~5%, luck=20 → ~8%, luck=50 → ~12%, luck=100 → ~15%
+    import math
+    luck_bonus = math.log(1 + a_luck) * 3.5 if a_luck > 0 else 0
+    win_rate = 50 + (a_force - b_force) * 2 + luck_bonus
     if a_pet.pet_type == "dog":  # 刀盾狗天赋
         win_rate += 5
     win_rate = max(5, min(95, win_rate))  # clamp to [5%, 95%]
