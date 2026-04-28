@@ -16,6 +16,7 @@ from loguru import logger
 DATA_DIR = Path("data/laofei_tools")
 PET_DATA_FILE = DATA_DIR / "pet_data.json"
 PET_INVENTORY_FILE = DATA_DIR / "pet_inventory.json"
+PET_PK_RECORD_FILE = DATA_DIR / "pet_pk_records.json"
 
 # ========== 宠物种类定义 ==========
 PET_TYPES = {
@@ -864,6 +865,75 @@ def do_work(user_id: str) -> dict:
     }
 
 
+# ========== PK 每日记录 ==========
+
+def _load_pk_records() -> dict:
+    """加载PK记录"""
+    _ensure_data_dir()
+    if PET_PK_RECORD_FILE.exists():
+        try:
+            with open(PET_PK_RECORD_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_pk_records(data: dict):
+    """保存PK记录"""
+    _ensure_data_dir()
+    with open(PET_PK_RECORD_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def check_pk_limit(attacker_id: str, defender_id: str) -> str:
+    """检查PK次数限制，返回空字符串表示可以PK，否则返回提示信息"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    data = _load_pk_records()
+
+    # 检查攻击方今天是否已主动PK过防守方
+    attacker_key = f"{attacker_id}_attack"
+    attacker_rec = data.get(attacker_key, {})
+    if attacker_rec.get("date") == today:
+        targets = attacker_rec.get("targets", [])
+        if defender_id in targets:
+            return "你今天已经主动PK过对方了"
+
+    # 检查防守方今天是否已被攻击方被动PK过
+    defender_key = f"{defender_id}_defend"
+    defender_rec = data.get(defender_key, {})
+    if defender_rec.get("date") == today:
+        attackers = defender_rec.get("attackers", [])
+        if attacker_id in attackers:
+            return "对方今天已经被你PK过了"
+
+    return ""
+
+
+def record_pk(attacker_id: str, defender_id: str):
+    """记录一次PK"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    data = _load_pk_records()
+
+    # 记录攻击方主动PK
+    attacker_key = f"{attacker_id}_attack"
+    attacker_rec = data.get(attacker_key, {})
+    if attacker_rec.get("date") != today:
+        attacker_rec = {"date": today, "targets": []}
+    attacker_rec["targets"].append(defender_id)
+    data[attacker_key] = attacker_rec
+
+    # 记录防守方被动PK
+    defender_key = f"{defender_id}_defend"
+    defender_rec = data.get(defender_key, {})
+    if defender_rec.get("date") != today:
+        defender_rec = {"date": today, "attackers": []}
+    defender_rec["attackers"].append(attacker_id)
+    data[defender_key] = defender_rec
+
+    _save_pk_records(data)
+
+
 # ========== PK 逻辑 ==========
 
 def do_pk(attacker_id: str, defender_id: str) -> dict:
@@ -890,15 +960,23 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     if b_pet is None:
         return {"success": False, "message": "对方还没有领养宠物"}
 
-    # 3. 检查攻击方体力
+    # 3. 检查每日PK次数限制（同一对手主动和被动各一次）
+    pk_limit_msg = check_pk_limit(attacker_id, defender_id)
+    if pk_limit_msg:
+        return {"success": False, "message": pk_limit_msg}
+
+    # 4. 检查攻击方体力
     if a_pet.stamina < 20:
         return {"success": False, "message": f"你的宠物体力不足（当前体力: {a_pet.stamina}，需要20）"}
 
-    # 4. 检查防守方体力
+    # 5. 检查防守方体力
     if b_pet.stamina < 10:
         return {"success": False, "message": f"对方宠物体力不足，无法PK"}
 
-    # 5. 扣除双方体力
+    # 6. 记录PK
+    record_pk(attacker_id, defender_id)
+
+    # 7. 扣除双方体力
     a_pet.stamina -= 20
     b_pet.stamina -= 10
     save_pet(attacker_id)
