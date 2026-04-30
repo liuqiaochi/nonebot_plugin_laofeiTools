@@ -27,7 +27,7 @@ DAILY_GAME_LIMITS = {
     "lottery": 10,
     "guess": 3,
     "rob": 10,
-    "rob_bank": 10,
+    "rob_bank": 1,  # 抢银行每天一次
 }
 
 

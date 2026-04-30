@@ -474,7 +474,7 @@ async def handle_rob_bank(matcher: Matcher, event: MessageEvent):
     if remaining <= 0:
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text("今日抢银行次数已用完（每日10次）")
+            MessageSegment.text("今日抢银行次数已用完（每日1次）")
         ]))
         return
     
@@ -492,34 +492,38 @@ async def handle_rob_bank(matcher: Matcher, event: MessageEvent):
     # 随机结果
     rand = random.random() * 100
     
-    if rand < 3:  # 3% 大成功
-        amount = random.randint(100, 300)
+    if rand < 10:  # 10% 大获成功
+        amount = random.randint(1000, 2000)
         user.points += amount
         save_user(user_id)
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
             MessageSegment.text(f"抢银行大获成功，获得了 {amount} 积分")
         ]))
-    elif rand < 23:  # 20% 成功
-        amount = random.randint(1, 100)
+    elif rand < 40:  # 30% 成功
+        amount = random.randint(100, 300)
         user.points += amount
         save_user(user_id)
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
             MessageSegment.text(f"抢银行成功，获得 {amount} 积分")
         ]))
-    elif rand < 70:  # 47% 不敢去
+    elif rand < 60:  # 20% 失败被抓没有损失
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text("思来想去，走到半路还是怕了回家了吧")
+            MessageSegment.text("抢银行失败，你被抓了，但侥幸逃脱，没有损失")
         ]))
-    else:  # 30% 失败
-        amount = random.randint(1, 50)
-        user.points -= amount
+    elif rand < 70:  # 10% 失败被抓扣50分
+        user.points -= 50
         save_user(user_id)
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text(f"抢银行失败，你被抓了，赔偿了 {amount} 积分")
+            MessageSegment.text("抢银行失败，你被抓了，赔偿了 50 积分")
+        ]))
+    else:  # 30% 不想去了
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("思来想去，走到半路还是怕了回家了吧")
         ]))
 
 
@@ -926,7 +930,7 @@ FEATURE_HELP = {
 	  2.取出银行:将积分从银行取出""",
     "抢银行": """【抢银行】
 指令：抢银行
-描述：抢银行，有几率获得积分，也可能被扣分""",
+描述：每天一次，有几率获得积分（大获成功1000-2000，成功100-300），也可能被抓（扣50分或没有损失）""",
     "抽奖": """【抽奖】
 指令：抽奖 积分
 描述：消耗积分抽奖，随机获取0-3倍积分
