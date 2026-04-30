@@ -197,16 +197,23 @@ def place_bet(user_id: str, number: int, points: int) -> dict:
     pool_data = _load_lottery_pool()
     current_round = pool_data["current_round"]
     
-    # 检查是否已经押注（一轮只能押注一次）
+    # 检查是否已经押注（如果已押注，允许修改）
     bets_data = _load_lottery_bets()
     round_bets = bets_data.get(str(current_round), [])
     
-    for bet in round_bets:
+    existing_bet = None
+    for i, bet in enumerate(round_bets):
         if bet["user_id"] == user_id:
-            return {
-                "success": False,
-                "message": f"本轮你已经押注过数字 {bet['number']}（{bet['points']}积分），每轮只能押注一次",
-            }
+            existing_bet = bet
+            bet_index = i
+            break
+    
+    # 如果已押注，先退还积分
+    if existing_bet:
+        user.points += existing_bet["points"]
+        pool_data["pool_amount"] -= existing_bet["points"]
+        round_bets.pop(bet_index)
+        logger.info(f"[幸运奖池] 用户 {user_id} 修改押注，退还 {existing_bet['points']} 积分")
     
     # 扣除用户积分
     user.points -= points
@@ -228,6 +235,12 @@ def place_bet(user_id: str, number: int, points: int) -> dict:
     _save_lottery_pool(pool_data)
     
     logger.info(f"[幸运奖池] 用户 {user_id} 押注数字 {number}，积分 {points}")
+    
+    if existing_bet:
+        return {
+            "success": True,
+            "message": f"押注修改成功！原押注数字 {existing_bet['number']}（{existing_bet['points']}积分）已退还，新押注数字 {number}（{points}积分）",
+        }
     
     return {
         "success": True,
