@@ -7,7 +7,8 @@
 - 群聊专用，默认关闭，超级用户可开启
 """
 
-from nonebot import get_driver, require
+from nonebot import get_driver, require, get_bot_list
+from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 from nonebot.plugin import PluginMetadata
 from nonebot.log import logger
 
@@ -20,6 +21,7 @@ from . import pet_commands
 from .config import Config, init_enabled_groups
 from .points_data import calculate_bank_interest, init_data
 from .pet_data import init_pet_data, refresh_all_stamina
+from .lottery_pool import draw_lottery, get_pool_status
 
 __version__ = "0.2.0"
 
@@ -40,9 +42,18 @@ __plugin_meta__ = PluginMetadata(
         取出银行 积分 - 取出银行
         抢银行 - 抢银行获取积分
         抽奖 积分 - 消耗积分抽奖
+        十抽 积分 - 消耗10次抽奖机会
         猜数字 积分 - 开始猜数字游戏
         我猜 数字 - 猜数字
         打劫 @某人 - 打劫他人积分
+        抽签/今日运气 - 每日抽签
+    
+    幸运奖池：
+        押注 [数字1-29] [积分10-500] - 押注数字
+        奖池 - 查看当前奖池状态
+        我的押注 - 查看我的押注记录
+        开奖历史 - 查看开奖历史记录
+        手动开奖 - 超级用户手动开奖（每小时自动开奖）
     
     宠物指令：
         我的宠物 - 查看宠物信息/领养宠物
@@ -56,10 +67,11 @@ __plugin_meta__ = PluginMetadata(
         宠物佩戴 配饰名 - 佩戴配饰
         宠物背包 - 查看道具背包
         宠物帮助 - 查看宠物帮助
-
+    
     说明：
         - 搜图功能仅在群聊可用
         - 默认关闭，需超级用户发送「开启lf搜图」开启
+        - 幸运奖池每小时整点自动开奖
     """,
     type="application",
     homepage="https://github.com/liuqiaochi/nonebot_plugin_laofeiTools",
@@ -110,3 +122,58 @@ async def daily_stamina_refresh():
     """每天0点刷新所有宠物体力"""
     refresh_all_stamina()
     logger.info("老肥工具箱: 宠物体力刷新完成")
+
+
+# ========== 定时任务：每小时整点幸运奖池开奖 ==========
+@scheduler.scheduled_job("cron", minute=0, id="lottery_draw")
+async def hourly_lottery_draw():
+    """每小时整点执行幸运奖池开奖"""
+    logger.info("老肥工具箱: 开始执行幸运奖池开奖")
+    
+    result = draw_lottery()
+    
+    if result["success"]:
+        # 构建中奖信息
+        winners_text = ""
+        if result["winners"]:
+            for winner in result["winners"]:
+                winners_text += f"用户 {winner['user_id']}：押注数字 {winner['bet_number']}，获得奖金 {winner['reward']} 积分\n"
+        else:
+            winners_text = "无人中奖，奖金滚入下一轮"
+        
+        log_msg = f"""幸运奖池第 {result['current_round']} 轮开奖结果
+中奖数字：{result['winning_number']}
+总奖池：{result['total_pool']} 积分
+中奖者：
+{winners_text}
+下一轮奖池基数：{result['next_round_base']} 积分"""
+        
+        logger.info(f"老肥工具箱: 幸运奖池第 {result['current_round']} 轮开奖完成")
+        logger.info(f"老肥工具箱: {log_msg}")
+        
+        # 尝试向所有bot的群聊发送开奖通知
+        try:
+            bots = get_bot_list()
+            for bot in bots:
+                if isinstance(bot, Bot):
+                    # 获取bot加入的群聊列表
+                    try:
+                        group_list = await bot.get_group_list()
+                        for group in group_list:
+                            group_id = group["group_id"]
+                            # 检查该群聊是否开启了积分系统
+                            from .config import is_points_enabled
+                            if is_points_enabled(str(group_id)):
+                                try:
+                                    await bot.send_group_msg(
+                                        group_id=group_id,
+                                        message=MessageSegment.text(f"🎰 幸运奖池开奖通知\n\n{log_msg}")
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"老肥工具箱: 向群聊 {group_id} 发送开奖通知失败 - {e}")
+                    except Exception as e:
+                        logger.warning(f"老肥工具箱: 获取群聊列表失败 - {e}")
+        except Exception as e:
+            logger.warning(f"老肥工具箱: 发送开奖通知失败 - {e}")
+    else:
+        logger.error(f"老肥工具箱: 幸运奖池开奖失败 - {result.get('message', '未知错误')}")

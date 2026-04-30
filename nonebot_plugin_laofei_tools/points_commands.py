@@ -45,6 +45,15 @@ from .points_data import (
     save_user,
     start_guess_game,
 )
+from .lottery_pool import (
+    place_bet,
+    get_pool_status,
+    get_user_bet,
+    get_lottery_history,
+    get_round_bets,
+    draw_lottery,
+    get_current_round,
+)
 from .config import is_points_enabled, enable_points, disable_points
 
 # 抽签图片目录
@@ -1853,4 +1862,247 @@ async def handle_newbie(matcher: Matcher, event: MessageEvent):
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
         MessageSegment.text(f"🎁 新手大礼包领取成功！\n获得 500 积分\n获得食物：{food_list} 各1个")
+    ]))
+
+
+# ========== 幸运奖池指令 ==========
+# 押注指令
+bet_cmd = on_command("押注", aliases={"bet", "下注"}, priority=5, block=True, force_whitespace=True)
+
+@bet_cmd.handle()
+async def handle_bet(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()):
+    """处理押注指令"""
+    # 检查群聊是否开启了积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
+    
+    # 解析参数
+    arg_str = args.extract_plain_text().strip()
+    if not arg_str:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("请输入押注数字和积分，例如：押注 8 500")
+        ]))
+        return
+    
+    # 解析数字和积分
+    parts = arg_str.split()
+    if len(parts) != 2:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("格式错误，请输入：押注 [数字1-29] [积分10-500]\n例如：押注 8 500")
+        ]))
+        return
+    
+    try:
+        number = int(parts[0])
+        points = int(parts[1])
+    except ValueError:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("数字和积分必须是有效数字")
+        ]))
+        return
+    
+    # 执行押注
+    user_id = str(event.user_id)
+    result = place_bet(user_id, number, points)
+    
+    if not result["success"]:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(result["message"])
+        ]))
+        return
+    
+    # 获取当前奖池状态
+    pool_status = get_pool_status()
+    
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(f"{result['message']}\n\n当前奖池：{pool_status['pool_amount']} 积分\n距离开奖还有：{pool_status['seconds_until_draw']} 秒")
+    ]))
+
+
+# 查看奖池指令
+pool_cmd = on_command("奖池", aliases={"pool", "幸运奖池"}, priority=5, block=True, force_whitespace=True)
+
+@pool_cmd.handle()
+async def handle_pool(matcher: Matcher, event: MessageEvent):
+    """处理查看奖池指令"""
+    # 检查群聊是否开启了积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
+    
+    # 获取奖池状态
+    pool_status = get_pool_status()
+    
+    # 获取当前轮回的押注记录
+    round_bets = get_round_bets()
+    
+    # 构建押注详情
+    bet_details = ""
+    if round_bets:
+        bet_details = "\n\n当前押注："
+        for bet in round_bets:
+            bet_details += f"\n用户 {bet['user_id']}：数字 {bet['number']}，积分 {bet['points']}"
+    
+    msg = f"""🎰 幸运奖池
+
+第 {pool_status['current_round']} 轮
+当前奖池：{pool_status['pool_amount']} 积分
+押注人数：{pool_status['bet_count']} 人
+押注总额：{pool_status['total_bets']} 积分
+下次开奖：{pool_status['next_draw_time']}
+（还有 {pool_status['seconds_until_draw']} 秒）{bet_details}
+
+押注格式：押注 [数字1-29] [积分10-500]
+例如：押注 8 500"""
+    
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(msg)
+    ]))
+
+
+# 查看我的押注指令
+my_bet_cmd = on_command("我的押注", aliases={"mybet", "我的下注"}, priority=5, block=True, force_whitespace=True)
+
+@my_bet_cmd.handle()
+async def handle_my_bet(matcher: Matcher, event: MessageEvent):
+    """处理查看我的押注指令"""
+    # 检查群聊是否开启了积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
+    
+    # 获取用户押注记录
+    user_id = str(event.user_id)
+    bet = get_user_bet(user_id)
+    
+    if not bet:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(f"你本轮还没有押注\n当前轮回：第 {get_current_round()} 轮")
+        ]))
+        return
+    
+    msg = f"""你的押注记录
+
+轮回：第 {get_current_round()} 轮
+押注数字：{bet['number']}
+押注积分：{bet['points']}
+押注时间：{bet['timestamp']}"""
+    
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(msg)
+    ]))
+
+
+# 查看开奖历史指令
+history_cmd = on_command("开奖历史", aliases={"history", "历史"}, priority=5, block=True, force_whitespace=True)
+
+@history_cmd.handle()
+async def handle_history(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()):
+    """处理查看开奖历史指令"""
+    # 检查群聊是否开启了积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
+    
+    # 解析参数（可选）
+    arg_str = args.extract_plain_text().strip()
+    limit = 5  # 默认显示5条
+    
+    if arg_str:
+        try:
+            limit = int(arg_str)
+            limit = max(1, min(20, limit))  # 限制1-20条
+        except ValueError:
+            pass
+    
+    # 获取开奖历史
+    history = get_lottery_history(limit)
+    
+    if not history:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("暂无开奖历史")
+        ]))
+        return
+    
+    # 构建历史记录消息
+    msg = "🎰 幸运奖池开奖历史\n\n"
+    
+    for record in history:
+        winners_text = ""
+        if record["winners"]:
+            for winner in record["winners"]:
+                winners_text += f"用户 {winner['user_id']}：{winner['reward']} 积分 "
+        else:
+            winners_text = "无人中奖"
+        
+        msg += f"第 {record['round']} 轮：中奖数字 {record['winning_number']}\n"
+        msg += f"奖池：{record['total_pool']} 积分，中奖者：{winners_text}\n"
+        msg += f"开奖时间：{record['draw_time']}\n\n"
+    
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(msg.strip())
+    ]))
+
+
+# 手动开奖指令（超级用户）
+draw_cmd = on_command("手动开奖", aliases={"draw", "开奖"}, permission=SUPERUSER, priority=5, block=True, force_whitespace=True)
+
+@draw_cmd.handle()
+async def handle_draw(matcher: Matcher, event: MessageEvent):
+    """处理手动开奖指令（超级用户）"""
+    # 执行开奖
+    result = draw_lottery()
+    
+    if not result["success"]:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(result["message"])
+        ]))
+        return
+    
+    # 构建中奖信息
+    winners_text = ""
+    if result["winners"]:
+        for winner in result["winners"]:
+            winners_text += f"\n用户 {winner['user_id']}：押注数字 {winner['bet_number']}，获得奖金 {winner['reward']} 积分"
+    else:
+        winners_text = "\n无人中奖，奖金滚入下一轮"
+    
+    msg = f"""🎰 第 {result['current_round']} 轮开奖结果
+
+中奖数字：{result['winning_number']}
+总奖池：{result['total_pool']} 积分{winners_text}
+
+下一轮奖池基数：{result['next_round_base']} 积分"""
+    
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(msg)
     ]))
