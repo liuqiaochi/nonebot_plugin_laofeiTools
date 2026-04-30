@@ -1,7 +1,7 @@
 """
 幸运奖池系统
 
-每小时整点开奖，从1-29的数字中随机一个
+每2小时整点开奖（8:00、10:00、12:00、14:00、16:00、18:00、20:00、22:00），从1-29的数字中随机一个
 用户可以在开奖前花积分押注数字
 开奖时从押注的总积分中，按中奖押注积分的比例分给中奖的人
 未中奖的积分自动累计到下一轮的基础奖池中
@@ -9,7 +9,7 @@
 
 import json
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -130,17 +130,32 @@ def get_pool_status() -> dict:
     # 计算当前轮回的总押注金额
     total_bets = sum(bet["points"] for bet in round_bets)
     
-    # 计算下一开奖时间（下一个整点）
+    # 计算下一开奖时间（8:00、10:00、12:00、14:00、16:00、18:00、20:00、22:00）
+    draw_hours = [8, 10, 12, 14, 16, 18, 20, 22]
+    
     now = datetime.now()
-    next_hour = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    today = now.date()
+    
+    # 找到下一个开奖时间
+    next_draw = None
+    for h in draw_hours:
+        draw_time = datetime.combine(today, time(h, 0, 0))
+        if now < draw_time:
+            next_draw = draw_time
+            break
+    
+    # 如果今天的开奖时间都过了，下次是明天 8:00
+    if next_draw is None:
+        tomorrow = today + timedelta(days=1)
+        next_draw = datetime.combine(tomorrow, time(8, 0, 0))
     
     return {
         "current_round": current_round,
         "pool_amount": pool_data["pool_amount"],
         "total_bets": total_bets,
         "bet_count": len(round_bets),
-        "next_draw_time": next_hour.strftime("%Y-%m-%d %H:%M:%S"),
-        "seconds_until_draw": int((next_hour - now).total_seconds()),
+        "next_draw_time": next_draw.strftime("%Y-%m-%d %H:%M:%S"),
+        "seconds_until_draw": int((next_draw - now).total_seconds()),
     }
 
 

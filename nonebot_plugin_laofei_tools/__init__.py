@@ -53,7 +53,7 @@ __plugin_meta__ = PluginMetadata(
         奖池 - 查看当前奖池状态
         我的押注 - 查看我的押注记录
         开奖历史 - 查看开奖历史记录
-        手动开奖 - 超级用户手动开奖（每小时自动开奖）
+        手动开奖 - 超级用户手动开奖（每2小时自动开奖）
     
     宠物指令：
         我的宠物 - 查看宠物信息/领养宠物
@@ -71,7 +71,7 @@ __plugin_meta__ = PluginMetadata(
     说明：
         - 搜图功能仅在群聊可用
         - 默认关闭，需超级用户发送「开启lf搜图」开启
-        - 幸运奖池每小时整点自动开奖
+        - 幸运奖池每2小时自动开奖（8:00、10:00、12:00、14:00、16:00、18:00、20:00、22:00）
     """,
     type="application",
     homepage="https://github.com/liuqiaochi/nonebot_plugin_laofeiTools",
@@ -124,8 +124,8 @@ async def daily_stamina_refresh():
     logger.info("老肥工具箱: 宠物体力刷新完成")
 
 
-# ========== 定时任务：每小时整点幸运奖池开奖 ==========
-@scheduler.scheduled_job("cron", minute=0, id="lottery_draw")
+# ========== 定时任务：每2小时整点幸运奖池开奖（8:00-22:00） ==========
+@scheduler.scheduled_job("cron", hour="8-22/2", minute=0, id="lottery_draw")
 async def hourly_lottery_draw():
     """每小时整点执行幸运奖池开奖"""
     logger.info("老肥工具箱: 开始执行幸运奖池开奖")
