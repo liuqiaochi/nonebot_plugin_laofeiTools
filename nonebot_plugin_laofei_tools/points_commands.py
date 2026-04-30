@@ -921,9 +921,9 @@ FEATURE_HELP = {
     "转账": """【转账】
 指令：转账 积分 @某人
 描述：将n积分转账给某人""",
-    "打劫": """【打劫】
-指令：打劫 @某人
-描述：打劫别人的积分""",
+#     "打劫": """【打劫】
+# 指令：打劫 @某人
+# 描述：打劫别人的积分""",
     "银行": """【银行】
 指令：存入银行 积分/取出银行 积分
 描述：1.存入银行:将积分存入银行，每天计算利息;
@@ -995,145 +995,145 @@ PK    抽签
 
 
 
-# ========== 打劫指令 ==========
-rob_cmd = on_command("打劫", aliases={"抢积分", "抢劫"}, priority=5, block=True)
-
-
-@rob_cmd.handle()
-async def handle_rob(
-    matcher: Matcher,
-    event: MessageEvent,
-    args: Message = CommandArg(),
-):
-    """处理打劫指令"""
-    user_id = str(event.user_id)
-    
+# ========== 打劫指令（已注释，暂时不用） ==========
+# rob_cmd = on_command("打劫", aliases={"抢积分", "抢劫"}, priority=5, block=True)
+# 
+# 
+# @rob_cmd.handle()
+# async def handle_rob(
+#     matcher: Matcher,
+#     event: MessageEvent,
+#     args: Message = CommandArg(),
+# ):
+#     """处理打劫指令"""
+#     user_id = str(event.user_id)
+#     
     # 检查是否在群聊
-    if isinstance(event, PrivateMessageEvent):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("打劫功能仅在群聊可用")
-        ]))
-        return
-    
+#     if isinstance(event, PrivateMessageEvent):
+#         await matcher.finish(Message([
+#             MessageSegment.reply(event.message_id),
+#             MessageSegment.text("打劫功能仅在群聊可用")
+#         ]))
+#         return
+#     
     # 检查群聊是否开启了积分系统
-    if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
-        return
-    
+#     if not is_points_enabled(str(event.group_id)):
+#         await matcher.finish(Message([
+#             MessageSegment.reply(event.message_id),
+#             MessageSegment.text("本群积分系统已关闭")
+#         ]))
+#         return
+#     
     # 检查是否@了某人
-    if not event.reply and not any(seg.type == "at" for seg in args):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("请使用「打劫 @某人」格式")
-        ]))
-        return
-    
+#     if not event.reply and not any(seg.type == "at" for seg in args):
+#         await matcher.finish(Message([
+#             MessageSegment.reply(event.message_id),
+#             MessageSegment.text("请使用「打劫 @某人」格式")
+#         ]))
+#         return
+#     
     # 获取被@的用户
-    target_id = None
-    for seg in args:
-        if seg.type == "at":
-            target_id = seg.data.get("qq")
-            break
-    
-    if not target_id and event.reply:
-        target_id = str(event.reply.sender.user_id)
-    
-    if not target_id:
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("请@要打劫的对象")
-        ]))
-        return
-    
-    if target_id == user_id:
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("不能打劫自己")
-        ]))
-        return
-    
-    user = get_user(user_id)
-    
+#     target_id = None
+#     for seg in args:
+#         if seg.type == "at":
+#             target_id = seg.data.get("qq")
+#             break
+#     
+#     if not target_id and event.reply:
+#         target_id = str(event.reply.sender.user_id)
+#     
+#     if not target_id:
+#         await matcher.finish(Message([
+#             MessageSegment.reply(event.message_id),
+#             MessageSegment.text("请@要打劫的对象")
+#         ]))
+#         return
+#     
+#     if target_id == user_id:
+#         await matcher.finish(Message([
+#             MessageSegment.reply(event.message_id),
+#             MessageSegment.text("不能打劫自己")
+#         ]))
+#         return
+#     
+#     user = get_user(user_id)
+#     
     # 检查每日次数
-    remaining = get_game_remaining(user_id, "rob")
-    if remaining <= 0:
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("今日打劫次数已用完（每日10次）")
-        ]))
-        return
-    
+#     remaining = get_game_remaining(user_id, "rob")
+#     if remaining <= 0:
+#         await matcher.finish(Message([
+#             MessageSegment.reply(event.message_id),
+#             MessageSegment.text("今日打劫次数已用完（每日10次）")
+#         ]))
+#         return
+#     
     # 检查是否有50积分
-    if user.points < 50:
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("积分不足50，无法打劫")
-        ]))
-        return
-    
-    target_user = get_user(target_id)
-    
+#     if user.points < 50:
+#         await matcher.finish(Message([
+#             MessageSegment.reply(event.message_id),
+#             MessageSegment.text("积分不足50，无法打劫")
+#         ]))
+#         return
+#     
+#     target_user = get_user(target_id)
+#     
     # 检查对方是否有积分账户（总积分和经验都为0说明没有账户）
-    total_points = target_user.points + target_user.bank_points
-    if total_points == 0 and target_user.exp == 0:
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("对方还没有积分账户，无法打劫")
-        ]))
-        return
-    
+#     total_points = target_user.points + target_user.bank_points
+#     if total_points == 0 and target_user.exp == 0:
+#         await matcher.finish(Message([
+#             MessageSegment.reply(event.message_id),
+#             MessageSegment.text("对方还没有积分账户，无法打劫")
+#         ]))
+#         return
+#     
     # 检查对方身上有没有积分
-    if target_user.points < 1:
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("对方身上没有积分，无法打劫")
-        ]))
-        return
-    
+#     if target_user.points < 1:
+#         await matcher.finish(Message([
+#             MessageSegment.reply(event.message_id),
+#             MessageSegment.text("对方身上没有积分，无法打劫")
+#         ]))
+#         return
+#     
     # 检查对方总积分是否不足50
-    if total_points < 50:
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("对方已经穷的吃不起饭了，你还打劫别人！")
-        ]))
-        return
-    
+#     if total_points < 50:
+#         await matcher.finish(Message([
+#             MessageSegment.reply(event.message_id),
+#             MessageSegment.text("对方已经穷的吃不起饭了，你还打劫别人！")
+#         ]))
+#         return
+#     
     # 消耗次数
-    consume_game_count(user_id, "rob")
-    
+#     consume_game_count(user_id, "rob")
+#     
     # 随机结果
-    rand = random.random() * 100
-    
-    if rand < 30:  # 30% 成功
-        max_rob = min(target_user.points, 50)
-        amount = random.randint(1, max_rob)
-        target_user.points -= amount
-        user.points += amount
-        save_user(user_id)
-        save_user(target_id)
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text(f"打劫成功，获得 {amount} 积分")
-        ]))
-    elif rand < 70:  # 40% 逃跑
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("打劫失败，对方跑掉了并对你竖了个中指")
-        ]))
-    else:  # 30% 失败扣分
-        amount = random.randint(1, 50)
-        user.points -= amount
-        target_user.points += amount
-        save_user(user_id)
-        save_user(target_id)
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text(f"打劫失败，被反杀，损失 {amount} 积分")
-        ]))
+#     rand = random.random() * 100
+#     
+#     if rand < 30:  # 30% 成功
+#         max_rob = min(target_user.points, 50)
+#         amount = random.randint(1, max_rob)
+#         target_user.points -= amount
+#         user.points += amount
+#         save_user(user_id)
+#         save_user(target_id)
+#         await matcher.finish(Message([
+#             MessageSegment.reply(event.message_id),
+#             MessageSegment.text(f"打劫成功，获得 {amount} 积分")
+#         ]))
+#     elif rand < 70:  # 40% 逃跑
+#         await matcher.finish(Message([
+#             MessageSegment.reply(event.message_id),
+#             MessageSegment.text("打劫失败，对方跑掉了并对你竖了个中指")
+#         ]))
+#     else:  # 30% 失败扣分
+#         amount = random.randint(1, 50)
+#         user.points -= amount
+#         target_user.points += amount
+#         save_user(user_id)
+#         save_user(target_id)
+#         await matcher.finish(Message([
+#             MessageSegment.reply(event.message_id),
+#             MessageSegment.text(f"打劫失败，被反杀，损失 {amount} 积分")
+#         ]))
 # ========== 发积分指令（超级用户隐藏指令） ==========
 give_points_cmd = on_command("发积分", permission=SUPERUSER, priority=5, block=True)
 
