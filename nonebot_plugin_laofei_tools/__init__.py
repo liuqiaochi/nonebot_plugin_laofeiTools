@@ -7,7 +7,7 @@
 - 群聊专用，默认关闭，超级用户可开启
 """
 
-from nonebot import get_driver, require, get_bot_list
+from nonebot import get_driver, require, get_bots
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 from nonebot.plugin import PluginMetadata
 from nonebot.log import logger
@@ -153,8 +153,8 @@ async def hourly_lottery_draw():
         
         # 尝试向所有bot的群聊发送开奖通知
         try:
-            bots = get_bot_list()
-            for bot in bots:
+            bots = get_bots()
+            for bot_id, bot in bots.items():
                 if isinstance(bot, Bot):
                     # 获取bot加入的群聊列表
                     try:
