@@ -1831,7 +1831,7 @@ Exp: {info['current_exp']} / {info['exp_needed']}
 #             )
 #         except Exception:
 #             pass
-        await matcher.finish()
+#         await matcher.finish()
 
 # ========== 新手大礼包指令 ==========
 
