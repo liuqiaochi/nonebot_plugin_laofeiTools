@@ -106,15 +106,15 @@ async def init_config():
     logger.info("老肥工具箱: 银行利息计算完成")
 
 
-# ========== 定时任务：每天0点计算银行利息 ==========
+# ========== 定时任务：每天0点计算银行利息（已注释）==========
 from nonebot_plugin_apscheduler import scheduler
 
 
-@scheduler.scheduled_job("cron", hour=0, minute=0, id="bank_interest")
-async def daily_bank_interest():
-    """每天0点计算银行利息"""
-    calculate_bank_interest()
-    logger.info("老肥工具箱: 每日银行利息计算完成")
+# @scheduler.scheduled_job("cron", hour=0, minute=0, id="bank_interest")
+# async def daily_bank_interest():
+#     """每天0点计算银行利息"""
+#     calculate_bank_interest()
+#     logger.info("老肥工具箱: 每日银行利息计算完成")
 
 
 @scheduler.scheduled_job("cron", hour=0, minute=0, id="pet_stamina_refresh")
@@ -124,56 +124,56 @@ async def daily_stamina_refresh():
     logger.info("老肥工具箱: 宠物体力刷新完成")
 
 
-# ========== 定时任务：每2小时整点幸运奖池开奖（8:00-22:00） ==========
-@scheduler.scheduled_job("cron", hour="8-22/2", minute=0, id="lottery_draw")
-async def hourly_lottery_draw():
-    """每小时整点执行幸运奖池开奖"""
-    logger.info("老肥工具箱: 开始执行幸运奖池开奖")
-    
-    result = draw_lottery()
-    
-    if result["success"]:
-        # 构建中奖信息
-        winners_text = ""
-        if result["winners"]:
-            for winner in result["winners"]:
-                winners_text += f"用户 {winner['user_id']}：押注数字 {winner['bet_number']}，获得奖金 {winner['reward']} 积分\n"
-        else:
-            winners_text = "无人中奖，奖金滚入下一轮"
-        
-        log_msg = f"""幸运奖池第 {result['current_round']} 轮开奖结果
-中奖数字：{result['winning_number']}
-总奖池：{result['total_pool']} 积分
-中奖者：
-{winners_text}
-下一轮奖池基数：{result['next_round_base']} 积分"""
-        
-        logger.info(f"老肥工具箱: 幸运奖池第 {result['current_round']} 轮开奖完成")
-        logger.info(f"老肥工具箱: {log_msg}")
-        
-        # 尝试向所有bot的群聊发送开奖通知
-        try:
-            bots = get_bots()
-            for bot_id, bot in bots.items():
-                if isinstance(bot, Bot):
-                    # 获取bot加入的群聊列表
-                    try:
-                        group_list = await bot.get_group_list()
-                        for group in group_list:
-                            group_id = group["group_id"]
-                            # 检查该群聊是否开启了积分系统
-                            from .config import is_points_enabled
-                            if is_points_enabled(str(group_id)):
-                                try:
-                                    await bot.send_group_msg(
-                                        group_id=group_id,
-                                        message=MessageSegment.text(f"🎰 幸运奖池开奖通知\n\n{log_msg}")
-                                    )
-                                except Exception as e:
-                                    logger.warning(f"老肥工具箱: 向群聊 {group_id} 发送开奖通知失败 - {e}")
-                    except Exception as e:
-                        logger.warning(f"老肥工具箱: 获取群聊列表失败 - {e}")
-        except Exception as e:
-            logger.warning(f"老肥工具箱: 发送开奖通知失败 - {e}")
-    else:
-        logger.error(f"老肥工具箱: 幸运奖池开奖失败 - {result.get('message', '未知错误')}")
+# ========== 定时任务：每2小时整点幸运奖池开奖（已注释，8:00-22:00）==========
+# @scheduler.scheduled_job("cron", hour="8-22/2", minute=0, id="lottery_draw")
+# async def hourly_lottery_draw():
+#     """每小时整点执行幸运奖池开奖"""
+#     logger.info("老肥工具箱: 开始执行幸运奖池开奖")
+#     
+#     result = draw_lottery()
+#     
+#     if result["success"]:
+#         # 构建中奖信息
+#         winners_text = ""
+#         if result["winners"]:
+#             for winner in result["winners"]:
+#                 winners_text += f"用户 {winner['user_id']}：押注数字 {winner['bet_number']}，获得奖金 {winner['reward']} 积分\n"
+#         else:
+#             winners_text = "无人中奖，奖金滚入下一轮"
+#         
+#         log_msg = f"""幸运奖池第 {result['current_round']} 轮开奖结果
+# 中奖数字：{result['winning_number']}
+# 总奖池：{result['total_pool']} 积分
+# 中奖者：
+# {winners_text}
+# 下一轮奖池基数：{result['next_round_base']} 积分"""
+#         
+#         logger.info(f"老肥工具箱: 幸运奖池第 {result['current_round']} 轮开奖完成")
+#         logger.info(f"老肥工具箱: {log_msg}")
+#         
+#         # 尝试向所有bot的群聊发送开奖通知
+#         try:
+#             bots = get_bots()
+#             for bot_id, bot in bots.items():
+#                 if isinstance(bot, Bot):
+#                     # 获取bot加入的群聊列表
+#                     try:
+#                         group_list = await bot.get_group_list()
+#                         for group in group_list:
+#                             group_id = group["group_id"]
+#                             # 检查该群聊是否开启了积分系统
+#                             from .config import is_points_enabled
+#                             if is_points_enabled(str(group_id)):
+#                                 try:
+#                                     await bot.send_group_msg(
+#                                         group_id=group_id,
+#                                         message=MessageSegment.text(f"🎰 幸运奖池开奖通知\n\n{log_msg}")
+#                                     )
+#                                 except Exception as e:
+#                                     logger.warning(f"老肥工具箱: 向群聊 {group_id} 发送开奖通知失败 - {e}")
+#                     except Exception as e:
+#                         logger.warning(f"老肥工具箱: 获取群聊列表失败 - {e}")
+#         except Exception as e:
+#             logger.warning(f"老肥工具箱: 发送开奖通知失败 - {e}")
+#     else:
+#         logger.error(f"老肥工具箱: 幸运奖池开奖失败 - {result.get('message', '未知错误')}")

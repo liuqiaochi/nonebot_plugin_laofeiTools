@@ -151,9 +151,47 @@ def _save_bank_data(data: dict):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
+def migrate_bank_points():
+    """迁移所有用户的银行积分到可用积分（一次性操作）"""
+    _ensure_data_dir()
+    
+    if not USER_DATA_FILE.exists():
+        return
+    
+    try:
+        with open(USER_DATA_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        migrated_count = 0
+        total_migrated = 0
+        
+        for user_id, user_data in data.items():
+            bank_points = user_data.get("bank_points", 0)
+            if bank_points > 0:
+                # 转移银行积分到可用积分
+                user_data["points"] = user_data.get("points", 0) + bank_points
+                user_data["bank_points"] = 0
+                migrated_count += 1
+                total_migrated += bank_points
+        
+        # 如果有迁移，保存数据
+        if migrated_count > 0:
+            with open(USER_DATA_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"[积分系统] 已迁移 {migrated_count} 位用户的银行积分，共 {total_migrated} 积分")
+            
+    except Exception as e:
+        logger.error(f"[积分系统] 迁移银行积分失败: {e}")
+
+
 def init_data():
     """初始化：从文件加载所有用户数据到缓存（插件启动时调用）"""
     _ensure_data_dir()
+    
+    # 先执行银行积分迁移
+    migrate_bank_points()
+    
     if USER_DATA_FILE.exists():
         try:
             with open(USER_DATA_FILE, "r", encoding="utf-8") as f:
