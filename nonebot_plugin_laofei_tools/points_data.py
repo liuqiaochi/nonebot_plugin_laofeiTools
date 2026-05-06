@@ -581,8 +581,14 @@ def draw_fortune(user_id: str) -> dict:
     if user_rec.get("date") == today and user_rec.get("fortune"):
         return {"success": True, "fortune": user_rec["fortune"]}
 
-    # 随机抽取签文
-    fortune = random.choice(FORTUNE_TEXTS)
+    # 按权重随机抽取签文
+    # 撞大运: 2%, 其他6个等级均分 98%
+    weights = [0.02]  # 撞大运 2%
+    remaining = 0.98 / 6  # 其他6个等级均分
+    weights.extend([remaining] * 6)
+    
+    # 按权重随机选择
+    fortune = random.choices(FORTUNE_TEXTS, weights=weights, k=1)[0]
 
     # 记录
     data[user_id] = {"date": today, "fortune": fortune}

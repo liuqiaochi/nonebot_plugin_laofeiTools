@@ -162,44 +162,44 @@ async def handle_sign(matcher: Matcher, event: MessageEvent):
 
 
 # ========== 抽签指令 ==========
-# fortune_cmd = on_command("抽签", aliases={"今日运气", "今日抽签", "今日气运"}, priority=5, block=True, force_whitespace=True)
-# 
-# 
-# @fortune_cmd.handle()
-# async def handle_fortune(matcher: Matcher, event: MessageEvent):
-#     """处理每日抽签指令"""
+fortune_cmd = on_command("抽签", aliases={"今日运气", "今日抽签", "今日气运"}, priority=5, block=True, force_whitespace=True)
+
+
+@fortune_cmd.handle()
+async def handle_fortune(matcher: Matcher, event: MessageEvent):
+    """处理每日抽签指令"""
     # 检查群聊是否开启了积分系统
-#     if isinstance(event, GroupMessageEvent):
-#         if not is_points_enabled(str(event.group_id)):
-#             await matcher.finish(Message([
-#                 MessageSegment.reply(event.message_id),
-#                 MessageSegment.text("本群积分系统已关闭")
-#             ]))
-#             return
-# 
-#     user_id = str(event.user_id)
-#     result = draw_fortune(user_id)
-# 
-#     if not result["success"]:
-#         await matcher.finish(Message([
-#             MessageSegment.reply(event.message_id),
-#             MessageSegment.text(result["message"])
-#         ]))
-#         return
-# 
-#     fortune = result["fortune"]
-#     text_msg = f"『{fortune['level']}』{fortune['text']}"
-# 
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
+    
+    user_id = str(event.user_id)
+    result = draw_fortune(user_id)
+    
+    if not result["success"]:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(result["message"])
+        ]))
+        return
+    
+    fortune = result["fortune"]
+    text_msg = f"『{fortune['level']}』{fortune['text']}"
+    
     # 构建消息：文本 + 图片
-#     msg_chain = [MessageSegment.reply(event.message_id), MessageSegment.text(text_msg)]
-# 
+    msg_chain = [MessageSegment.reply(event.message_id), MessageSegment.text(text_msg)]
+    
     # 查找对应签的图片
-#     image_path = FORTUNE_IMAGE_DIR / f"{fortune['level']}.png"
-#     if image_path.exists():
-#         msg_chain.append(MessageSegment.image(f"file://{image_path}"))
-# 
-#     await matcher.finish(Message(msg_chain))
-# 
+    image_path = FORTUNE_IMAGE_DIR / f"{fortune['level']}.png"
+    if image_path.exists():
+        msg_chain.append(MessageSegment.image(f"file://{image_path}"))
+    
+    await matcher.finish(Message(msg_chain))
+
 
 # ========== 积分查询指令 ==========
 points_cmd = on_command("积分", aliases={"查积分", "我的积分"}, priority=5, block=True, force_whitespace=True)

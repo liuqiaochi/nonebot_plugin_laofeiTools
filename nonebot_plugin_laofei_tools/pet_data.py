@@ -809,43 +809,31 @@ def do_feed(user_id: str, food_name: str) -> dict:
 
 def do_work(user_id: str) -> dict:
     """宠物打工逻辑
-
-    消耗30体力，获得120积分，间隔4小时。
+    
+    消耗30体力，获得120积分。
     10%概率获得随机食物，3%概率掉落普通配饰。
-
+    
     Args:
         user_id: 用户 ID
-
+    
     Returns:
         dict: 打工结果
     """
     # 1. 先刷新体力
     refresh_stamina_if_needed(user_id)
-
+    
     # 2. 获取宠物
     pet = get_pet(user_id)
     if pet is None:
         return {"success": False, "message": "你还没有领养宠物"}
-
-    # 3. 检查打工间隔（4小时）
-    now = datetime.now()
-    if pet.last_work_time:
-        last_work = datetime.strptime(pet.last_work_time, "%Y-%m-%d %H:%M:%S")
-        diff = (now - last_work).total_seconds()
-        if diff < 4 * 3600:
-            remaining_min = int((4 * 3600 - diff) / 60)
-            hours = remaining_min // 60
-            mins = remaining_min % 60
-            return {"success": False, "message": f"宠物还在休息中，{hours}小时{mins}分钟后可以继续打工"}
-
-    # 4. 检查体力
+    
+    # 3. 检查体力
     if pet.stamina < 30:
         return {"success": False, "message": f"宠物体力不足，无法打工（当前体力: {pet.stamina}，需要30）"}
 
-    # 5. 扣除体力，记录时间
+    # 5. 扣除体力
     pet.stamina -= 30
-    pet.last_work_time = now.strftime("%Y-%m-%d %H:%M:%S")
-
+    
     # 6. 掉落判定
     dropped_items = []
 
