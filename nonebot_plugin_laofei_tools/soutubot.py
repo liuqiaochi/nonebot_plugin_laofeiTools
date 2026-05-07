@@ -41,6 +41,7 @@ class SoutubotClient:
                 "Referer": BASE_URL,
             },
             timeout=httpx.Timeout(30.0, connect=10.0),
+            proxy=None,
         )
 
     async def _fetch_global_m(self) -> int:
