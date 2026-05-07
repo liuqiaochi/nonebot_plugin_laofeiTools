@@ -181,7 +181,7 @@ async def download_image(bot: Bot, image_url: str) -> Optional[bytes]:
     try:
         # 如果是 HTTP URL，直接下载
         if image_url.startswith(("http://", "https://")):
-            async with httpx.AsyncClient(timeout=30.0, proxy=None) as client:
+            async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
                 resp = await client.get(image_url)
                 resp.raise_for_status()
                 return resp.content
@@ -190,7 +190,7 @@ async def download_image(bot: Bot, image_url: str) -> Optional[bytes]:
         try:
             file_info = await bot.get_image(file=image_url)
             if file_info and file_info.get("url"):
-                async with httpx.AsyncClient(timeout=30.0, proxy=None) as client:
+                async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
                     resp = await client.get(file_info["url"])
                     resp.raise_for_status()
                     return resp.content
@@ -333,7 +333,7 @@ async def download_and_blur_image(image_url: str, blur_radius: int = 10) -> str:
     import base64
     from io import BytesIO
     
-    async with httpx.AsyncClient(timeout=30.0, proxy=None) as client:
+    async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
         resp = await client.get(image_url)
         resp.raise_for_status()
         image_data = resp.content
