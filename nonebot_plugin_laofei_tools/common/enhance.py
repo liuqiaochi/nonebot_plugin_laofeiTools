@@ -3,14 +3,16 @@
 
 指令：
     lg超分 - 引用图片进行高清化处理，让模糊图片变清晰
+
+使用 DeepAI API（torch-srgan 模型）进行超分辨率处理
 """
 
 import os
 import uuid
+from io import BytesIO
 from typing import Optional
 
-import cv2
-import numpy as np
+import httpx
 from nonebot import on_command
 from nonebot.adapters.onebot.v11 import (
     Bot,
@@ -21,8 +23,13 @@ from nonebot.adapters.onebot.v11 import (
 from nonebot.log import logger
 from nonebot.matcher import Matcher
 
+from ..config import DATA_DIR, Config
 from .utils import download_image
-from ..config import DATA_DIR
+
+plugin_config = Config.get_global_config()
+
+DEEPAI_API_KEY = plugin_config.longge_deepai_api_key
+DEEPAI_API_URL = "https://api.deepai.org/api/torch-srgan"
 
 # 临时文件目录
 ENHANCE_DIR = DATA_DIR / "enhance"
@@ -43,6 +50,10 @@ async def handle_enhance(
     event: MessageEvent,
 ):
     """处理图片超分指令"""
+
+    # 检查 API Key
+    if not DEEPAI_API_KEY:
+        await matcher.finish("超分功能未配置 API Key，请联系管理员")
 
     # 1. 检查是否引用了消息
     if not event.reply:
@@ -69,10 +80,10 @@ async def handle_enhance(
 
         logger.info(f"超分图片下载成功，大小: {len(image_data)} bytes")
 
-        # 5. 超分处理
+        # 5. 调用 DeepAI API 超分
         output_path = await enhance_image(image_data)
         if not output_path:
-            await matcher.finish("图片处理失败，请重试")
+            await matcher.finish("图片处理失败，可能是 API 限流，请稍后重试")
 
         # 6. 发送处理后的图片
         try:
@@ -96,60 +107,51 @@ async def handle_enhance(
 
 async def enhance_image(image_data: bytes) -> Optional[str]:
     """
-    使用 OpenCV 进行图像超分处理
-
-    流程：双边滤波去噪 → 细节增强(Edge Enhance) → USM锐化 → 对比度增强
+    调用 DeepAI API 进行超分辨率处理
 
     Args:
         image_data: 原始图片二进制数据
 
     Returns:
-        处理后图片的临时文件路径，失败返回 None
+        处理后图片的本地临时文件路径，失败返回 None
     """
     try:
-        # 将二进制数据转为 numpy 数组
-        nparr = np.frombuffer(image_data, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
+            resp = await client.post(
+                DEEPAI_API_URL,
+                headers={"api-key": DEEPAI_API_KEY},
+                files={"image": ("image.jpg", image_data, "image/jpeg")},
+            )
+            resp.raise_for_status()
+            result = resp.json()
 
-        if img is None:
-            logger.error("无法解码图片")
+        output_url = result.get("output_url")
+        if not output_url:
+            logger.error(f"DeepAI 返回无 output_url: {result}")
             return None
 
-        orig_h, orig_w = img.shape[:2]
-        logger.info(f"原始图片尺寸: {orig_w}x{orig_h}")
+        logger.info(f"DeepAI 超分成功，结果URL: {output_url}")
 
-        # Step 1: 双边滤波去噪（保留边缘的同时去除噪点）
-        denoised = cv2.bilateralFilter(img, d=9, sigmaColor=75, sigmaSpace=75)
-
-        # Step 2: 细节增强（cv2.detailEnhance 需要 opencv-contrib，用替代方案）
-        # 使用高斯模糊做低频层，与原图相减得到高频细节层，再叠加增强
-        gaussian = cv2.GaussianBlur(denoised, (0, 0), 5)
-        detail = cv2.addWeighted(denoised, 1.5, gaussian, -0.5, 0)
-
-        # Step 3: Unsharp Mask 锐化
-        blur = cv2.GaussianBlur(detail, (0, 0), 3)
-        sharpened = cv2.addWeighted(detail, 1.3, blur, -0.3, 0)
-
-        # Step 4: CLAHE 直方图均衡化增强对比度（转 LAB 空间只处理亮度通道）
-        lab = cv2.cvtColor(sharpened, cv2.COLOR_BGR2LAB)
-        l, a, b = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        l = clahe.apply(l)
-        enhanced = cv2.merge([l, a, b])
-        enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
-
-        # 确保临时目录存在
-        ENHANCE_DIR.mkdir(parents=True, exist_ok=True)
+        # 下载超分结果图
+        async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
+            resp = await client.get(output_url)
+            resp.raise_for_status()
+            enhanced_data = resp.content
 
         # 保存到临时文件
+        ENHANCE_DIR.mkdir(parents=True, exist_ok=True)
         filename = f"{uuid.uuid4().hex[:12]}.jpg"
         output_path = str((ENHANCE_DIR / filename).resolve())
-        cv2.imwrite(output_path, enhanced, [cv2.IMWRITE_JPEG_QUALITY, 95])
 
-        logger.info(f"超分图片已保存: {output_path}")
+        with open(output_path, "wb") as f:
+            f.write(enhanced_data)
 
+        logger.info(f"超分图片已保存: {output_path}，大小: {len(enhanced_data)} bytes")
         return output_path
 
+    except httpx.HTTPStatusError as e:
+        logger.error(f"DeepAI API 请求失败，状态码: {e.response.status_code}")
+        return None
     except Exception as e:
         logger.error(f"图片超分处理失败: {e}")
         return None

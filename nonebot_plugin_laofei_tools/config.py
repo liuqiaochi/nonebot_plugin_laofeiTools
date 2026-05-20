@@ -13,12 +13,15 @@ from pydantic import BaseModel
 
 class Config(BaseModel):
     """插件配置类"""
-    
+
     # 超级用户列表（开启/关闭功能的权限）
     longge_superusers: Set[str] = set()
 
     # 默认开启搜图的群聊（为空表示默认关闭）
     longge_search_enabled_groups: Set[str] = set()
+
+    # DeepAI API Key（图片超分功能）
+    longge_deepai_api_key: str = ""
 
 
 # 数据文件路径

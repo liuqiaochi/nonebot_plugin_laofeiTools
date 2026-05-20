@@ -90,7 +90,7 @@ pip install nonebot-plugin-longge-tools
 |------|------|
 | `lg超分` | 引用图片进行高清化处理，让模糊图片变清晰 |
 
-> 使用 OpenCV 图像增强流水线（双边滤波去噪 → 细节增强 → USM锐化 → CLAHE对比度增强）。
+> 使用 DeepAI API（torch-srgan 超分辨率模型）进行图片高清化，需配置 API Key。
 
 ### 管理指令（超级用户）
 
@@ -118,6 +118,11 @@ pip install nonebot-plugin-longge-tools
 ```env
 # 可选：配置默认开启搜图的群聊列表
 LONGGE_SEARCH_ENABLED_GROUPS=["123456789", "987654321"]
+
+# DeepAI API Key（图片超分功能必需）
+# 注册地址：https://deepai.org
+# 获取 Key：https://api.deepai.org/dashboard
+LONGGE_DEEPAI_API_KEY=your-api-key-here
 ```
 
 ## 数据存储
@@ -139,7 +144,6 @@ LONGGE_SEARCH_ENABLED_GROUPS=["123456789", "987654321"]
 - nonebot-plugin-apscheduler >= 0.3.0
 - httpx >= 0.24.0
 - pillow >= 10.0.0
-- opencv-python >= 4.8.0
 - pydantic >= 2.0.0
 
 ## 许可证
