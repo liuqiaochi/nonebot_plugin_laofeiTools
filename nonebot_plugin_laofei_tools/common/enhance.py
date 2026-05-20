@@ -26,7 +26,7 @@ from nonebot.matcher import Matcher
 from ..config import DATA_DIR
 from .utils import download_image
 
-DEEPAI_API_KEY = get_driver().config.get("longge_deepai_api_key", "")
+DEEPAI_API_KEY = getattr(get_driver().config, "longge_deepai_api_key", "")
 DEEPAI_API_URL = "https://api.deepai.org/api/torch-srgan"
 
 # 临时文件目录
