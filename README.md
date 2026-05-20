@@ -31,6 +31,20 @@ nonebot_plugin_laofei_tools/
 pip install nonebot-plugin-longge-tools
 ```
 
+### 图片超分功能（可选）
+
+lg超分需要安装 Real-ESRGAN 依赖，该依赖包含 PyTorch，体积较大。CPU-only 系统建议先安装轻量版 torch：
+
+```bash
+# CPU-only 系统先安装轻量 torch（推荐）
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+# 然后安装超分依赖
+pip install nonebot-plugin-longge-tools[enhance]
+```
+
+> 首次使用 lg超分 时会自动下载模型文件（~17MB），后续无需重复下载。
+
 ## 功能一览
 
 ### 积分系统
@@ -90,7 +104,7 @@ pip install nonebot-plugin-longge-tools
 |------|------|
 | `lg超分` | 引用图片进行高清化处理，让模糊图片变清晰 |
 
-> 使用 DeepAI API（torch-srgan 超分辨率模型）进行图片高清化，需配置 API Key。
+> 使用 Real-ESRGAN 本地推理（realesr-general-x4v3 轻量模型），2x 超分辨率，首次使用自动下载模型。
 
 ### 管理指令（超级用户）
 
@@ -118,11 +132,6 @@ pip install nonebot-plugin-longge-tools
 ```env
 # 可选：配置默认开启搜图的群聊列表
 LONGGE_SEARCH_ENABLED_GROUPS=["123456789", "987654321"]
-
-# DeepAI API Key（图片超分功能必需）
-# 注册地址：https://deepai.org
-# 获取 Key：https://api.deepai.org/dashboard
-LONGGE_DEEPAI_API_KEY=your-api-key-here
 ```
 
 ## 数据存储
