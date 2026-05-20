@@ -91,6 +91,10 @@ async def handle_lg_help(matcher: Matcher, event: MessageEvent):
 lg搜图 - 引用图片进行搜索
 搜图帮助 - 查看搜图帮助
 
+【图片工具】
+lg高分 - 引用图片进行高分辨率放大(默认2x)
+lg高分 3 - 引用图片进行3x放大(支持2/3/4)
+
 【宠物系统】
 我的宠物 - 查看/领养宠物
 宠物帮助 - 查看宠物帮助

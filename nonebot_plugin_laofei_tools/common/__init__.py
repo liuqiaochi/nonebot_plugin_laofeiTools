@@ -1,1 +1,1 @@
-from . import points_commands, restart
+from . import points_commands, restart, upscale
