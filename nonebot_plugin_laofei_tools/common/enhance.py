@@ -13,7 +13,7 @@ from io import BytesIO
 from typing import Optional
 
 import httpx
-from nonebot import on_command
+from nonebot import get_driver, on_command
 from nonebot.adapters.onebot.v11 import (
     Bot,
     Message,
@@ -23,12 +23,10 @@ from nonebot.adapters.onebot.v11 import (
 from nonebot.log import logger
 from nonebot.matcher import Matcher
 
-from ..config import DATA_DIR, Config
+from ..config import DATA_DIR
 from .utils import download_image
 
-plugin_config = Config.get_global_config()
-
-DEEPAI_API_KEY = plugin_config.longge_deepai_api_key
+DEEPAI_API_KEY = get_driver().config.get("longge_deepai_api_key", "")
 DEEPAI_API_URL = "https://api.deepai.org/api/torch-srgan"
 
 # 临时文件目录
