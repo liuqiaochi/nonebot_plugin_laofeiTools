@@ -411,7 +411,6 @@ def get_user_info(user_id: str) -> dict:
         "current_exp": current_exp,
         "exp_needed": exp_needed,
         "points": user.points,
-        "bank_points": user.bank_points,
         "total_sign_days": user.total_sign_days,
         "continuous_sign_days": user.continuous_sign_days,
         "signed_today": signed_today,

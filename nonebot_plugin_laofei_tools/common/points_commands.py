@@ -225,7 +225,6 @@ async def handle_points(matcher: Matcher, event: MessageEvent):
     msg = f"""[Lv.{info['level']}] {info['title']}
 Exp: {info['current_exp']} / {info['exp_needed']}
 现有积分: {info['points']}
-银行积分: {info['bank_points']}
 累计签到: {info['total_sign_days']} 天
 连续签到: {info['continuous_sign_days']} 天
 {sign_status}"""
