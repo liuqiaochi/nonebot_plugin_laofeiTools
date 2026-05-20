@@ -143,7 +143,7 @@ async def enhance_image(image_data: bytes) -> Optional[str]:
 
         # 保存到临时文件
         filename = f"{uuid.uuid4().hex[:12]}.jpg"
-        output_path = str(ENHANCE_DIR / filename)
+        output_path = str((ENHANCE_DIR / filename).resolve())
         cv2.imwrite(output_path, enhanced, [cv2.IMWRITE_JPEG_QUALITY, 95])
 
         logger.info(f"超分图片已保存: {output_path}")
