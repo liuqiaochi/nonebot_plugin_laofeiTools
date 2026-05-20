@@ -1,6 +1,6 @@
 # nonebot-plugin-longge-tools
 
-龙哥工具箱 - NoneBot2 插件，集成积分系统、宠物养成、以图搜图、图片超分等功能。
+龙哥工具箱 - NoneBot2 插件，集成积分系统、宠物养成、以图搜图等功能。
 
 ## 项目架构
 
@@ -13,7 +13,6 @@ nonebot_plugin_laofei_tools/
 │   ├── points_commands.py   # 积分系统指令（签到、抽签、积分查询、新手大礼包）
 │   ├── points_data.py       # 积分数据管理、银行利息、抽签逻辑
 │   ├── lottery_pool.py      # 幸运奖池系统
-│   ├── enhance.py           # 图片超分功能（lg超分）
 │   ├── restart.py           # 重启bot功能
 │   └── utils.py             # 公共工具函数（图片下载等）
 ├── pet/                     # 宠物模块
@@ -30,20 +29,6 @@ nonebot_plugin_laofei_tools/
 ```bash
 pip install nonebot-plugin-longge-tools
 ```
-
-### 图片超分功能（可选）
-
-lg超分需要安装 Real-ESRGAN 依赖，该依赖包含 PyTorch，体积较大。CPU-only 系统建议先安装轻量版 torch：
-
-```bash
-# CPU-only 系统先安装轻量 torch（推荐）
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-
-# 然后安装超分依赖
-pip install nonebot-plugin-longge-tools[enhance]
-```
-
-> 首次使用 lg超分 时会自动下载模型文件（~17MB），后续无需重复下载。
 
 ## 功能一览
 
@@ -98,14 +83,6 @@ pip install nonebot-plugin-longge-tools[enhance]
 
 > 搜图功能需超级用户在群聊中发送 `开启lg搜图` 开启。
 
-### 图片工具
-
-| 指令 | 说明 |
-|------|------|
-| `lg超分` | 引用图片进行高清化处理，让模糊图片变清晰 |
-
-> 使用 Real-ESRGAN 本地推理（realesr-general-x4v3 轻量模型），2x 超分辨率，首次使用自动下载模型。
-
 ### 管理指令（超级用户）
 
 | 指令 | 说明 |
@@ -144,7 +121,6 @@ LONGGE_SEARCH_ENABLED_GROUPS=["123456789", "987654321"]
 | `guess_games.json` | 猜数字游戏数据 |
 | `enabled_groups.json` | 已开启搜图的群聊 |
 | `points_disabled_groups.json` | 已关闭积分系统的群聊 |
-| `enhance/` | 图片超分临时文件（处理后自动清理） |
 
 ## 依赖
 

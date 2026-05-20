@@ -24,7 +24,6 @@ dependencies = [
     "nonebot-plugin-apscheduler>=0.3.0",
     "httpx>=0.24.0",
     "pillow>=10.0.0",
-    "numpy>=1.24.0",
     "pydantic>=2.0.0",
 ]
 
@@ -33,9 +32,6 @@ Homepage = "https://github.com/liuqiaochi/nonebot_plugin_longgeTools"
 Repository = "https://github.com/liuqiaochi/nonebot_plugin_longgeTools"
 
 [project.optional-dependencies]
-enhance = [
-    "realesrgan>=0.3.0",
-]
 dev = [
     "black",
     "ruff",
