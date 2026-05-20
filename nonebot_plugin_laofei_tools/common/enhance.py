@@ -42,14 +42,30 @@ def _get_upsampler():
     if _upsampler is not None:
         return _upsampler
 
+    # 修补 basicsr 与新版 torchvision 的兼容性：
+    # basicsr 依赖 torchvision.transforms.functional_tensor，该模块在 torchvision 0.15+ 中已移除，
+    # 对应函数已合并到 torchvision.transforms.functional。
+    # 必须在导入 basicsr 之前完成修补，否则 basicsr.data 模块加载时就会报错。
+    import sys
+    if "torchvision.transforms.functional_tensor" not in sys.modules:
+        try:
+            import torchvision.transforms.functional
+            sys.modules["torchvision.transforms.functional_tensor"] = (
+                torchvision.transforms.functional
+            )
+            logger.info("已修补 basicsr 与新版 torchvision 的兼容性")
+        except ImportError:
+            pass
+
     try:
         from basicsr.archs.arch_util import SRVGGNetCompact
         from realesrgan import RealESRGANer
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
-            "缺少 realesrgan 依赖，请安装：pip install realesrgan\n"
-            "CPU-only 系统建议先安装轻量 torch："
-            "pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu"
+            f"缺少超分依赖：{e}\n"
+            "请依次执行：\n"
+            "  pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu\n"
+            "  pip install realesrgan"
         )
 
     model = SRVGGNetCompact(
