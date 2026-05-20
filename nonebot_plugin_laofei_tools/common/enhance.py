@@ -13,8 +13,6 @@ import uuid
 from io import BytesIO
 from typing import Optional
 
-import numpy as np
-from PIL import Image
 from nonebot import on_command
 from nonebot.adapters.onebot.v11 import (
     Bot,
@@ -117,8 +115,6 @@ async def handle_enhance(
 
         # 5. 超分处理
         output_path = await enhance_image(image_data)
-        if not output_path:
-            await matcher.finish("图片处理失败，请检查日志")
 
         # 6. 发送处理后的图片
         try:
@@ -140,7 +136,7 @@ async def handle_enhance(
         await matcher.finish(f"处理失败：{str(e)}")
 
 
-async def enhance_image(image_data: bytes) -> Optional[str]:
+async def enhance_image(image_data: bytes) -> str:
     """
     使用 Real-ESRGAN 进行超分辨率处理
 
@@ -148,9 +144,16 @@ async def enhance_image(image_data: bytes) -> Optional[str]:
         image_data: 原始图片二进制数据
 
     Returns:
-        处理后图片的本地临时文件路径，失败返回 None
+        处理后图片的本地临时文件路径
+
+    Raises:
+        ImportError: 缺少依赖
+        RuntimeError: 处理失败
     """
     try:
+        import numpy as np
+        from PIL import Image
+
         # 将图片转为 numpy 数组
         img = Image.open(BytesIO(image_data)).convert("RGB")
         img_np = np.array(img)
@@ -182,7 +185,12 @@ async def enhance_image(image_data: bytes) -> Optional[str]:
 
     except ImportError as e:
         logger.error(f"超分依赖缺失: {e}")
-        return None
+        raise RuntimeError(
+            f"超分功能依赖未安装：{e}\n"
+            "请依次执行：\n"
+            "  pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu\n"
+            "  pip install realesrgan"
+        ) from e
     except Exception as e:
         logger.error(f"图片超分处理失败: {type(e).__name__}: {e}")
-        return None
+        raise RuntimeError(f"超分处理失败：{type(e).__name__}: {e}") from e
