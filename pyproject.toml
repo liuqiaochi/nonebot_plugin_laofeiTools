@@ -1,7 +1,7 @@
 [project]
-name = "nonebot-plugin-laofei-tools"
-version = "0.2.0"
-description = "老肥工具箱 - NoneBot 插件，支持以图搜图、积分系统等功能"
+name = "nonebot-plugin-longge-tools"
+version = "0.3.0"
+description = "龙哥工具箱 - NoneBot 插件，支持以图搜图、积分系统等功能"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -28,8 +28,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/liuqiaochi/nonebot_plugin_laofeiTools"
-Repository = "https://github.com/liuqiaochi/nonebot_plugin_laofeiTools"
+Homepage = "https://github.com/liuqiaochi/nonebot_plugin_longgeTools"
+Repository = "https://github.com/liuqiaochi/nonebot_plugin_longgeTools"
 
 [project.optional-dependencies]
 dev = [

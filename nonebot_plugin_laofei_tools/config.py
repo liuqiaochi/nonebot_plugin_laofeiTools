@@ -15,10 +15,10 @@ class Config(BaseModel):
     """插件配置类"""
     
     # 超级用户列表（开启/关闭功能的权限）
-    laofei_superusers: Set[str] = set()
-    
+    longge_superusers: Set[str] = set()
+
     # 默认开启搜图的群聊（为空表示默认关闭）
-    laofei_search_enabled_groups: Set[str] = set()
+    longge_search_enabled_groups: Set[str] = set()
 
 
 # 数据文件路径

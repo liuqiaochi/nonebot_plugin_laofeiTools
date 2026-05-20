@@ -1,5 +1,5 @@
 """
-老肥工具箱 - NoneBot 插件
+龙哥工具箱 - NoneBot 插件
 
 功能：
 - 以图搜图（soutubot.moe）
@@ -24,16 +24,16 @@ from .points_data import calculate_bank_interest, init_data
 from .pet_data import init_pet_data, refresh_all_stamina
 from .lottery_pool import draw_lottery, get_pool_status
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __plugin_meta__ = PluginMetadata(
-    name="老肥工具箱",
+    name="龙哥工具箱",
     description="实用工具合集，支持以图搜图、积分系统等功能",
     usage="""
     搜图指令：
-        开启lf搜图 - 超级用户开启群聊搜图功能
-        lf搜图 - 引用图片进行搜索（需先开启）
-        关闭lf搜图 - 超级用户关闭群聊搜图功能
+        开启lg搜图 - 超级用户开启群聊搜图功能
+        lg搜图 - 引用图片进行搜索（需先开启）
+        关闭lg搜图 - 超级用户关闭群聊搜图功能
     
     积分指令：
         签到/打卡 - 每日签到获取积分
@@ -71,11 +71,11 @@ __plugin_meta__ = PluginMetadata(
     
     说明：
         - 搜图功能仅在群聊可用
-        - 默认关闭，需超级用户发送「开启lf搜图」开启
+        - 默认关闭，需超级用户发送「开启lg搜图」开启
         - 幸运奖池每2小时自动开奖（8:00、10:00、12:00、14:00、16:00、18:00、20:00、22:00）
     """,
     type="application",
-    homepage="https://github.com/liuqiaochi/nonebot_plugin_laofeiTools",
+    homepage="https://github.com/liuqiaochi/nonebot_plugin_longgeTools",
     supported_adapters={"~onebot.v11"},
     config=Config,
 )
@@ -92,19 +92,19 @@ async def init_config():
 
     # 加载宠物系统数据
     init_pet_data()
-    logger.info("老肥工具箱: 宠物系统数据加载完成")
+    logger.info("龙哥工具箱: 宠物系统数据加载完成")
 
     config = driver.config
     
     # 从配置中读取默认开启的群聊
-    default_groups = getattr(config, "laofei_search_enabled_groups", set())
+    default_groups = getattr(config, "longge_search_enabled_groups", set())
     if default_groups:
         init_enabled_groups(set(str(g) for g in default_groups))
-        logger.info(f"老肥工具箱: 已加载 {len(default_groups)} 个默认开启的群聊")
+        logger.info(f"龙哥工具箱: 已加载 {len(default_groups)} 个默认开启的群聊")
     
     # 启动时计算一次银行利息（如果今天还没计算）
     calculate_bank_interest()
-    logger.info("老肥工具箱: 银行利息计算完成")
+    logger.info("龙哥工具箱: 银行利息计算完成")
 
 
 # ========== 定时任务：每天0点计算银行利息（已注释）==========
@@ -115,21 +115,21 @@ from nonebot_plugin_apscheduler import scheduler
 # async def daily_bank_interest():
 #     """每天0点计算银行利息"""
 #     calculate_bank_interest()
-#     logger.info("老肥工具箱: 每日银行利息计算完成")
+#     logger.info("龙哥工具箱: 每日银行利息计算完成")
 
 
 @scheduler.scheduled_job("cron", hour=0, minute=0, id="pet_stamina_refresh")
 async def daily_stamina_refresh():
     """每天0点刷新所有宠物体力"""
     refresh_all_stamina()
-    logger.info("老肥工具箱: 宠物体力刷新完成")
+    logger.info("龙哥工具箱: 宠物体力刷新完成")
 
 
 # ========== 定时任务：每2小时整点幸运奖池开奖（已注释，8:00-22:00）==========
 # @scheduler.scheduled_job("cron", hour="8-22/2", minute=0, id="lottery_draw")
 # async def hourly_lottery_draw():
 #     """每小时整点执行幸运奖池开奖"""
-#     logger.info("老肥工具箱: 开始执行幸运奖池开奖")
+#     logger.info("龙哥工具箱: 开始执行幸运奖池开奖")
 #     
 #     result = draw_lottery()
 #     
@@ -149,8 +149,8 @@ async def daily_stamina_refresh():
 # {winners_text}
 # 下一轮奖池基数：{result['next_round_base']} 积分"""
 #         
-#         logger.info(f"老肥工具箱: 幸运奖池第 {result['current_round']} 轮开奖完成")
-#         logger.info(f"老肥工具箱: {log_msg}")
+#         logger.info(f"龙哥工具箱: 幸运奖池第 {result['current_round']} 轮开奖完成")
+#         logger.info(f"龙哥工具箱: {log_msg}")
 #         
 #         # 尝试向所有bot的群聊发送开奖通知
 #         try:
@@ -171,10 +171,10 @@ async def daily_stamina_refresh():
 #                                         message=MessageSegment.text(f"🎰 幸运奖池开奖通知\n\n{log_msg}")
 #                                     )
 #                                 except Exception as e:
-#                                     logger.warning(f"老肥工具箱: 向群聊 {group_id} 发送开奖通知失败 - {e}")
+#                                     logger.warning(f"龙哥工具箱: 向群聊 {group_id} 发送开奖通知失败 - {e}")
 #                     except Exception as e:
-#                         logger.warning(f"老肥工具箱: 获取群聊列表失败 - {e}")
+#                         logger.warning(f"龙哥工具箱: 获取群聊列表失败 - {e}")
 #         except Exception as e:
-#             logger.warning(f"老肥工具箱: 发送开奖通知失败 - {e}")
+#             logger.warning(f"龙哥工具箱: 发送开奖通知失败 - {e}")
 #     else:
-#         logger.error(f"老肥工具箱: 幸运奖池开奖失败 - {result.get('message', '未知错误')}")
+#         logger.error(f"龙哥工具箱: 幸运奖池开奖失败 - {result.get('message', '未知错误')}")

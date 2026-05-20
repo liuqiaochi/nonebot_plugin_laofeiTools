@@ -1,6 +1,6 @@
-# nonebot-plugin-laofei-tools
+# nonebot-plugin-longge-tools
 
-老肥工具箱 - NoneBot2 插件
+龙哥工具箱 - NoneBot2 插件
 
 ## 功能
 
@@ -23,7 +23,7 @@
 ## 安装
 
 ```bash
-pip install nonebot-plugin-laofei-tools
+pip install nonebot-plugin-longge-tools
 ```
 
 ## 使用
@@ -95,7 +95,7 @@ pip install nonebot-plugin-laofei-tools
 
 ```env
 # 可选：配置默认开启搜图的群聊列表
-LAOFEI_SEARCH_ENABLED_GROUPS=["123456789", "987654321"]
+LONGGE_SEARCH_ENABLED_GROUPS=["123456789", "987654321"]
 ```
 
 ## 数据存储

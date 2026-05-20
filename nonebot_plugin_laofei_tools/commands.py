@@ -2,8 +2,8 @@
 NoneBot 指令处理
 
 指令：
-    lf搜图 - 引用图片进行以图搜图（群聊可用，需先开启）
-    开启lf搜图 - 超级用户开启群聊搜图功能
+    lg搜图 - 引用图片进行以图搜图（群聊可用，需先开启）
+    开启lg搜图 - 超级用户开启群聊搜图功能
 """
 
 from typing import List, Optional
@@ -28,7 +28,7 @@ from .soutubot import get_client
 
 # ========== 搜图指令 ==========
 search_image = on_command(
-    "lf搜图",
+    "lg搜图",
     priority=5,
     block=True,
     force_whitespace=True,
@@ -52,12 +52,12 @@ async def handle_search_image(
     # 2. 检查群聊是否开启了功能
     group_id = str(event.group_id)
     if not is_group_enabled(group_id):
-        await matcher.finish("搜图功能未开启，请联系超级用户发送「开启lf搜图」")
+        await matcher.finish("搜图功能未开启，请联系超级用户发送「开启lg搜图」")
         return
     
     # 3. 检查是否引用了消息
     if not event.reply:
-        await matcher.finish("请引用一张图片后发送「lf搜图」")
+        await matcher.finish("请引用一张图片后发送「lg搜图」")
         return
     
     # 4. 获取被引用消息中的图片
@@ -68,7 +68,7 @@ async def handle_search_image(
             break
     
     if not image_url:
-        await matcher.finish("引用的消息中没有图片，请引用一张图片后发送「lf搜图」")
+        await matcher.finish("引用的消息中没有图片，请引用一张图片后发送「lg搜图」")
         return
     
     # 5. 发送等待提示
@@ -99,7 +99,7 @@ async def handle_search_image(
 
 # ========== 开启功能指令（超级用户） ==========
 enable_search = on_command(
-    "开启lf搜图",
+    "开启lg搜图",
     permission=SUPERUSER,
     priority=5,
     block=True,
@@ -127,12 +127,12 @@ async def handle_enable_search(
         return
     
     enable_group(group_id)
-    await matcher.finish("✅ 已开启本群搜图功能，现在可以发送「lf搜图」进行搜索了")
+    await matcher.finish("✅ 已开启本群搜图功能，现在可以发送「lg搜图」进行搜索了")
 
 
 # ========== 关闭功能指令（超级用户） ==========
 disable_search = on_command(
-    "关闭lf搜图",
+    "关闭lg搜图",
     permission=SUPERUSER,
     priority=5,
     block=True,
@@ -246,7 +246,7 @@ async def send_forward_message(
         "type": "node",
         "data": {
             "name": "搜图Bot酱",
-            "uin": str(bot.self_id),
+            "uin": str(bot.selg_id),
             "content": header_msg,
         }
     })
@@ -291,7 +291,7 @@ async def send_forward_message(
             "type": "node",
             "data": {
                 "name": f"{source} - {similarity}%",
-                "uin": str(bot.self_id),
+                "uin": str(bot.selg_id),
                 "content": content,
             }
         })
@@ -369,15 +369,15 @@ async def handle_search_help(matcher: Matcher, event: MessageEvent):
     msg = """搜图功能帮助
 
 【搜图指令】
-lf搜图 - 引用图片进行搜索
+lg搜图 - 引用图片进行搜索
 
 【管理指令】
-开启lf搜图 - 开启搜图功能(超管)
-关闭lf搜图 - 关闭搜图功能(超管)
+开启lg搜图 - 开启搜图功能(超管)
+关闭lg搜图 - 关闭搜图功能(超管)
 
 【使用说明】
-1. 需要超级用户先发送「开启lf搜图」开启功能
-2. 引用一张图片后发送「lf搜图」进行搜索
+1. 需要超级用户先发送「开启lg搜图」开启功能
+2. 引用一张图片后发送「lg搜图」进行搜索
 3. 搜图功能仅在群聊可用"""
     await matcher.finish(msg)
 
@@ -412,3 +412,33 @@ async def handle_restart_notify(matcher: Matcher, bot: Bot, event: MessageEvent)
         MessageSegment.reply(event.message_id),
         MessageSegment.text(f"已向 {sent_count} 个群发送重启通知")
     ]))
+
+
+# ========== lg帮助指令 ==========
+lg_help_cmd = on_command("lg帮助", aliases={"龙哥帮助", "lg help"}, priority=5, block=True, force_whitespace=True)
+
+
+@lg_help_cmd.handle()
+async def handle_lg_help(matcher: Matcher, event: MessageEvent):
+    """处理lg帮助指令"""
+    msg = """龙哥工具箱 - 功能总览
+
+【积分系统】
+签到/打卡 - 每日签到获取积分
+积分/查积分 - 查看积分信息
+抽签/今日运气 - 每日抽签
+新手大礼包 - 领取新手大礼包
+
+【搜图功能】
+lg搜图 - 引用图片进行搜索
+搜图帮助 - 查看搜图帮助
+
+【宠物系统】
+我的宠物 - 查看/领养宠物
+宠物帮助 - 查看宠物帮助
+
+【管理指令 - 超级用户】
+开启lg搜图/关闭lg搜图 - 管理搜图功能
+开启积分/关闭积分 - 管理积分系统
+重启bot - 重启机器人"""
+    await matcher.finish(msg)
