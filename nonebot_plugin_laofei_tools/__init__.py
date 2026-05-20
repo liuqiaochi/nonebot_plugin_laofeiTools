@@ -18,6 +18,7 @@ require("nonebot_plugin_apscheduler")
 from . import commands
 from . import points_commands
 from . import pet_commands
+from . import restart
 from .config import Config, init_enabled_groups
 from .points_data import calculate_bank_interest, init_data
 from .pet_data import init_pet_data, refresh_all_stamina
