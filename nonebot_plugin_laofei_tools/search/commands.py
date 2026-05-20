@@ -319,20 +319,107 @@ search_help_cmd = on_command("搜图帮助", priority=5, block=True, force_white
 @search_help_cmd.handle()
 async def handle_search_help(matcher: Matcher, event: MessageEvent):
     """处理搜图帮助指令"""
-    msg = """搜图功能帮助
+    import base64
+    from io import BytesIO
+    from PIL import Image, ImageDraw, ImageFont
 
-【搜图指令】
-lg搜图 - 引用图片进行搜索
+    def _try_load_font(size: int):
+        font_paths = [
+            "/System/Library/Fonts/PingFang.ttc",
+            "/System/Library/Fonts/STHeiti Light.ttc",
+            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+            "C:/Windows/Fonts/msyh.ttc",
+            "C:/Windows/Fonts/simhei.ttf",
+        ]
+        for fp in font_paths:
+            try:
+                return ImageFont.truetype(fp, size)
+            except (OSError, IOError):
+                continue
+        return ImageFont.load_default()
 
-【管理指令】
-开启lg搜图 - 开启搜图功能(超管)
-关闭lg搜图 - 关闭搜图功能(超管)
+    font_title = _try_load_font(28)
+    font_section = _try_load_font(22)
+    font_cmd = _try_load_font(20)
+    font_desc = _try_load_font(14)
 
-【使用说明】
-1. 需要超级用户先发送「开启lg搜图」开启功能
-2. 引用一张图片后发送「lg搜图」进行搜索
-3. 搜图功能仅在群聊可用"""
-    await matcher.finish(msg)
+    # 颜色
+    BG = (45, 45, 55)
+    TITLE_C = (255, 200, 100)
+    SECTION_C = (100, 200, 255)
+    ADMIN_C = (255, 160, 100)
+    TEXT_C = (255, 255, 255)
+    DESC_C = (160, 160, 180)
+    DIVIDER_C = (80, 80, 95)
+    NUM_C = (120, 200, 120)
+
+    width = 520
+    padding = 25
+    header_h = 60
+    section_h = 35
+    item_h = 50
+    tip_gap = 15
+
+    # 内容
+    sections = [
+        ("搜图指令", [
+            ("lg搜图", "引用图片进行搜索"),
+        ]),
+        ("管理指令", [
+            ("开启lg搜图", "开启搜图功能（超管）"),
+            ("关闭lg搜图", "关闭搜图功能（超管）"),
+        ], True),
+    ]
+    tips = [
+        "1. 需要超级用户先发送「开启lg搜图」开启功能",
+        "2. 引用一张图片后发送「lg搜图」进行搜索",
+        "3. 搜图功能仅在群聊可用",
+    ]
+
+    # 计算高度
+    h = padding + header_h
+    for name, items, *rest in sections:
+        h += section_h + len(items) * item_h + tip_gap
+    h += tip_gap + len(tips) * 22 + padding
+
+    img = Image.new("RGB", (width, h), BG)
+    draw = ImageDraw.Draw(img)
+    y = padding
+
+    # 标题
+    title = "搜图功能帮助"
+    t_bbox = draw.textbbox((0, 0), title, font=font_title)
+    draw.text(((width - (t_bbox[2] - t_bbox[0])) // 2, y), title, fill=TITLE_C, font=font_title)
+    y += header_h
+
+    for section_name, items, *rest in sections:
+        is_admin = rest[0] if rest else False
+        sc = ADMIN_C if is_admin else SECTION_C
+        draw.line([(padding, y - 5), (width - padding, y - 5)], fill=DIVIDER_C, width=1)
+        draw.text((padding, y), f"【{section_name}】", fill=sc, font=font_section)
+        y += section_h
+        for cmd, desc in items:
+            draw.text((padding + 10, y), cmd, fill=TEXT_C, font=font_cmd)
+            draw.text((padding + 20, y + 25), desc, fill=DESC_C, font=font_desc)
+            y += item_h
+        y += tip_gap
+
+    # 使用说明
+    draw.line([(padding, y - 5), (width - padding, y - 5)], fill=DIVIDER_C, width=1)
+    draw.text((padding, y), "【使用说明】", fill=SECTION_C, font=font_section)
+    y += section_h
+    for tip in tips:
+        draw.text((padding + 10, y), tip, fill=NUM_C, font=font_desc)
+        y += 22
+
+    out = BytesIO()
+    img.save(out, format="PNG")
+    out.seek(0)
+    img_b64 = base64.b64encode(out.getvalue()).decode()
+    await matcher.finish(MessageSegment.image(f"base64://{img_b64}"))
 
 
 # ========== 重启通知指令（超级用户隐藏指令） ==========
