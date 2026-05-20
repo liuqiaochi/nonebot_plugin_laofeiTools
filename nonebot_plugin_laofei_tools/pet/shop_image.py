@@ -12,8 +12,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 from .pet_data import FOODS, ACCESSORIES
 
-# 图片目录
-IMAGE_DIR = Path(__file__).parent / "image"
+# 图片目录（插件根目录下的 image 文件夹）
+IMAGE_DIR = Path(__file__).parent.parent / "image"
 
 # 颜色定义
 BG_COLOR = (45, 45, 55)

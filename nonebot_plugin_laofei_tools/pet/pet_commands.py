@@ -32,8 +32,8 @@ from .pet_data import (
     do_work, do_steal, get_item_by_id,
 )
 
-# 宠物图片目录
-PET_IMAGE_DIR = Path(__file__).parent / "image"
+# 宠物图片目录（插件根目录下的 image 文件夹）
+PET_IMAGE_DIR = Path(__file__).parent.parent / "image"
 
 # 弃养确认缓存：user_id -> True（等待确认中）
 _abandon_confirm: dict = {}
