@@ -54,10 +54,10 @@ from .lottery_pool import (
     draw_lottery,
     get_current_round,
 )
-from .config import is_points_enabled, enable_points, disable_points
+from ..config import is_points_enabled, enable_points, disable_points
 
 # 抽签图片目录
-FORTUNE_IMAGE_DIR = Path(__file__).parent / "image"
+FORTUNE_IMAGE_DIR = Path(__file__).parent.parent / "image"
 
 
 # ========== 积分系统开关指令（超级用户） ==========
@@ -1867,7 +1867,7 @@ async def handle_newbie(matcher: Matcher, event: MessageEvent):
     save_user(user_id)
     
     # 发放每种食物各一个
-    from .pet_data import FOODS as PET_FOODS, add_item
+    from ..pet.pet_data import FOODS as PET_FOODS, add_item
     food_names = list(PET_FOODS.keys())
     for food in food_names:
         add_item(user_id, "food", food)

@@ -18,8 +18,8 @@ from nonebot.adapters.onebot.v11 import (
 from nonebot.matcher import Matcher
 from nonebot.params import CommandArg
 
-from .config import is_points_enabled
-from .points_data import get_user as get_points_user, save_user as save_points_user
+from ..config import is_points_enabled
+from ..common.points_data import get_user as get_points_user, save_user as save_points_user
 from .pet_data import (
     PET_TYPES, FOODS, ACCESSORIES, AFFECTION_LEVELS,
     get_pet, create_pet, save_pet, abandon_pet,

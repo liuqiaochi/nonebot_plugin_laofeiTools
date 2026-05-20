@@ -22,7 +22,7 @@ from nonebot.matcher import Matcher
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
 
-from .config import enable_group, is_group_enabled
+from ..config import enable_group, is_group_enabled
 from .soutubot import get_client
 
 
@@ -158,7 +158,7 @@ async def handle_disable_search(
         await matcher.finish("搜图功能已关闭")
         return
     
-    from .config import disable_group
+    from ..config import disable_group
     disable_group(group_id)
     await matcher.finish("❌ 已关闭本群搜图功能")
 
@@ -412,33 +412,3 @@ async def handle_restart_notify(matcher: Matcher, bot: Bot, event: MessageEvent)
         MessageSegment.reply(event.message_id),
         MessageSegment.text(f"已向 {sent_count} 个群发送重启通知")
     ]))
-
-
-# ========== lg帮助指令 ==========
-lg_help_cmd = on_command("lg帮助", aliases={"龙哥帮助", "lg help"}, priority=5, block=True, force_whitespace=True)
-
-
-@lg_help_cmd.handle()
-async def handle_lg_help(matcher: Matcher, event: MessageEvent):
-    """处理lg帮助指令"""
-    msg = """龙哥工具箱 - 功能总览
-
-【积分系统】
-签到/打卡 - 每日签到获取积分
-积分/查积分 - 查看积分信息
-抽签/今日运气 - 每日抽签
-新手大礼包 - 领取新手大礼包
-
-【搜图功能】
-lg搜图 - 引用图片进行搜索
-搜图帮助 - 查看搜图帮助
-
-【宠物系统】
-我的宠物 - 查看/领养宠物
-宠物帮助 - 查看宠物帮助
-
-【管理指令 - 超级用户】
-开启lg搜图/关闭lg搜图 - 管理搜图功能
-开启积分/关闭积分 - 管理积分系统
-重启bot - 重启机器人"""
-    await matcher.finish(msg)
