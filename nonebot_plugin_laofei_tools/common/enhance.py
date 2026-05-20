@@ -114,7 +114,7 @@ async def enhance_image(image_data: bytes) -> Optional[str]:
         处理后图片的本地临时文件路径，失败返回 None
     """
     try:
-        async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=120.0, trust_env=False) as client:
             resp = await client.post(
                 DEEPAI_API_URL,
                 headers={"api-key": DEEPAI_API_KEY},
@@ -131,7 +131,7 @@ async def enhance_image(image_data: bytes) -> Optional[str]:
         logger.info(f"DeepAI 超分成功，结果URL: {output_url}")
 
         # 下载超分结果图
-        async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=120.0, trust_env=False) as client:
             resp = await client.get(output_url)
             resp.raise_for_status()
             enhanced_data = resp.content
@@ -147,9 +147,12 @@ async def enhance_image(image_data: bytes) -> Optional[str]:
         logger.info(f"超分图片已保存: {output_path}，大小: {len(enhanced_data)} bytes")
         return output_path
 
+    except httpx.TimeoutException:
+        logger.error("DeepAI API 请求超时（120秒），服务器可能繁忙")
+        return None
     except httpx.HTTPStatusError as e:
         logger.error(f"DeepAI API 请求失败，状态码: {e.response.status_code}")
         return None
     except Exception as e:
-        logger.error(f"图片超分处理失败: {e}")
+        logger.error(f"图片超分处理失败: {type(e).__name__}: {e}")
         return None
