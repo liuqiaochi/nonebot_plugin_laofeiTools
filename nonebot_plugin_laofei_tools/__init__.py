@@ -107,9 +107,11 @@ def _try_load_font(size: int):
 
 def _generate_help_image() -> str:
     """生成 lg帮助 图片，返回 base64 PNG"""
-    # 检查豆包 API Key 是否配置
+    # 检查豆包 API Key 和模型是否配置
     config = driver.config
-    doubao_configured = bool(getattr(config, "doubao_api_key", ""))
+    doubao_configured = bool(
+        getattr(config, "doubao_api_key", "") and getattr(config, "doubao_model", "")
+    )
 
     font_title = _try_load_font(30)
     font_section = _try_load_font(22)
@@ -134,7 +136,7 @@ def _generate_help_image() -> str:
             ("@龙哥 + 内容", "与我对话，AI 智能回复"),
             ("@龙哥 + 引用消息", "对引用内容进行分析回复"),
         ] if doubao_configured else [
-            ("未配置 API Key", "请在 .env 中设置 DOUBAO_API_KEY"),
+            ("未配置 API Key/模型", "请在 .env 中设置 DOUBAO_API_KEY 和 DOUBAO_MODEL"),
         ]),
         ("搜图功能", [
             ("lg搜图", "引用图片进行搜索"),

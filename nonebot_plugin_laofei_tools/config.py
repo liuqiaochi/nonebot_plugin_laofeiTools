@@ -23,6 +23,9 @@ class Config(BaseModel):
     # 火山引擎豆包 API Key（必填，火山方舟控制台获取。未配置时 AI 功能不可用）
     doubao_api_key: str = ""
 
+    # 豆包模型名称（必填，支持端点 ID ep-xxx 或模型名，如 doubao-1-5-vision-pro-32k-250115）
+    doubao_model: str = ""
+
 
 # 数据文件路径
 DATA_DIR = Path("data/laofei_tools")

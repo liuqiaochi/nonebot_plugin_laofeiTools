@@ -32,8 +32,7 @@ from ..config import enable_ai, disable_ai, is_ai_enabled
 # 火山引擎方舟 API（OpenAI 兼容）
 _CHAT_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
 
-# 使用的模型（豆包 Pro 32K）
-_MODEL = "doubao-pro-32k-241215"
+# 模型 ID 通过配置获取（火山方舟推理接入点 ID）
 
 # 系统提示词
 _SYSTEM_PROMPT = (
@@ -47,16 +46,17 @@ _SYSTEM_PROMPT = (
 
 
 def _is_doubao_configured() -> bool:
-    """检查豆包 API Key 是否已在插件配置中设置"""
+    """检查豆包 API Key 和模型名称是否已在插件配置中设置"""
     driver = get_driver()
     key = getattr(driver.config, "doubao_api_key", "")
-    return bool(key and key.strip())
+    model = getattr(driver.config, "doubao_model", "")
+    return bool(key and key.strip() and model and model.strip())
 
 
-def _get_api_key() -> str:
-    """获取豆包 API Key"""
+def _get_endpoint_id() -> str:
+    """获取豆包模型名称（支持 ep-xxx 或直接模型名）"""
     driver = get_driver()
-    return getattr(driver.config, "doubao_api_key", "").strip()
+    return getattr(driver.config, "doubao_model", "").strip()
 
 
 # ========== AI 对话调用 ==========
@@ -67,9 +67,10 @@ async def _chat(prompt: str) -> str:
     import httpx
 
     api_key = _get_api_key()
+    endpoint_id = _get_endpoint_id()
 
     payload = {
-        "model": _MODEL,
+        "model": endpoint_id,
         "messages": [
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
@@ -119,8 +120,8 @@ async def handle_enable_ai(matcher: Matcher, event: MessageEvent):
     # 检查 API Key 是否已配置
     if not _is_doubao_configured():
         await matcher.finish(
-            "AI 功能未配置豆包 API Key，无法使用。\n"
-            "请在 .env 中设置 DOUBAO_API_KEY=你的Key"
+            "AI 功能未配置豆包 API Key 或模型名称，无法使用。\n"
+            "请在 .env 中设置 DOUBAO_API_KEY 和 DOUBAO_MODEL"
         )
 
     group_id = str(event.group_id)
