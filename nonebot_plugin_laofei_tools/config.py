@@ -20,7 +20,7 @@ class Config(BaseModel):
     # 默认开启搜图的群聊（为空表示默认关闭）
     longge_search_enabled_groups: Set[str] = set()
 
-    # 百度千帆 API Key（必填，格式：bce-v3/ALTAK-xxx/yyy。未配置时 AI 功能完全不可用）
+    # 百度千帆 API Key（必填，bce-v3 格式，直接作为 Bearer Token 调用 v2 接口。未配置时 AI 功能不可用）
     longge_qianfan_api_key: str = ""
 
 

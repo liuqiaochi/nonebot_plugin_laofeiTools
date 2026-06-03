@@ -6,9 +6,10 @@
 - 默认关闭，超管通过「开启ai」「关闭ai」管理群开关
 - 私聊完全禁用
 - 需在插件配置中设置 longge_qianfan_api_key 才能使用
+
+鉴权：bce-v3 格式 Key 直接用作 Bearer Token（v2 接口，兼容 OpenAI 协议）
 """
 
-import time
 from typing import Optional
 
 from nonebot import get_driver, on_command, on_message
@@ -27,11 +28,11 @@ from nonebot.rule import to_me
 
 from ..config import enable_ai, disable_ai, is_ai_enabled
 
-# Baidu Qianfan OAuth endpoint
-_TOKEN_URL = "https://aip.baidubce.com/oauth/2.0/token"
+# 千帆 v2 接口（OpenAI 兼容）
+_V2_CHAT_URL = "https://qianfan.baidubce.com/v2/chat/completions"
 
-# Chat endpoint for ERNIE-Speed (free tier)
-_CHAT_URL = "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/ernie_speed"
+# 使用的模型
+_MODEL = "ernie-speed-8k"
 
 # 系统提示词
 _SYSTEM_PROMPT = (
@@ -51,87 +52,46 @@ def _is_qianfan_configured() -> bool:
     return bool(key and key.strip())
 
 
-# ========== access_token 缓存 ==========
-_cached_token: Optional[str] = None
-_token_expires_at: float = 0.0
-
-
-def _parse_api_key(full_key: str) -> tuple:
-    """解析 bce-v3/ALTAK-xxx/yyy 格式的 key"""
-    key = full_key
-    # 去掉可能的 bce-v3/ 前缀
-    if key.startswith("bce-v3/"):
-        key = key[7:]
-    # 按 / 分割
-    parts = key.split("/")
-    if len(parts) >= 2:
-        return parts[0], parts[1]
-    return key, ""
-
-
-async def _fetch_access_token(api_key: str, secret_key: str) -> str:
-    """获取百度千帆 access_token"""
-    import httpx
-
-    async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
-        resp = await client.get(_TOKEN_URL, params={
-            "grant_type": "client_credentials",
-            "client_id": api_key,
-            "client_secret": secret_key,
-        })
-        data = resp.json()
-
-    if "access_token" not in data:
-        error = data.get("error_description", data.get("error", "unknown"))
-        raise RuntimeError(f"获取千帆 access_token 失败: {error}")
-
-    return data["access_token"]
-
-
-async def _get_access_token() -> str:
-    """获取缓存的 access_token，过期自动刷新"""
-    global _cached_token, _token_expires_at
-
-    if _cached_token and time.time() < _token_expires_at - 60:
-        return _cached_token
-
+def _get_api_key() -> str:
+    """获取千帆 API Key"""
     driver = get_driver()
-    full_key = getattr(driver.config, "longge_qianfan_api_key", "")
-    if not full_key:
-        raise RuntimeError("插件未配置千帆 API Key（LONGGE_QIANFAN_API_KEY）")
+    return getattr(driver.config, "longge_qianfan_api_key", "").strip()
 
-    api_key, secret_key = _parse_api_key(full_key)
-    logger.info("正在获取千帆 access_token...")
 
-    token = await _fetch_access_token(api_key, secret_key)
-    _cached_token = token
-    _token_expires_at = time.time() + 2592000  # 30 天
-    logger.info("千帆 access_token 已刷新")
-    return token
+# ========== AI 对话调用 ==========
 
 
 async def _chat(prompt: str) -> str:
-    """调用千帆 API 进行对话"""
+    """调用千帆 v2 接口（Bearer Token，OpenAI 兼容协议）"""
     import httpx
 
-    token = await _get_access_token()
-    url = f"{_CHAT_URL}?access_token={token}"
+    api_key = _get_api_key()
 
     payload = {
+        "model": _MODEL,
         "messages": [
+            {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ],
-        "system": _SYSTEM_PROMPT,
+        "stream": False,
     }
 
     async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
-        resp = await client.post(url, json=payload)
+        resp = await client.post(
+            _V2_CHAT_URL,
+            json=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            },
+        )
         data = resp.json()
 
-    if "error_code" in data:
-        raise RuntimeError(f"千帆 API 错误 [{data.get('error_code')}]: {data.get('error_msg', 'unknown')}")
+    if resp.status_code != 200 or "error" in data:
+        error_msg = data.get("error", {}).get("message", str(data))
+        raise RuntimeError(f"千帆 API 错误 [{resp.status_code}]: {error_msg}")
 
-    result = data.get("result", "")
+    result = data.get("choices", [{}])[0].get("message", {}).get("content", "")
     if not result:
         logger.warning(f"千帆 API 返回为空: {data}")
         return "抱歉，AI 没有返回内容，请稍后再试。"
