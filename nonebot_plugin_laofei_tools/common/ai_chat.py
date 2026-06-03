@@ -32,7 +32,7 @@ from ..config import enable_ai, disable_ai, is_ai_enabled
 _V2_CHAT_URL = "https://qianfan.baidubce.com/v2/chat/completions"
 
 # 使用的模型
-_MODEL = "ernie-speed-8k"
+_MODEL = "ernie-speed-pro-128k"
 
 # 系统提示词
 _SYSTEM_PROMPT = (
