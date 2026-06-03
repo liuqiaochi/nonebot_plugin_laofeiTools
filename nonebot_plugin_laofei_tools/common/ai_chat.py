@@ -33,8 +33,8 @@ from ..config import enable_ai, disable_ai, is_ai_enabled
 # 千帆 v2 接口（OpenAI 兼容）
 _V2_CHAT_URL = "https://qianfan.baidubce.com/v2/chat/completions"
 
-# 使用的模型
-_MODEL = "ernie-speed-pro-128k"
+# 使用的模型（DeepSeek V3.1 明确支持 web_search 联网检索）
+_MODEL = "deepseek-v3.1-250821"
 
 # 系统提示词
 _SYSTEM_PROMPT = (
@@ -80,6 +80,7 @@ async def _chat(prompt: str) -> str:
             "enable": True,
             "enable_citation": True,
             "enable_trace": True,
+            "search_mode": "auto",
             "search_number": 6,
             "reference_number": 3,
         },
