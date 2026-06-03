@@ -53,7 +53,13 @@ def _is_doubao_configured() -> bool:
     return bool(key and key.strip() and model and model.strip())
 
 
-def _get_endpoint_id() -> str:
+def _get_api_key() -> str:
+    """获取豆包 API Key"""
+    driver = get_driver()
+    return getattr(driver.config, "doubao_api_key", "").strip()
+
+
+def _get_model() -> str:
     """获取豆包模型名称（支持 ep-xxx 或直接模型名）"""
     driver = get_driver()
     return getattr(driver.config, "doubao_model", "").strip()
@@ -67,10 +73,10 @@ async def _chat(prompt: str) -> str:
     import httpx
 
     api_key = _get_api_key()
-    endpoint_id = _get_endpoint_id()
+    model = _get_model()
 
     payload = {
-        "model": endpoint_id,
+        "model": model,
         "messages": [
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
