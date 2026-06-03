@@ -107,6 +107,10 @@ def _try_load_font(size: int):
 
 def _generate_help_image() -> str:
     """生成 lg帮助 图片，返回 base64 PNG"""
+    # 检查千帆 API Key 是否配置
+    config = driver.config
+    qianfan_configured = bool(getattr(config, "longge_qianfan_api_key", ""))
+
     font_title = _try_load_font(30)
     font_section = _try_load_font(22)
     font_cmd = _try_load_font(20)
@@ -129,6 +133,8 @@ def _generate_help_image() -> str:
         ("AI 对话", [
             ("@龙哥 + 内容", "与我对话，AI 智能回复"),
             ("@龙哥 + 引用消息", "对引用内容进行分析回复"),
+        ] if qianfan_configured else [
+            ("未配置 API Key", "请在 .env 中设置 LONGGE_QIANFAN_API_KEY"),
         ]),
         ("搜图功能", [
             ("lg搜图", "引用图片进行搜索"),

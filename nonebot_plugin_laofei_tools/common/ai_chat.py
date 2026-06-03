@@ -5,6 +5,7 @@
 - @bot + 发送内容 / 引用消息 → AI 分析并回复
 - 默认关闭，超管通过「开启ai」「关闭ai」管理群开关
 - 私聊完全禁用
+- 需在插件配置中设置 longge_qianfan_api_key 才能使用
 """
 
 import time
@@ -39,6 +40,16 @@ _SYSTEM_PROMPT = (
     "用中文回复，不要过长，控制在 200 字以内。"
     "如果用户的问题需要较长回复，可以分段但要保持精炼。"
 )
+
+# ========== 配置检查 ==========
+
+
+def _is_qianfan_configured() -> bool:
+    """检查千帆 API Key 是否已在插件配置中设置"""
+    driver = get_driver()
+    key = getattr(driver.config, "longge_qianfan_api_key", "")
+    return bool(key and key.strip())
+
 
 # ========== access_token 缓存 ==========
 _cached_token: Optional[str] = None
@@ -87,7 +98,7 @@ async def _get_access_token() -> str:
     driver = get_driver()
     full_key = getattr(driver.config, "longge_qianfan_api_key", "")
     if not full_key:
-        raise RuntimeError("未配置百度千帆 API Key，请在 .env 中设置 LONGGE_QIANFAN_API_KEY")
+        raise RuntimeError("插件未配置千帆 API Key（LONGGE_QIANFAN_API_KEY）")
 
     api_key, secret_key = _parse_api_key(full_key)
     logger.info("正在获取千帆 access_token...")
@@ -144,6 +155,13 @@ async def handle_enable_ai(matcher: Matcher, event: MessageEvent):
     if isinstance(event, PrivateMessageEvent):
         await matcher.finish("AI 功能仅在群聊可用，请发送「开启群号」来开启（功能开发中）")
 
+    # 检查 API Key 是否已配置
+    if not _is_qianfan_configured():
+        await matcher.finish(
+            "AI 功能未配置千帆 API Key，无法使用。\n"
+            "请在 .env 中设置 LONGGE_QIANFAN_API_KEY=你的Key"
+        )
+
     group_id = str(event.group_id)
     if is_ai_enabled(group_id):
         await matcher.finish(f"本群 AI 功能已开启")
@@ -179,6 +197,10 @@ ai_chat_matcher = on_message(rule=to_me(), priority=99, block=False)
 
 @ai_chat_matcher.handle()
 async def handle_ai_chat(bot: Bot, event: MessageEvent, matcher: Matcher):
+    # API Key 未配置则完全静默不处理
+    if not _is_qianfan_configured():
+        return
+
     # 私聊完全禁用
     if isinstance(event, PrivateMessageEvent):
         return
