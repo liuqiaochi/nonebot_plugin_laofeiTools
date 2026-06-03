@@ -8,6 +8,7 @@
 - 需在插件配置中设置 longge_qianfan_api_key 才能使用
 
 鉴权：bce-v3 格式 Key 直接用作 Bearer Token（v2 接口，兼容 OpenAI 协议）
+联网搜索：已开启 web_search（检索6条，引用3条），支持实时信息查询
 """
 
 from typing import Optional
@@ -75,6 +76,13 @@ async def _chat(prompt: str) -> str:
             {"role": "user", "content": prompt},
         ],
         "stream": False,
+        "web_search": {
+            "enable": True,
+            "enable_citation": True,
+            "enable_trace": True,
+            "search_number": 6,
+            "reference_number": 3,
+        },
     }
 
     async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
