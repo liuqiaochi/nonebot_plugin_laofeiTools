@@ -5,11 +5,14 @@
 - @bot + 发送内容 / 引用消息 → AI 分析并回复
 - 默认关闭，超管通过「开启ai」「关闭ai」管理群开关
 - 私聊完全禁用
-- 需在插件配置中设置 doubao_api_key 才能使用
+- 需在插件配置中设置 doubao_api_key + doubao_model
+- 手动搜索层：DuckDuckGo 搜索 → 注入 prompt → 模型结合搜索结果回复
 
 鉴权：Bearer Token（兼容 OpenAI 协议）
 """
 
+import asyncio
+import concurrent.futures
 from typing import Optional
 
 from nonebot import get_driver, on_command, on_message
@@ -32,14 +35,14 @@ from ..config import enable_ai, disable_ai, is_ai_enabled
 # 火山引擎方舟 API（OpenAI 兼容）
 _CHAT_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
 
-# 模型 ID 通过配置获取（火山方舟推理接入点 ID）
-
 # 系统提示词
 _SYSTEM_PROMPT = (
     "你是一个 QQ 群聊中的 AI 助手，名字叫龙哥。"
     "你的回复应当简洁、友好、有帮助。"
     "用中文回复，不要过长，控制在 200 字以内。"
     "如果用户的问题需要较长回复，可以分段但要保持精炼。"
+    "你会收到联网搜索结果，请结合搜索结果回答用户问题。"
+    "如果搜索结果已经包含答案，直接引用；如果搜索结果不足，诚实说明。"
 )
 
 # ========== 配置检查 ==========
@@ -67,20 +70,61 @@ def _get_model() -> str:
 
 # ========== AI 对话调用 ==========
 
+# 搜索线程池（避免阻塞事件循环）
+_search_executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+
+
+def _do_web_search(query: str, max_results: int = 5) -> str:
+    """在独立线程中执行 DuckDuckGo 搜索，返回格式化结果"""
+    try:
+        from duckduckgo_search import DDGS
+        results = list(DDGS().text(query, max_results=max_results))
+        if not results:
+            return ""
+        lines = ["【联网搜索结果】"]
+        for i, r in enumerate(results, 1):
+            title = r.get("title", "")
+            body = r.get("body", "")
+            href = r.get("href", "")
+            lines.append(f"{i}. {title}")
+            lines.append(f"   {body[:200]}")
+            lines.append(f"   来源: {href}")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.warning(f"网页搜索失败: {e}")
+        return ""
+
+
+async def _search_web(prompt: str) -> str:
+    """异步搜索网页，不阻塞事件循环"""
+    loop = asyncio.get_running_loop()
+    # 用用户消息的前 80 个字符作为搜索词
+    query = prompt[:80].strip()
+    return await loop.run_in_executor(_search_executor, _do_web_search, query)
+
 
 async def _chat(prompt: str) -> str:
-    """调用豆包 API（Bearer Token，OpenAI 兼容协议）"""
+    """调用豆包 API，附带联网搜索结果"""
     import httpx
 
     api_key = _get_api_key()
     model = _get_model()
 
+    # 先搜索网页
+    search_context = await _search_web(prompt)
+
+    # 构建消息：system + 搜索结果 + 用户消息
+    messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+    if search_context:
+        messages.append({
+            "role": "user",
+            "content": search_context,
+        })
+    messages.append({"role": "user", "content": prompt})
+
     payload = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
+        "messages": messages,
         "stream": False,
     }
 
