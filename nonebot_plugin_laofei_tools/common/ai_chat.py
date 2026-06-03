@@ -24,6 +24,7 @@ from nonebot.adapters.onebot.v11 import (
 from nonebot.log import logger
 from nonebot.matcher import Matcher
 from nonebot.permission import SUPERUSER
+from nonebot.exception import FinishedException
 from nonebot.rule import to_me
 
 from ..config import enable_ai, disable_ai, is_ai_enabled
@@ -188,12 +189,14 @@ async def handle_ai_chat(bot: Bot, event: MessageEvent, matcher: Matcher):
             MessageSegment.reply(event.message_id),
             MessageSegment.text(reply),
         ]))
+    except FinishedException:
+        raise
     except Exception as e:
         logger.exception("千帆 AI 调用失败")
         error_msg = str(e)
         if len(error_msg) > 100:
             error_msg = error_msg[:100] + "..."
-        await matcher.finish(Message([
+        await matcher.send(Message([
             MessageSegment.reply(event.message_id),
             MessageSegment.text(f"AI 暂时无法回复：{error_msg}"),
         ]))
