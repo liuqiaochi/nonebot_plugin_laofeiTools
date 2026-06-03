@@ -20,8 +20,8 @@ class Config(BaseModel):
     # 默认开启搜图的群聊（为空表示默认关闭）
     longge_search_enabled_groups: Set[str] = set()
 
-    # 百度千帆 API Key（必填，bce-v3 格式，直接作为 Bearer Token 调用 v2 接口。未配置时 AI 功能不可用）
-    longge_qianfan_api_key: str = ""
+    # 火山引擎豆包 API Key（必填，火山方舟控制台获取。未配置时 AI 功能不可用）
+    doubao_api_key: str = ""
 
 
 # 数据文件路径
@@ -135,7 +135,7 @@ def init_enabled_groups(default_groups: Set[str]) -> None:
         _save_enabled_groups(_enabled_groups)
 
 
-# ========== AI 千帆功能开关 ==========
+# ========== AI 豆包功能开关 ==========
 
 AI_DATA_FILE = DATA_DIR / "ai_enabled_groups.json"
 

@@ -1,14 +1,13 @@
 """
-百度千帆 AI 聊天模块
+火山引擎豆包 AI 聊天模块
 
 功能：
 - @bot + 发送内容 / 引用消息 → AI 分析并回复
 - 默认关闭，超管通过「开启ai」「关闭ai」管理群开关
 - 私聊完全禁用
-- 需在插件配置中设置 longge_qianfan_api_key 才能使用
+- 需在插件配置中设置 doubao_api_key 才能使用
 
-鉴权：bce-v3 格式 Key 直接用作 Bearer Token（v2 接口，兼容 OpenAI 协议）
-联网搜索：已开启 web_search（检索6条，引用3条），支持实时信息查询
+鉴权：Bearer Token（兼容 OpenAI 协议）
 """
 
 from typing import Optional
@@ -30,11 +29,11 @@ from nonebot.rule import to_me
 
 from ..config import enable_ai, disable_ai, is_ai_enabled
 
-# 千帆 v2 接口（OpenAI 兼容）
-_V2_CHAT_URL = "https://qianfan.baidubce.com/v2/chat/completions"
+# 火山引擎方舟 API（OpenAI 兼容）
+_CHAT_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
 
-# 使用的模型（ERNIE-Speed 免费模型）
-_MODEL = "ernie-speed-pro-128k"
+# 使用的模型（豆包 Pro 32K）
+_MODEL = "doubao-pro-32k-241215"
 
 # 系统提示词
 _SYSTEM_PROMPT = (
@@ -47,24 +46,24 @@ _SYSTEM_PROMPT = (
 # ========== 配置检查 ==========
 
 
-def _is_qianfan_configured() -> bool:
-    """检查千帆 API Key 是否已在插件配置中设置"""
+def _is_doubao_configured() -> bool:
+    """检查豆包 API Key 是否已在插件配置中设置"""
     driver = get_driver()
-    key = getattr(driver.config, "longge_qianfan_api_key", "")
+    key = getattr(driver.config, "doubao_api_key", "")
     return bool(key and key.strip())
 
 
 def _get_api_key() -> str:
-    """获取千帆 API Key"""
+    """获取豆包 API Key"""
     driver = get_driver()
-    return getattr(driver.config, "longge_qianfan_api_key", "").strip()
+    return getattr(driver.config, "doubao_api_key", "").strip()
 
 
 # ========== AI 对话调用 ==========
 
 
 async def _chat(prompt: str) -> str:
-    """调用千帆 v2 接口（Bearer Token，OpenAI 兼容协议）"""
+    """调用豆包 API（Bearer Token，OpenAI 兼容协议）"""
     import httpx
 
     api_key = _get_api_key()
@@ -76,14 +75,11 @@ async def _chat(prompt: str) -> str:
             {"role": "user", "content": prompt},
         ],
         "stream": False,
-        "web_search": {
-            "enable": True,
-        },
     }
 
     async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
         resp = await client.post(
-            _V2_CHAT_URL,
+            _CHAT_URL,
             json=payload,
             headers={
                 "Content-Type": "application/json",
@@ -94,11 +90,11 @@ async def _chat(prompt: str) -> str:
 
     if resp.status_code != 200 or "error" in data:
         error_msg = data.get("error", {}).get("message", str(data))
-        raise RuntimeError(f"千帆 API 错误 [{resp.status_code}]: {error_msg}")
+        raise RuntimeError(f"豆包 API 错误 [{resp.status_code}]: {error_msg}")
 
     result = data.get("choices", [{}])[0].get("message", {}).get("content", "")
     if not result:
-        logger.warning(f"千帆 API 返回为空: {data}")
+        logger.warning(f"豆包 API 返回为空: {data}")
         return "抱歉，AI 没有返回内容，请稍后再试。"
 
     return result.strip()
@@ -121,10 +117,10 @@ async def handle_enable_ai(matcher: Matcher, event: MessageEvent):
         await matcher.finish("AI 功能仅在群聊可用，请发送「开启群号」来开启（功能开发中）")
 
     # 检查 API Key 是否已配置
-    if not _is_qianfan_configured():
+    if not _is_doubao_configured():
         await matcher.finish(
-            "AI 功能未配置千帆 API Key，无法使用。\n"
-            "请在 .env 中设置 LONGGE_QIANFAN_API_KEY=你的Key"
+            "AI 功能未配置豆包 API Key，无法使用。\n"
+            "请在 .env 中设置 DOUBAO_API_KEY=你的Key"
         )
 
     group_id = str(event.group_id)
@@ -163,7 +159,7 @@ ai_chat_matcher = on_message(rule=to_me(), priority=99, block=False)
 @ai_chat_matcher.handle()
 async def handle_ai_chat(bot: Bot, event: MessageEvent, matcher: Matcher):
     # API Key 未配置则完全静默不处理
-    if not _is_qianfan_configured():
+    if not _is_doubao_configured():
         return
 
     # 私聊完全禁用
@@ -196,7 +192,7 @@ async def handle_ai_chat(bot: Bot, event: MessageEvent, matcher: Matcher):
     except FinishedException:
         raise
     except Exception as e:
-        logger.exception("千帆 AI 调用失败")
+        logger.exception("豆包 AI 调用失败")
         error_msg = str(e)
         if len(error_msg) > 100:
             error_msg = error_msg[:100] + "..."
