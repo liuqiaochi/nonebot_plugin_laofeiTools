@@ -499,11 +499,12 @@ _ANNOUNCE_DIV = (60, 65, 75)
 
 # commit message 前缀 → 公告文案映射
 def _get_changelog() -> list:
-    """从 CHANGELOG.txt 读取变更列表（每行一条）
+    """从 CHANGELOG.txt 读取变更列表，自动合并缩进子行
 
-    搜索策略：
-    1. 优先从 bot 工作目录（Path.cwd()）找，并向上一级遍历
-    2. 兜底从当前文件路径向上遍历
+    CHANGELOG.txt 格式：
+        1.新增xxx功能（序号. 开头 = 新条目）
+           缩进行 = 附属于上一条的子行（如示例），合并为一条
+        # 或 // 开头 = 注释，忽略
     """
     changelog = None
 
@@ -544,13 +545,19 @@ def _get_changelog() -> list:
 
     items = []
     for line in changelog.read_text(encoding="utf-8").split("\n"):
-        line = line.strip()
-        if not line or line.startswith("#") or line.startswith("//"):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or stripped.startswith("//"):
             continue
-        # 去掉 "新增：" "修复：" 等前缀（CHANGELOG.txt 里已经是最终文案，前缀重复）
-        line = re.sub(r"^(新增|修复|优化)[：: ]?", "", line).strip()
-        if line:
-            items.append(line)
+
+        if line.startswith((" ", "\t")):
+            # 缩进行 → 附属于上一条
+            if items:
+                items[-1] = items[-1] + "\n" + stripped
+        else:
+            # 新条目：只去掉序号前缀 "1."，"新增/修复" 等描述性文字保留
+            content = re.sub(r"^\d+\.\s*", "", stripped).strip()
+            if content:
+                items.append(content)
 
     return items
 
@@ -593,11 +600,15 @@ def _generate_announce_image(items: list) -> str:
 
     item_lines = []
     for i, item in enumerate(items):
-        if font_item:
-            lines = _wrap_text(item, font_item, max_text_width)
-        else:
-            lines = [item]
-        item_lines.append((i + 1, lines))
+        # 拆分 "\n" 为子行，再分别按宽度换行
+        sub_lines = item.split("\n")
+        all_wrapped = []
+        for sub in sub_lines:
+            if font_item:
+                all_wrapped.extend(_wrap_text(sub, font_item, max_text_width))
+            else:
+                all_wrapped.append(sub)
+        item_lines.append((i + 1, all_wrapped))
 
     total_lines = sum(len(lines) for _, lines in item_lines)
     total_height = padding + title_h + 20 + total_lines * 28 + (len(item_lines) - 1) * item_gap + 50 + padding
@@ -620,8 +631,13 @@ def _generate_announce_image(items: list) -> str:
     for num, lines in item_lines:
         badge_text = str(num)
         draw.text((padding + 4, y), badge_text, fill=_ANNOUNCE_NUM, font=font_item)
-        for line in lines:
-            draw.text((padding + 30, y), line, fill=_ANNOUNCE_ITEM, font=font_item)
+        for j, line in enumerate(lines):
+            if j == 0:
+                # 主描述行
+                draw.text((padding + 30, y), line, fill=_ANNOUNCE_ITEM, font=font_item)
+            else:
+                # 子行（如"例如"）→ 缩进 + 浅色
+                draw.text((padding + 44, y), line, fill=_ANNOUNCE_DATE, font=font_item)
             y += 28
         y += item_gap
 
