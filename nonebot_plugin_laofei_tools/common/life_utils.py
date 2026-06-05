@@ -511,11 +511,47 @@ _COMMIT_PREFIX_MAP = {
 def _find_repo_root() -> Path:
     """从当前文件路径向上找 git 仓库根目录"""
     p = Path(__file__).resolve().parent
-    for _ in range(5):
+    for _ in range(6):
         if (p / ".git").exists():
             return p
         p = p.parent
     return Path.cwd()
+
+
+def _find_git() -> str:
+    """查找 git 可执行文件，找不到回退到直接读 .git 文件"""
+    import shutil
+    git = shutil.which("git")
+    if git:
+        return git
+    for p in ("/usr/bin/git", "/usr/local/bin/git", "/opt/homebrew/bin/git"):
+        if Path(p).is_file():
+            return p
+    return ""
+
+
+def _get_current_hash(repo_root: Path) -> str:
+    """获取当前 HEAD commit hash（优先用 git 命令，fallback 读文件）"""
+    git = _find_git()
+    if git:
+        try:
+            return subprocess.check_output(
+                [git, "rev-parse", "HEAD"],
+                cwd=str(repo_root), text=True, stderr=subprocess.DEVNULL,
+            ).strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+
+    # Fallback: 直接读 .git 文件
+    head_file = repo_root / ".git" / "HEAD"
+    if not head_file.exists():
+        return ""
+    head = head_file.read_text().strip()
+    if head.startswith("ref: "):
+        ref_path = repo_root / ".git" / head[5:]
+        if ref_path.exists():
+            return ref_path.read_text().strip()
+    return head
 
 
 def _get_changelog_from_git() -> list:
@@ -523,15 +559,12 @@ def _get_changelog_from_git() -> list:
     repo_root = _find_repo_root()
     hash_file = DATA_DIR / "last_announce_hash.txt"
 
-    # 获取当前 HEAD
-    try:
-        current_hash = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"],
-            cwd=str(repo_root), text=True, stderr=subprocess.DEVNULL,
-        ).strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        logger.warning("公告: 无法执行 git 命令")
+    current_hash = _get_current_hash(repo_root)
+    if not current_hash:
+        logger.warning("公告: 无法获取当前 commit hash")
         return []
+
+    git = _find_git()
 
     if not hash_file.exists():
         # 首次使用：不记录基线，取所有用户面向的 commit
@@ -543,20 +576,33 @@ def _get_changelog_from_git() -> list:
 
     from_hash = hash_file.read_text().strip() if hash_file.exists() else ""
 
-    try:
-        if from_hash:
-            output = subprocess.check_output(
-                ["git", "log", "--format=%s", f"{from_hash}..HEAD", "--"],
-                cwd=str(repo_root), text=True, stderr=subprocess.DEVNULL,
-            ).strip()
+    output = ""
+    if git:
+        try:
+            if from_hash:
+                output = subprocess.check_output(
+                    [git, "log", "--format=%s", f"{from_hash}..HEAD", "--"],
+                    cwd=str(repo_root), text=True, stderr=subprocess.DEVNULL,
+                ).strip()
+            else:
+                output = subprocess.check_output(
+                    [git, "log", "--format=%s", "-30", "--"],
+                    cwd=str(repo_root), text=True, stderr=subprocess.DEVNULL,
+                ).strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            logger.warning("公告: git log 执行失败，尝试回退文件方式")
+
+    if not output:
+        # 完全没有 git 命令可用：回退到读取 CHANGELOG.txt
+        changelog_file = repo_root / "CHANGELOG.txt"
+        if changelog_file.exists():
+            output = changelog_file.read_text().strip()
+            if not output:
+                hash_file.write_text(current_hash)
+                return []
         else:
-            output = subprocess.check_output(
-                ["git", "log", "--format=%s", "-30", "--"],
-                cwd=str(repo_root), text=True, stderr=subprocess.DEVNULL,
-            ).strip()
-    except subprocess.CalledProcessError:
-        logger.warning("公告: git log 执行失败")
-        return []
+            logger.warning("公告: git 命令不可用且未找到 CHANGELOG.txt，无法生成公告")
+            return []
 
     if not output:
         hash_file.write_text(current_hash)
@@ -567,11 +613,16 @@ def _get_changelog_from_git() -> list:
         line = line.strip()
         if not line:
             continue
+        if line.startswith("#") or line.startswith("//"):
+            continue
         # 跳过内部重构、样式、测试等非用户面向 commit
         if any(line.startswith(p) for p in ("refactor:", "chore:", "style:", "test:", "docs:", "build:", "ci:")):
             continue
-        # 转化为公告文案
+        # 转化文案（git commit 格式走映射，纯文本直用）
         text = _format_commit_line(line)
+        if not text and line:
+            # CHANGELOG.txt 的纯文本行，直接作为条目
+            text = line
         if text:
             items.append(text)
 
