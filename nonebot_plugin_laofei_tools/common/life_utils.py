@@ -499,16 +499,37 @@ _ANNOUNCE_DIV = (60, 65, 75)
 
 # commit message 前缀 → 公告文案映射
 def _get_changelog() -> list:
-    """从 CHANGELOG.txt 读取变更列表（每行一条）"""
-    # 从当前文件路径向上找仓库根目录
-    p = Path(__file__).resolve().parent
-    for _ in range(6):
-        changelog = p / "CHANGELOG.txt"
-        if changelog.exists():
+    """从 CHANGELOG.txt 读取变更列表（每行一条）
+
+    搜索策略：
+    1. 优先从 bot 工作目录（Path.cwd()）找，并向上一级遍历
+    2. 兜底从当前文件路径向上遍历
+    """
+    changelog = None
+
+    # 策略1：从工作目录找（NoneBot 运行时 cwd 通常是 bot 根目录）
+    p = Path.cwd()
+    for _ in range(8):
+        candidate = p / "CHANGELOG.txt"
+        if candidate.exists():
+            changelog = candidate
+            logger.debug(f"公告: 在工作目录中找到 CHANGELOG.txt: {candidate}")
             break
         p = p.parent
-    else:
-        logger.warning("公告: 未找到 CHANGELOG.txt")
+
+    # 策略2：从当前文件路径向上找
+    if changelog is None:
+        p = Path(__file__).resolve().parent
+        for _ in range(10):
+            candidate = p / "CHANGELOG.txt"
+            if candidate.exists():
+                changelog = candidate
+                logger.debug(f"公告: 在模块路径中找到 CHANGELOG.txt: {candidate}")
+                break
+            p = p.parent
+
+    if changelog is None:
+        logger.warning("公告: 未找到 CHANGELOG.txt（已搜索 cwd 和模块路径）")
         return []
 
     items = []
