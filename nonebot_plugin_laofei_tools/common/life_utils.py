@@ -508,30 +508,28 @@ def _get_changelog() -> list:
     """
     changelog = None
 
-    # 策略1：从工作目录找（NoneBot 运行时 cwd 通常是 bot 根目录）
-    p = Path.cwd()
-    for _ in range(8):
-        candidate = p / "CHANGELOG.txt"
-        if candidate.exists():
-            changelog = candidate
-            logger.debug(f"公告: 在工作目录中找到 CHANGELOG.txt: {candidate}")
-            break
-        p = p.parent
+    # 策略1：从插件包目录找（最可靠，随插件一起部署）
+    # life_utils.py 在 common/ 下，向上 2 层到 nonebot_plugin_laofei_tools/
+    plugin_dir = Path(__file__).resolve().parent.parent
+    candidate = plugin_dir / "CHANGELOG.txt"
+    if candidate.exists():
+        changelog = candidate
+        logger.debug(f"公告: 在插件包中找到 CHANGELOG.txt: {candidate}")
 
-    # 策略2：从当前文件路径向上找
+    # 策略2：从工作目录兜底（NoneBot 运行时 cwd 通常是 bot 根目录）
     if changelog is None:
-        p = Path(__file__).resolve().parent
-        for _ in range(10):
+        p = Path.cwd()
+        for _ in range(8):
             candidate = p / "CHANGELOG.txt"
             if candidate.exists():
                 changelog = candidate
-                logger.debug(f"公告: 在模块路径中找到 CHANGELOG.txt: {candidate}")
+                logger.debug(f"公告: 在工作目录中找到 CHANGELOG.txt: {candidate}")
                 break
             p = p.parent
 
     if changelog is None:
-        # 在 bot 工作目录自动创建 CHANGELOG.txt 模板
-        changelog = Path.cwd() / "CHANGELOG.txt"
+        # 在插件包目录自动创建 CHANGELOG.txt 模板
+        changelog = plugin_dir / "CHANGELOG.txt"
         changelog.write_text(
             "# CHANGELOG — 龙哥工具箱更新日志\n"
             "# 每行一条变更，格式：序号.描述（支持缩进子行如示例）\n"
