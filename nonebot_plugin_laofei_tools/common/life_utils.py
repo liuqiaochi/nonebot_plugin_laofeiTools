@@ -590,27 +590,59 @@ def _get_changelog_from_git() -> list:
 
 
 def _format_commit_line(line: str) -> str:
-    """将 git commit message 转为公告文案"""
+    """将 git commit message 转为简洁公告文案，只保留用户可感知的变更"""
+
+    # ---------- 1. 前缀匹配 ----------
     for prefix, label in _COMMIT_PREFIX_MAP.items():
-        if line.startswith(f"{prefix}: "):
-            msg = line[len(prefix) + 2:].strip().rstrip(".")
-            # 跳过 AI 相关 / 已被回滚功能的旧 commit
-            skip_keywords = [
-                "AI ", "千帆", "豆包", "duckduckgo", "DeepSeek",
-                "联网搜索", "access_token", "FinishedException",
-                "_get_api_key", "NameError",
-                "doubao_model", "模型名改为配置项",
-                "AI 引擎从百度", "百度千帆",
-                "ernie-speed", "deepseek",
-                "API Key 改为纯插件",
-                "Bearer Token", "OAuth",
-                "Real-ESRGAN", "DeepAI", "超分",
-                "basicsr", "torchvision", "get_global_config",
-                "pydantic Config",
-            ]
-            if any(kw in msg for kw in skip_keywords):
-                return ""
-            return f"{label}：{msg}"
+        if not line.startswith(f"{prefix}: "):
+            continue
+        msg = line[len(prefix) + 2:].strip().rstrip(".")
+
+        # ---------- 2. 已删功能的旧 commit，整条跳过 ----------
+        _SKIP_DELETED = [
+            # AI 功能（已整体删除）
+            "AI ", "千帆", "豆包", "duckduckgo", "DeepSeek",
+            "联网搜索", "access_token", "FinishedException",
+            "_get_api_key", "NameError",
+            "doubao_model", "模型名改为配置项",
+            "AI 引擎从百度", "百度千帆",
+            "ernie-speed", "deepseek",
+            "API Key 改为纯插件",
+            "Bearer Token", "OAuth",
+            # 超分功能（已删除）
+            "Real-ESRGAN", "DeepAI", "超分",
+            "basicsr", "torchvision", "get_global_config",
+            "pydantic Config",
+        ]
+        if any(kw in msg for kw in _SKIP_DELETED):
+            return ""
+
+        # ---------- 3. 纯内部修改，用户无感，跳过 ----------
+        _SKIP_INTERNAL = [
+            "帮助改为图片",       # 搜图帮助/lg帮助从文字改图片，非新功能
+            "改为图片返回",
+            "图片目录路径",       # 宠物模块路径修正
+            "统一风格",
+            "lf前缀改为lg",       # 内部命名变更
+            "项目改名",           # 内部项目名
+            "银行显示",           # 移除银行字段
+        ]
+        if any(kw in msg for kw in _SKIP_INTERNAL):
+            return ""
+
+        # ---------- 4. 剥离"移除/删除xxx"部分（已删功能不体现） ----------
+        msg = re.sub(r"\s*[，,]\s*移除[^，,，]+", "", msg)
+        msg = re.sub(r"\s*[，,]\s*删除[^，,，]+", "", msg)
+        msg = re.sub(r"\s*[，,]\s*不再[^，,，]+", "", msg)
+        msg = msg.strip().rstrip("，。,. ")
+
+        # ---------- 5. 去冗余前缀（"新增：新增xxx" → "新增：xxx"） ----------
+        msg = re.sub(r"^新增[：: ]?", "", msg).strip()
+
+        if not msg:
+            return ""
+        return f"{label}：{msg}"
+
     return ""
 
 
