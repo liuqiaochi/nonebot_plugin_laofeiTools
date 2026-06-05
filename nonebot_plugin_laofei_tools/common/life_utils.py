@@ -529,8 +529,18 @@ def _get_changelog() -> list:
             p = p.parent
 
     if changelog is None:
-        logger.warning("公告: 未找到 CHANGELOG.txt（已搜索 cwd 和模块路径）")
-        return []
+        # 在 bot 工作目录自动创建 CHANGELOG.txt 模板
+        changelog = Path.cwd() / "CHANGELOG.txt"
+        changelog.write_text(
+            "# CHANGELOG — 龙哥工具箱更新日志\n"
+            "# 每行一条变更，格式：序号.描述（支持缩进子行如示例）\n"
+            "# 以 # 或 // 开头的行为注释，不会被展示\n"
+            "\n"
+            "1.在此填写第一条更新内容\n"
+            "   在此填写示例或补充说明\n",
+            encoding="utf-8",
+        )
+        logger.info(f"公告: 自动创建 CHANGELOG.txt → {changelog}")
 
     items = []
     for line in changelog.read_text(encoding="utf-8").split("\n"):
