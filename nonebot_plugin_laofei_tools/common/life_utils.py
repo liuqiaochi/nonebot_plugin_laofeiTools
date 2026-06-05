@@ -4,7 +4,6 @@
 
 import base64
 import re
-import subprocess
 from io import BytesIO
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -17,7 +16,6 @@ from nonebot.log import logger
 from nonebot.matcher import Matcher
 from nonebot.permission import SUPERUSER
 
-from ..config import DATA_DIR
 
 # ========== 字体加载 ==========
 
@@ -500,201 +498,30 @@ _ANNOUNCE_DATE = (140, 150, 170)
 _ANNOUNCE_DIV = (60, 65, 75)
 
 # commit message 前缀 → 公告文案映射
-_COMMIT_PREFIX_MAP = {
-    "feat": "新增",
-    "fix": "修复",
-    "perf": "优化",
-    "refactor": "重构",
-}
-
-
-def _find_repo_root() -> Path:
-    """从当前文件路径向上找 git 仓库根目录"""
+def _get_changelog() -> list:
+    """从 CHANGELOG.txt 读取变更列表（每行一条）"""
+    # 从当前文件路径向上找仓库根目录
     p = Path(__file__).resolve().parent
     for _ in range(6):
-        if (p / ".git").exists():
-            return p
+        changelog = p / "CHANGELOG.txt"
+        if changelog.exists():
+            break
         p = p.parent
-    return Path.cwd()
-
-
-def _find_git() -> str:
-    """查找 git 可执行文件，找不到回退到直接读 .git 文件"""
-    import shutil
-    git = shutil.which("git")
-    if git:
-        return git
-    for p in ("/usr/bin/git", "/usr/local/bin/git", "/opt/homebrew/bin/git"):
-        if Path(p).is_file():
-            return p
-    return ""
-
-
-def _get_current_hash(repo_root: Path) -> str:
-    """获取当前 HEAD commit hash（优先用 git 命令，fallback 读文件）"""
-    git = _find_git()
-    if git:
-        try:
-            return subprocess.check_output(
-                [git, "rev-parse", "HEAD"],
-                cwd=str(repo_root), text=True, stderr=subprocess.DEVNULL,
-            ).strip()
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            pass
-
-    # Fallback: 直接读 .git 文件
-    head_file = repo_root / ".git" / "HEAD"
-    if not head_file.exists():
-        return ""
-    head = head_file.read_text().strip()
-    if head.startswith("ref: "):
-        ref_path = repo_root / ".git" / head[5:]
-        if ref_path.exists():
-            return ref_path.read_text().strip()
-    return head
-
-
-def _get_changelog_from_git() -> list:
-    """从 git log 自动提取上次公告以来的变更列表"""
-    repo_root = _find_repo_root()
-    hash_file = DATA_DIR / "last_announce_hash.txt"
-
-    current_hash = _get_current_hash(repo_root)
-    if not current_hash:
-        logger.warning("公告: 无法获取当前 commit hash")
-        return []
-
-    git = _find_git()
-
-    if not hash_file.exists():
-        # 首次使用：不记录基线，取所有用户面向的 commit
-        pass
     else:
-        last_hash = hash_file.read_text().strip()
-        if last_hash == current_hash:
-            return []  # 没有新变更
-
-    from_hash = hash_file.read_text().strip() if hash_file.exists() else ""
-
-    output = ""
-    if git:
-        try:
-            if from_hash:
-                output = subprocess.check_output(
-                    [git, "log", "--format=%s", f"{from_hash}..HEAD", "--"],
-                    cwd=str(repo_root), text=True, stderr=subprocess.DEVNULL,
-                ).strip()
-            else:
-                output = subprocess.check_output(
-                    [git, "log", "--format=%s", "-30", "--"],
-                    cwd=str(repo_root), text=True, stderr=subprocess.DEVNULL,
-                ).strip()
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            logger.warning("公告: git log 执行失败，尝试回退文件方式")
-
-    if not output:
-        # 完全没有 git 命令可用：回退到读取 CHANGELOG.txt
-        changelog_file = repo_root / "CHANGELOG.txt"
-        if changelog_file.exists():
-            output = changelog_file.read_text().strip()
-            if not output:
-                hash_file.write_text(current_hash)
-                return []
-        else:
-            logger.warning("公告: git 命令不可用且未找到 CHANGELOG.txt，无法生成公告")
-            return []
-
-    if not output:
-        hash_file.write_text(current_hash)
+        logger.warning("公告: 未找到 CHANGELOG.txt")
         return []
 
     items = []
-    for line in output.split("\n"):
+    for line in changelog.read_text(encoding="utf-8").split("\n"):
         line = line.strip()
-        if not line:
+        if not line or line.startswith("#") or line.startswith("//"):
             continue
-        if line.startswith("#") or line.startswith("//"):
-            continue
-        # 跳过内部重构、样式、测试等非用户面向 commit
-        if any(line.startswith(p) for p in ("refactor:", "chore:", "style:", "test:", "docs:", "build:", "ci:")):
-            continue
-        # 转化文案（git commit 格式走映射，纯文本直用）
-        text = _format_commit_line(line)
-        if not text and line:
-            # CHANGELOG.txt 的纯文本行，直接作为条目
-            text = line
-        if text:
-            items.append(text)
+        # 去掉 "新增：" "修复：" 等前缀（CHANGELOG.txt 里已经是最终文案，前缀重复）
+        line = re.sub(r"^(新增|修复|优化)[：: ]?", "", line).strip()
+        if line:
+            items.append(line)
 
-    # 去重（相似消息可能重复）
-    seen = set()
-    unique_items = []
-    for item in items:
-        key = item[:30]
-        if key not in seen:
-            seen.add(key)
-            unique_items.append(item)
-
-    # 更新基线
-    hash_file.write_text(current_hash)
-    return unique_items
-
-
-def _format_commit_line(line: str) -> str:
-    """将 git commit message 转为简洁公告文案，只保留用户可感知的变更"""
-
-    # ---------- 1. 前缀匹配 ----------
-    for prefix, label in _COMMIT_PREFIX_MAP.items():
-        if not line.startswith(f"{prefix}: "):
-            continue
-        msg = line[len(prefix) + 2:].strip().rstrip(".")
-
-        # ---------- 2. 已删功能的旧 commit，整条跳过 ----------
-        _SKIP_DELETED = [
-            # AI 功能（已整体删除）
-            "AI ", "千帆", "豆包", "duckduckgo", "DeepSeek",
-            "联网搜索", "access_token", "FinishedException",
-            "_get_api_key", "NameError",
-            "doubao_model", "模型名改为配置项",
-            "AI 引擎从百度", "百度千帆",
-            "ernie-speed", "deepseek",
-            "API Key 改为纯插件",
-            "Bearer Token", "OAuth",
-            # 超分功能（已删除）
-            "Real-ESRGAN", "DeepAI", "超分",
-            "basicsr", "torchvision", "get_global_config",
-            "pydantic Config",
-        ]
-        if any(kw in msg for kw in _SKIP_DELETED):
-            return ""
-
-        # ---------- 3. 纯内部修改，用户无感，跳过 ----------
-        _SKIP_INTERNAL = [
-            "帮助改为图片",       # 搜图帮助/lg帮助从文字改图片，非新功能
-            "改为图片返回",
-            "图片目录路径",       # 宠物模块路径修正
-            "统一风格",
-            "lf前缀改为lg",       # 内部命名变更
-            "项目改名",           # 内部项目名
-            "银行显示",           # 移除银行字段
-        ]
-        if any(kw in msg for kw in _SKIP_INTERNAL):
-            return ""
-
-        # ---------- 4. 剥离"移除/删除xxx"部分（已删功能不体现） ----------
-        msg = re.sub(r"\s*[，,]\s*移除[^，,，]+", "", msg)
-        msg = re.sub(r"\s*[，,]\s*删除[^，,，]+", "", msg)
-        msg = re.sub(r"\s*[，,]\s*不再[^，,，]+", "", msg)
-        msg = msg.strip().rstrip("，。,. ")
-
-        # ---------- 5. 去冗余前缀（"新增：新增xxx" → "新增：xxx"） ----------
-        msg = re.sub(r"^新增[：: ]?", "", msg).strip()
-
-        if not msg:
-            return ""
-        return f"{label}：{msg}"
-
-    return ""
+    return items
 
 
 @announce_cmd.handle()
@@ -711,8 +538,8 @@ async def handle_announce(matcher: Matcher, event: MessageEvent):
         items = re.split(r"\d+\.\s*", content)
         items = [item.strip() for item in items if item.strip()]
     else:
-        # 自动模式：从 git log 生成
-        items = _get_changelog_from_git()
+        # 自动模式：从 CHANGELOG.txt 读取
+        items = _get_changelog()
 
     if not items:
         await matcher.finish("暂无新的更新内容，当前已是最新版本。")
