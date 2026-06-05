@@ -17,7 +17,7 @@ from nonebot.log import logger
 from nonebot.matcher import Matcher
 from nonebot.permission import SUPERUSER
 
-from nonebot_plugin_laofei_tools.config import DATA_DIR
+from ..config import DATA_DIR
 
 # ========== 字体加载 ==========
 
