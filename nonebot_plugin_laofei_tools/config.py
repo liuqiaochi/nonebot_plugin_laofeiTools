@@ -20,12 +20,6 @@ class Config(BaseModel):
     # 默认开启搜图的群聊（为空表示默认关闭）
     longge_search_enabled_groups: Set[str] = set()
 
-    # 火山引擎豆包 API Key（必填，火山方舟控制台获取。未配置时 AI 功能不可用）
-    doubao_api_key: str = ""
-
-    # 豆包模型名称（必填，支持端点 ID ep-xxx 或模型名，如 doubao-1-5-vision-pro-32k-250115）
-    doubao_model: str = ""
-
 
 # 数据文件路径
 DATA_DIR = Path("data/laofei_tools")
@@ -138,45 +132,4 @@ def init_enabled_groups(default_groups: Set[str]) -> None:
         _save_enabled_groups(_enabled_groups)
 
 
-# ========== AI 豆包功能开关 ==========
 
-AI_DATA_FILE = DATA_DIR / "ai_enabled_groups.json"
-
-
-def _load_ai_enabled_groups() -> Set[str]:
-    _ensure_data_dir()
-    if AI_DATA_FILE.exists():
-        try:
-            with open(AI_DATA_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return set(data.get("enabled_groups", []))
-        except Exception:
-            return set()
-    return set()
-
-
-def _save_ai_enabled_groups(groups: Set[str]):
-    _ensure_data_dir()
-    try:
-        with open(AI_DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump({"enabled_groups": list(groups)}, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        from nonebot.log import logger
-        logger.error(f"保存 AI 群聊配置失败: {e}")
-
-
-_ai_enabled_groups: Set[str] = _load_ai_enabled_groups()
-
-
-def is_ai_enabled(group_id: str) -> bool:
-    return group_id in _ai_enabled_groups
-
-
-def enable_ai(group_id: str) -> None:
-    _ai_enabled_groups.add(group_id)
-    _save_ai_enabled_groups(_ai_enabled_groups)
-
-
-def disable_ai(group_id: str) -> None:
-    _ai_enabled_groups.discard(group_id)
-    _save_ai_enabled_groups(_ai_enabled_groups)

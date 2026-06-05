@@ -199,7 +199,7 @@ async def send_forward_message(
         "type": "node",
         "data": {
             "name": "搜图Bot酱",
-            "uin": str(bot.selg_id),
+            "uin": str(bot.self_id),
             "content": header_msg,
         }
     })
@@ -244,7 +244,7 @@ async def send_forward_message(
             "type": "node",
             "data": {
                 "name": f"{source} - {similarity}%",
-                "uin": str(bot.selg_id),
+                "uin": str(bot.self_id),
                 "content": content,
             }
         })

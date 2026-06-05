@@ -20,7 +20,7 @@ from nonebot.matcher import Matcher
 require("nonebot_plugin_localstore")
 require("nonebot_plugin_apscheduler")
 
-from .common import points_commands, restart, ai_chat
+from .common import points_commands, restart
 from .pet import pet_commands
 from .search import commands
 from .config import Config, init_enabled_groups
@@ -107,12 +107,6 @@ def _try_load_font(size: int):
 
 def _generate_help_image() -> str:
     """生成 lg帮助 图片，返回 base64 PNG"""
-    # 检查豆包 API Key 和模型是否配置
-    config = driver.config
-    doubao_configured = bool(
-        getattr(config, "doubao_api_key", "") and getattr(config, "doubao_model", "")
-    )
-
     font_title = _try_load_font(30)
     font_section = _try_load_font(22)
     font_cmd = _try_load_font(20)
@@ -132,24 +126,22 @@ def _generate_help_image() -> str:
             ("抽签 / 今日运气", "每日抽签（撞大运概率2%）"),
             ("新手大礼包", "领取新手大礼包"),
         ]),
-        ("AI 对话", [
-            ("@龙哥 + 内容", "与我对话，AI 智能回复"),
-            ("@龙哥 + 引用消息", "对引用内容进行分析回复"),
-        ] if doubao_configured else [
-            ("未配置 API Key/模型", "请在 .env 中设置 DOUBAO_API_KEY 和 DOUBAO_MODEL"),
-        ]),
         ("搜图功能", [
             ("lg搜图", "引用图片进行搜索"),
             ("搜图帮助", "查看搜图帮助"),
+        ]),
+        ("生活工具", [
+            ("lg天气 城市", "查询天气（支持今天/明天/后天）"),
+            ("lg换算 金额 来源 目标", "汇率换算（如 lg换算 100 人民币 美元）"),
         ]),
         ("宠物系统", [
             ("我的宠物", "查看或领养宠物"),
             ("宠物帮助", "查看宠物系统帮助"),
         ]),
         ("管理指令", [
-            ("开启/关闭 ai", "管理群聊 AI 对话功能"),
             ("开启/关闭 lg搜图", "管理群聊搜图功能"),
             ("开启/关闭 积分", "管理群聊积分系统"),
+            ("lg公告", "发布插件更新公告"),
             ("重启bot", "重启机器人"),
         ], True),
     ]
