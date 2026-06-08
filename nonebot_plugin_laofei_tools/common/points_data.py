@@ -540,6 +540,7 @@ FORTUNE_TEXTS = [
     {"level": "中吉", "text": "稳步前行多顺遂，小福常伴日子安。"},
     {"level": "小吉", "text": "浅福相伴皆安稳，平淡日子有惊喜。"},
     {"level": "平签", "text": "万事平平无起落，顺其自然自安然。"},
+    {"level": "小凶", "text": "小有不顺莫心慌，谨言慎行自可安。"},
     {"level": "凶", "text": "稍遇波折不足惧，静心慎行可化解。"},
     {"level": "大凶", "text": "低谷只是一时境，守心蓄力迎新生。"},
 ]
@@ -581,11 +582,19 @@ def draw_fortune(user_id: str) -> dict:
         return {"success": True, "fortune": user_rec["fortune"]}
 
     # 按权重随机抽取签文
-    # 撞大运: 2%, 其他6个等级均分 98%
-    weights = [0.02]  # 撞大运 2%
-    remaining = 0.98 / 6  # 其他6个等级均分
-    weights.extend([remaining] * 6)
-    
+    # 撞大运: 2%, 其他7个等级均分 98%
+    # 顺序: 撞大运 大吉 中吉 小吉 平签 小凶 凶 大凶
+    weights = [
+        0.02,   # 撞大运 2%
+        0.15,   # 大吉   15%
+        0.20,   # 中吉   20%
+        0.20,   # 小吉   20%
+        0.18,   # 平签   18%
+        0.12,   # 小凶   12%
+        0.08,   # 凶     8%
+        0.05,   # 大凶   5%
+    ]
+
     # 按权重随机选择
     fortune = random.choices(FORTUNE_TEXTS, weights=weights, k=1)[0]
 
