@@ -593,8 +593,9 @@ async def handle_announce(matcher: Matcher, event: MessageEvent):
         items = [item.strip() for item in items if item.strip()]
         sections = [(datetime.now().strftime("%Y-%m-%d"), items)]
     else:
-        # 自动模式：从 CHANGELOG.txt 读取（带日期分组）
-        sections = _get_changelog()
+        # 自动模式：从 CHANGELOG.txt 读取，只取最新日期
+        all_sections = _get_changelog()
+        sections = all_sections[:1] if all_sections else []
 
     if not sections:
         await matcher.finish("暂无新的更新内容，当前已是最新版本。")
@@ -608,19 +609,17 @@ def _generate_announce_image(sections: list[tuple[str, list]]) -> str:
     font_title = _try_load_font(30)
     font_item = _try_load_font(18)
     font_date = _try_load_font(14)
-    font_section_date = _try_load_font(16)
 
     width = 520
     padding = 28
     title_h = 60
     item_gap = 12
-    section_gap = 18
     max_text_width = width - padding * 2 - 40
 
     # 预处理：每个 section 的条目拆成 (date, [(num, lines), ...])
     global_num = 0
     section_data: list[tuple[str, list]] = []
-    for date_str, items in sections:
+    for _date_str, items in sections:
         item_lines = []
         for item in items:
             global_num += 1
@@ -632,16 +631,14 @@ def _generate_announce_image(sections: list[tuple[str, list]]) -> str:
                 else:
                     all_wrapped.append(sub)
             item_lines.append((global_num, all_wrapped))
-        section_data.append((date_str, item_lines))
+        section_data.append((_date_str, item_lines))
 
     # 计算总高度
     total_height = padding + title_h + 40  # 标题 + 发布日期
-    for date_str, item_lines in section_data:
-        total_height += 26  # 日期标签
+    for _date_str, item_lines in section_data:
         for _, lines in item_lines:
             total_height += len(lines) * 28
         total_height += (len(item_lines) - 1) * item_gap
-        total_height += section_gap
     total_height += 30 + padding  # 底线 + 结尾文字
 
     img = Image.new("RGB", (width, total_height), _ANNOUNCE_BG)
@@ -659,14 +656,7 @@ def _generate_announce_image(sections: list[tuple[str, list]]) -> str:
 
     draw.line([(padding, y - 10), (width - padding, y - 10)], fill=_ANNOUNCE_DIV, width=1)
 
-    for section_date, item_lines in section_data:
-        # 日期标题
-        if section_date:
-            y += 14
-            draw.line([(padding, y - 5), (width - padding, y - 5)], fill=_ANNOUNCE_DIV, width=1)
-            draw.text((padding, y), f"▎{section_date}", fill=_ANNOUNCE_DATE, font=font_section_date)
-            y += 22
-
+    for _section_date, item_lines in section_data:
         for num, lines in item_lines:
             draw.text((padding + 4, y), str(num), fill=_ANNOUNCE_NUM, font=font_item)
             for j, line in enumerate(lines):
@@ -676,9 +666,7 @@ def _generate_announce_image(sections: list[tuple[str, list]]) -> str:
                     draw.text((padding + 44, y), line, fill=_ANNOUNCE_DATE, font=font_item)
                 y += 28
             y += item_gap
-        y += section_gap
 
-    y -= section_gap
     draw.line([(padding, y + 5), (width - padding, y + 5)], fill=_ANNOUNCE_DIV, width=1)
     y += 20
 
