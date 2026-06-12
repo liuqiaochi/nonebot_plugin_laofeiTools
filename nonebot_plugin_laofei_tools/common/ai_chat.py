@@ -34,6 +34,23 @@ from ..config import (
     remove_ai_blacklist,
 )
 
+# ========== 启动时检查 API Key ==========
+
+driver = get_driver()
+
+
+@driver.on_startup
+async def _check_api_key():
+    """bot 启动时检查 DeepSeek API Key 是否已配置"""
+    api_key = getattr(driver.config, "deepseek_api_key", "")
+    if not api_key:
+        logger.error("=" * 50)
+        logger.error("❌ DeepSeek API Key 未配置！AI 功能将不可用。")
+        logger.error("请在 .env 文件中添加：DEEPSEEK_API_KEY=sk-xxx")
+        logger.error("=" * 50)
+    else:
+        logger.info(f"DeepSeek API Key 已配置 (模型: {getattr(driver.config, 'deepseek_model', 'deepseek-v4-flash')})")
+
 # ========== 聊天记忆 ==========
 
 _MAX_HISTORY = 10          # 每个用户最多缓存多少轮
@@ -94,8 +111,8 @@ def _split_long_message(text: str, max_len: int = 4000) -> list[str]:
     return chunks
 
 
-def _get_client() -> OpenAI | None:
-    """获取 OpenAI 客户端（指向 DeepSeek）"""
+def _get_client() -> OpenAI:
+    """获取 OpenAI 客户端（指向 DeepSeek），如未配置 API Key 则直接报错"""
     try:
         driver = get_driver()
         config = driver.config
@@ -103,7 +120,9 @@ def _get_client() -> OpenAI | None:
     except Exception:
         api_key = ""
     if not api_key:
-        return None
+        raise ValueError(
+            "DeepSeek API Key 未配置！请在 .env 中设置 DEEPSEEK_API_KEY=sk-xxx"
+        )
     return OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
 
 
@@ -218,9 +237,11 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
         return
 
     # 4. 检查 API 是否可用
-    client = _get_client()
-    if client is None:
-        await matcher.send("AI 功能未配置 API Key，请联系管理员。", reply_message=True)
+    try:
+        client = _get_client()
+    except ValueError as e:
+        logger.error(f"AI API Key 未配置: {e}")
+        await matcher.send(f"AI 功能未配置 API Key，请联系管理员。\n请在 .env 中设置 DEEPSEEK_API_KEY", reply_message=True)
         return
 
     model = _get_model()
