@@ -498,25 +498,28 @@ _ANNOUNCE_DATE = (140, 150, 170)
 _ANNOUNCE_DIV = (60, 65, 75)
 
 # commit message 前缀 → 公告文案映射
-def _get_changelog() -> list:
-    """从 CHANGELOG.txt 读取变更列表，自动合并缩进子行
+def _get_changelog() -> list[tuple[str, list]]:
+    """从 CHANGELOG.txt 读取变更列表，按日期分组
 
     CHANGELOG.txt 格式：
+        ## 2026-06-12（日期标题）
         1.新增xxx功能（序号. 开头 = 新条目）
            缩进行 = 附属于上一条的子行（如示例），合并为一条
         # 或 // 开头 = 注释，忽略
+
+    Returns:
+        [(date_str, [item1, item2, ...]), ...]
     """
     changelog = None
 
-    # 策略1：从插件包目录找（最可靠，随插件一起部署）
-    # life_utils.py 在 common/ 下，向上 2 层到 nonebot_plugin_laofei_tools/
+    # 策略1：从插件包目录找
     plugin_dir = Path(__file__).resolve().parent.parent
     candidate = plugin_dir / "CHANGELOG.txt"
     if candidate.exists():
         changelog = candidate
         logger.debug(f"公告: 在插件包中找到 CHANGELOG.txt: {candidate}")
 
-    # 策略2：从工作目录兜底（NoneBot 运行时 cwd 通常是 bot 根目录）
+    # 策略2：从工作目录兜底
     if changelog is None:
         p = Path.cwd()
         for _ in range(8):
@@ -528,36 +531,51 @@ def _get_changelog() -> list:
             p = p.parent
 
     if changelog is None:
-        # 在插件包目录自动创建 CHANGELOG.txt 模板
         changelog = plugin_dir / "CHANGELOG.txt"
         changelog.write_text(
-            "# CHANGELOG — 龙哥工具箱更新日志\n"
-            "# 每行一条变更，格式：序号.描述（支持缩进子行如示例）\n"
-            "# 以 # 或 // 开头的行为注释，不会被展示\n"
-            "\n"
+            "## 待填写日期\n"
             "1.在此填写第一条更新内容\n"
             "   在此填写示例或补充说明\n",
             encoding="utf-8",
         )
         logger.info(f"公告: 自动创建 CHANGELOG.txt → {changelog}")
 
-    items = []
+    sections: list[tuple[str, list]] = []
+    current_date = ""
+    current_items: list = []
+
     for line in changelog.read_text(encoding="utf-8").split("\n"):
         stripped = line.strip()
-        if not stripped or stripped.startswith("#") or stripped.startswith("//"):
+        if not stripped or stripped.startswith("#") and not stripped.startswith("##"):
+            continue
+        if stripped.startswith("//"):
+            continue
+
+        # 日期标题：## 2026-06-12
+        if stripped.startswith("## ") or stripped.startswith("##"):
+            date_str = stripped.lstrip("#").strip()
+            # 保存上一个 section
+            if current_items:
+                sections.append((current_date, current_items))
+                current_items = []
+            current_date = date_str
             continue
 
         if line.startswith((" ", "\t")):
             # 缩进行 → 附属于上一条
-            if items:
-                items[-1] = items[-1] + "\n" + stripped
+            if current_items:
+                current_items[-1] = current_items[-1] + "\n" + stripped
         else:
-            # 新条目：只去掉序号前缀 "1."，"新增/修复" 等描述性文字保留
+            # 新条目
             content = re.sub(r"^\d+\.\s*", "", stripped).strip()
             if content:
-                items.append(content)
+                current_items.append(content)
 
-    return items
+    # 最后一个 section
+    if current_items:
+        sections.append((current_date, current_items))
+
+    return sections
 
 
 @announce_cmd.handle()
@@ -570,76 +588,97 @@ async def handle_announce(matcher: Matcher, event: MessageEvent):
         content = ""
 
     if content:
-        # 手动模式：解析用户输入
+        # 手动模式：解析用户输入，按单个日期分组
         items = re.split(r"\d+\.\s*", content)
         items = [item.strip() for item in items if item.strip()]
+        sections = [(datetime.now().strftime("%Y-%m-%d"), items)]
     else:
-        # 自动模式：从 CHANGELOG.txt 读取
-        items = _get_changelog()
+        # 自动模式：从 CHANGELOG.txt 读取（带日期分组）
+        sections = _get_changelog()
 
-    if not items:
+    if not sections:
         await matcher.finish("暂无新的更新内容，当前已是最新版本。")
 
-    img_b64 = _generate_announce_image(items)
+    img_b64 = _generate_announce_image(sections)
     await matcher.finish(MessageSegment.image(f"base64://{img_b64}"))
 
 
-def _generate_announce_image(items: list) -> str:
-    """生成公告图片"""
+def _generate_announce_image(sections: list[tuple[str, list]]) -> str:
+    """生成公告图片，按日期分组显示"""
     font_title = _try_load_font(30)
     font_item = _try_load_font(18)
     font_date = _try_load_font(14)
+    font_section_date = _try_load_font(16)
 
     width = 520
     padding = 28
     title_h = 60
-    item_gap = 16
+    item_gap = 12
+    section_gap = 18
     max_text_width = width - padding * 2 - 40
 
-    item_lines = []
-    for i, item in enumerate(items):
-        # 拆分 "\n" 为子行，再分别按宽度换行
-        sub_lines = item.split("\n")
-        all_wrapped = []
-        for sub in sub_lines:
-            if font_item:
-                all_wrapped.extend(_wrap_text(sub, font_item, max_text_width))
-            else:
-                all_wrapped.append(sub)
-        item_lines.append((i + 1, all_wrapped))
+    # 预处理：每个 section 的条目拆成 (date, [(num, lines), ...])
+    global_num = 0
+    section_data: list[tuple[str, list]] = []
+    for date_str, items in sections:
+        item_lines = []
+        for item in items:
+            global_num += 1
+            sub_lines = item.split("\n")
+            all_wrapped = []
+            for sub in sub_lines:
+                if font_item:
+                    all_wrapped.extend(_wrap_text(sub, font_item, max_text_width))
+                else:
+                    all_wrapped.append(sub)
+            item_lines.append((global_num, all_wrapped))
+        section_data.append((date_str, item_lines))
 
-    total_lines = sum(len(lines) for _, lines in item_lines)
-    total_height = padding + title_h + 20 + total_lines * 28 + (len(item_lines) - 1) * item_gap + 50 + padding
+    # 计算总高度
+    total_height = padding + title_h + 40  # 标题 + 发布日期
+    for date_str, item_lines in section_data:
+        total_height += 26  # 日期标签
+        for _, lines in item_lines:
+            total_height += len(lines) * 28
+        total_height += (len(item_lines) - 1) * item_gap
+        total_height += section_gap
+    total_height += 30 + padding  # 底线 + 结尾文字
 
     img = Image.new("RGB", (width, total_height), _ANNOUNCE_BG)
     draw = ImageDraw.Draw(img)
 
     y = padding
 
+    # 标题
     draw.text((padding, y), "龙哥工具箱 - 更新公告", fill=_ANNOUNCE_TITLE, font=font_title)
     y += title_h
 
     date_str = datetime.now().strftime("%Y-%m-%d")
     draw.text((padding, y + 5), f"发布日期: {date_str}", fill=_ANNOUNCE_DATE, font=font_date)
-    y += 32
+    y += 40
 
-    draw.line([(padding, y - 5), (width - padding, y - 5)], fill=_ANNOUNCE_DIV, width=1)
-    y += 10
+    draw.line([(padding, y - 10), (width - padding, y - 10)], fill=_ANNOUNCE_DIV, width=1)
 
-    for num, lines in item_lines:
-        badge_text = str(num)
-        draw.text((padding + 4, y), badge_text, fill=_ANNOUNCE_NUM, font=font_item)
-        for j, line in enumerate(lines):
-            if j == 0:
-                # 主描述行
-                draw.text((padding + 30, y), line, fill=_ANNOUNCE_ITEM, font=font_item)
-            else:
-                # 子行（如"例如"）→ 缩进 + 浅色
-                draw.text((padding + 44, y), line, fill=_ANNOUNCE_DATE, font=font_item)
-            y += 28
-        y += item_gap
+    for section_date, item_lines in section_data:
+        # 日期标题
+        if section_date:
+            y += 14
+            draw.line([(padding, y - 5), (width - padding, y - 5)], fill=_ANNOUNCE_DIV, width=1)
+            draw.text((padding, y), f"▎{section_date}", fill=_ANNOUNCE_DATE, font=font_section_date)
+            y += 22
 
-    y -= item_gap
+        for num, lines in item_lines:
+            draw.text((padding + 4, y), str(num), fill=_ANNOUNCE_NUM, font=font_item)
+            for j, line in enumerate(lines):
+                if j == 0:
+                    draw.text((padding + 30, y), line, fill=_ANNOUNCE_ITEM, font=font_item)
+                else:
+                    draw.text((padding + 44, y), line, fill=_ANNOUNCE_DATE, font=font_item)
+                y += 28
+            y += item_gap
+        y += section_gap
+
+    y -= section_gap
     draw.line([(padding, y + 5), (width - padding, y + 5)], fill=_ANNOUNCE_DIV, width=1)
     y += 20
 
