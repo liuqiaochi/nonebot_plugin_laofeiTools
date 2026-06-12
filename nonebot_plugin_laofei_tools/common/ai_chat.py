@@ -280,15 +280,11 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
 
     _add_history(user_id, "assistant", reply)
 
-    # 回复（@ 提问者，超长拆分）
+    # 回复（引用原消息，@ 提问者，超长拆分）
     chunks = _split_long_message(reply)
     for i, chunk in enumerate(chunks):
-        if i == 0:
-            await matcher.send(
-                MessageSegment.at(user_id) + MessageSegment.text("\n" + chunk)
-            )
-        else:
-            await matcher.send(chunk)
+        msg = MessageSegment.at(user_id) + MessageSegment.text("\n" + chunk)
+        await matcher.send(msg, reply_message=True)
 
 
 # ========== lg清记忆 指令 ==========
