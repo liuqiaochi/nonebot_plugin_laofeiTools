@@ -140,16 +140,33 @@ async def _at_bot_rule(event: MessageEvent) -> bool:
     """检查消息是否 @了机器人"""
     if isinstance(event, PrivateMessageEvent):
         return False
+
+    # 优先用 NoneBot 内置方法
+    if hasattr(event, "is_tome") and callable(event.is_tome):
+        result = event.is_tome()
+        if result:
+            logger.debug(f"AI @bot 匹配 (is_tome): group={getattr(event, 'group_id', 'N/A')}")
+        return result
+
+    # 兜底：手动遍历 @ 段
     try:
         bots = get_bots()
         if not bots:
+            logger.warning("AI @bot: get_bots() 返回空，跳过")
             return False
         bot_self_id = list(bots.keys())[0]
-    except Exception:
+        logger.debug(f"AI @bot: bot_self_id={bot_self_id}, checking message segments")
+    except Exception as e:
+        logger.error(f"AI @bot: get_bots() 异常: {e}")
         return False
+
     for seg in event.message:
-        if seg.type == "at" and seg.data.get("qq") == bot_self_id:
+        seg_qq = seg.data.get("qq", "") if seg.type == "at" else ""
+        if seg.type == "at" and str(seg_qq) == str(bot_self_id):
+            logger.debug(f"AI @bot 匹配 (手动): group={getattr(event, 'group_id', 'N/A')}")
             return True
+
+    logger.debug(f"AI @bot 未匹配: group={getattr(event, 'group_id', 'N/A')}")
     return False
 
 
@@ -170,10 +187,12 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
 
     # 1. 检查群聊是否开启了 AI
     if not is_ai_group_enabled(group_id):
-        return  # 静默忽略，不响应
+        logger.debug(f"AI @bot: 群 {group_id} 未开启 AI，忽略")
+        return
 
     # 2. 检查用户是否在黑名单
     if is_ai_blacklisted(user_id):
+        logger.debug(f"AI @bot: 用户 {user_id} 在黑名单，忽略")
         return
 
     # 3. 构建 prompt
