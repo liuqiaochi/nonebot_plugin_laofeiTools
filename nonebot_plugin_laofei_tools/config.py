@@ -29,6 +29,8 @@ class Config(BaseModel):
 DATA_DIR = Path("data/laofei_tools")
 DATA_FILE = DATA_DIR / "enabled_groups.json"
 POINTS_DISABLED_FILE = DATA_DIR / "points_disabled_groups.json"
+AI_ENABLED_FILE = DATA_DIR / "ai_enabled_groups.json"
+AI_BLACKLIST_FILE = DATA_DIR / "ai_blacklist.json"
 
 
 def _ensure_data_dir():
@@ -136,4 +138,90 @@ def init_enabled_groups(default_groups: Set[str]) -> None:
         _save_enabled_groups(_enabled_groups)
 
 
+# ========== AI 功能群聊开关 ==========
 
+_ai_enabled_groups: Set[str] = set()
+_ai_blacklist: Set[str] = set()
+
+
+def _load_ai_enabled_groups() -> Set[str]:
+    _ensure_data_dir()
+    if AI_ENABLED_FILE.exists():
+        try:
+            with open(AI_ENABLED_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return set(data.get("enabled_groups", []))
+        except Exception:
+            return set()
+    return set()
+
+
+def _save_ai_enabled_groups(groups: Set[str]):
+    _ensure_data_dir()
+    try:
+        with open(AI_ENABLED_FILE, "w", encoding="utf-8") as f:
+            json.dump({"enabled_groups": list(groups)}, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        from nonebot.log import logger
+        logger.error(f"保存 AI 群聊配置失败: {e}")
+
+
+def _load_ai_blacklist() -> Set[str]:
+    _ensure_data_dir()
+    if AI_BLACKLIST_FILE.exists():
+        try:
+            with open(AI_BLACKLIST_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return set(data.get("blacklist", []))
+        except Exception:
+            return set()
+    return set()
+
+
+def _save_ai_blacklist(blacklist: Set[str]):
+    _ensure_data_dir()
+    try:
+        with open(AI_BLACKLIST_FILE, "w", encoding="utf-8") as f:
+            json.dump({"blacklist": list(blacklist)}, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        from nonebot.log import logger
+        logger.error(f"保存 AI 黑名单失败: {e}")
+
+
+# 初始化
+_ai_enabled_groups = _load_ai_enabled_groups()
+_ai_blacklist = _load_ai_blacklist()
+
+
+def is_ai_group_enabled(group_id: str) -> bool:
+    """检查群聊是否开启了 AI 功能（默认关闭）"""
+    return group_id in _ai_enabled_groups
+
+
+def enable_ai_group(group_id: str) -> None:
+    """开启群聊 AI 功能"""
+    _ai_enabled_groups.add(group_id)
+    _save_ai_enabled_groups(_ai_enabled_groups)
+
+
+def disable_ai_group(group_id: str) -> None:
+    """关闭群聊 AI 功能"""
+    _ai_enabled_groups.discard(group_id)
+    _save_ai_enabled_groups(_ai_enabled_groups)
+
+
+def is_ai_blacklisted(user_id: str) -> bool:
+    """检查用户是否在 AI 黑名单中"""
+    return user_id in _ai_blacklist
+
+
+def add_ai_blacklist(user_id: str) -> None:
+    """将用户加入 AI 黑名单"""
+    _ai_blacklist.add(user_id)
+    _save_ai_blacklist(_ai_blacklist)
+
+
+def remove_ai_blacklist(user_id: str) -> None:
+    """将用户移出 AI 黑名单"""
+    _ai_blacklist.discard(user_id)
+    _save_ai_blacklist(_ai_blacklist)

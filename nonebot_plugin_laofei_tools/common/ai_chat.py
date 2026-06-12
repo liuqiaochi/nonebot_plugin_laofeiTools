@@ -1,50 +1,51 @@
 """
 AI 对话模块 — 基于 DeepSeek API
+
+触发方式：@机器人 + 问题文本（支持引用消息）
+权限：仅群聊可用，默认关闭，超级管理员可开启/关闭
+黑名单：超级管理员可管理用户黑名单
 """
 
+import re
 import time
 from collections import defaultdict
 
 from openai import OpenAI
-from nonebot import on_command, get_driver
-from nonebot.adapters.onebot.v11 import MessageEvent, MessageSegment
+from nonebot import on_command, on_message, get_driver, get_bots
+from nonebot.adapters.onebot.v11 import (
+    Bot,
+    GroupMessageEvent,
+    MessageEvent,
+    MessageSegment,
+    PrivateMessageEvent,
+)
 from nonebot.log import logger
 from nonebot.matcher import Matcher
+from nonebot.params import CommandArg
+from nonebot.permission import SUPERUSER
+from nonebot.rule import Rule
 
-from ..config import Config
+from ..config import (
+    is_ai_group_enabled,
+    enable_ai_group,
+    disable_ai_group,
+    is_ai_blacklisted,
+    add_ai_blacklist,
+    remove_ai_blacklist,
+)
 
-# 聊天记录缓存：{user_id: [(role, content, timestamp), ...]}
+# ========== 聊天记忆 ==========
+
 _MAX_HISTORY = 10          # 每个用户最多缓存多少轮
 _MAX_HISTORY_AGE = 600     # 历史最大保留秒数（10分钟）
 
 _chat_histories: dict[str, list[dict]] = defaultdict(list)
 
-# 系统提示词
 _SYSTEM_PROMPT = (
     "你是一个名叫「龙哥」的QQ群机器人助手，性格幽默、热情、乐于助人。"
     "回答问题时尽量简洁清晰，使用中文。"
     "如果用户问你是谁，告诉他们你是龙哥工具箱内置的 DeepSeek AI 助手。"
 )
-
-
-def _get_client() -> OpenAI | None:
-    """获取 OpenAI 客户端（指向 DeepSeek）"""
-    try:
-        driver = get_driver()
-        config = driver.config
-        api_key = getattr(config, "deepseek_api_key", "")
-        model = getattr(config, "deepseek_model", "deepseek-v4-flash")
-    except Exception:
-        api_key = ""
-        model = "deepseek-v4-flash"
-
-    if not api_key:
-        return None
-
-    return OpenAI(
-        api_key=api_key,
-        base_url="https://api.deepseek.com",
-    )
 
 
 def _clean_history(user_id: str):
@@ -64,7 +65,6 @@ def _add_history(user_id: str, role: str, content: str):
         "content": content,
         "ts": time.time(),
     })
-    # 只保留最近 N 轮（每轮 user+assistant 两条）
     if len(_chat_histories[user_id]) > _MAX_HISTORY * 2:
         _chat_histories[user_id] = _chat_histories[user_id][-_MAX_HISTORY * 2:]
 
@@ -80,7 +80,7 @@ def _build_messages(user_id: str, prompt: str) -> list[dict]:
 
 
 def _split_long_message(text: str, max_len: int = 4000) -> list[str]:
-    """将长文本拆成多段（QQ 消息有长度限制）"""
+    """将长文本拆成多段"""
     chunks = []
     current = ""
     for line in text.split("\n"):
@@ -88,65 +88,131 @@ def _split_long_message(text: str, max_len: int = 4000) -> list[str]:
             chunks.append(current)
             current = line
         else:
-            if current:
-                current += "\n" + line
-            else:
-                current = line
+            current = (current + "\n" + line) if current else line
     if current:
         chunks.append(current)
     return chunks
 
 
-# ========== lg问 指令 ==========
+def _get_client() -> OpenAI | None:
+    """获取 OpenAI 客户端（指向 DeepSeek）"""
+    try:
+        driver = get_driver()
+        config = driver.config
+        api_key = getattr(config, "deepseek_api_key", "")
+    except Exception:
+        api_key = ""
+    if not api_key:
+        return None
+    return OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
 
-ai_cmd = on_command(
-    "lg问",
-    aliases={"lgai", "lg AI", "lg问ai", "问ai", "龙哥问答", "lg chat"},
-    priority=5,
-    block=True,
-    force_whitespace=True,
+
+def _get_model() -> str:
+    try:
+        return getattr(get_driver().config, "deepseek_model", "deepseek-v4-flash")
+    except Exception:
+        return "deepseek-v4-flash"
+
+
+def _extract_at_users(message) -> list[str]:
+    """提取消息中 @ 的 QQ 号列表"""
+    at_users = []
+    for seg in message:
+        if seg.type == "at" and seg.data.get("qq"):
+            at_users.append(seg.data["qq"])
+    return at_users
+
+
+def _strip_at_segments(message) -> str:
+    """去掉 @ 段落后返回纯文本"""
+    parts = []
+    for seg in message:
+        if seg.type == "at":
+            continue
+        if seg.type == "text":
+            parts.append(seg.data.get("text", ""))
+    return "".join(parts).strip()
+
+
+# ========== @bot 触发规则 ==========
+
+async def _at_bot_rule(event: MessageEvent) -> bool:
+    """检查消息是否 @了机器人"""
+    if isinstance(event, PrivateMessageEvent):
+        return False
+    try:
+        bots = get_bots()
+        if not bots:
+            return False
+        bot_self_id = list(bots.keys())[0]
+    except Exception:
+        return False
+    for seg in event.message:
+        if seg.type == "at" and seg.data.get("qq") == bot_self_id:
+            return True
+    return False
+
+
+# ========== @bot AI 对话 ==========
+
+ai_chat_matcher = on_message(
+    rule=Rule(_at_bot_rule),
+    priority=10,
+    block=False,
 )
 
 
-@ai_cmd.handle()
-async def handle_ai_chat(matcher: Matcher, event: MessageEvent):
-    """处理 AI 对话"""
-    # 解析用户问题
-    full_text = event.get_plaintext().strip()
-    if " " in full_text:
-        prompt = full_text.split(" ", 1)[1].strip()
-    else:
-        prompt = ""
-
-    if not prompt:
-        await matcher.finish(
-            "请告诉我你想问什么，例如：\n"
-            "lg问 今天天气怎么样\n"
-            "lg问 帮我写一段Python代码"
-        )
-
+@ai_chat_matcher.handle()
+async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEvent):
+    """处理 @机器人的 AI 对话"""
+    group_id = str(event.group_id)
     user_id = str(event.user_id)
 
+    # 1. 检查群聊是否开启了 AI
+    if not is_ai_group_enabled(group_id):
+        return  # 静默忽略，不响应
+
+    # 2. 检查用户是否在黑名单
+    if is_ai_blacklisted(user_id):
+        return
+
+    # 3. 构建 prompt
+    prompt_parts = []
+
+    # 如果有引用消息，把引用内容带上
+    if event.reply:
+        reply_text = event.reply.message.extract_plain_text().strip()
+        if reply_text:
+            prompt_parts.append(f"（用户引用了以下消息作为上下文）\n{reply_text}\n（以下是用户的问题）")
+
+    # 提取 @bot 后的文本（去掉 @bot 本身和空白）
+    text = _strip_at_segments(event.message)
+    if text:
+        prompt_parts.append(text)
+
+    if not prompt_parts:
+        await matcher.send("有什么事吗？@我然后说你想问的就好啦～", reply_message=True)
+        return
+
+    prompt = "\n".join(prompt_parts).strip()
+    if not prompt:
+        return
+
+    # 4. 检查 API 是否可用
     client = _get_client()
     if client is None:
-        await matcher.finish("AI 功能未配置 API Key，请联系管理员设置 deepseek_api_key。")
+        await matcher.send("AI 功能未配置 API Key，请联系管理员。", reply_message=True)
+        return
 
-    # 获取模型名
-    try:
-        config = get_driver().config
-        model = getattr(config, "deepseek_model", "deepseek-v4-flash")
-    except Exception:
-        model = "deepseek-v4-flash"
+    model = _get_model()
 
-    # 保存用户问题到历史
+    # 5. 保存 + 构建消息
     _add_history(user_id, "user", prompt)
-
-    # 构建消息列表（含历史）
     messages = _build_messages(user_id, prompt)
 
-    # 调用 DeepSeek API
+    # 6. 调用 API
     try:
-        logger.info(f"AI 对话: user={user_id}, prompt={prompt[:50]}...")
+        logger.info(f"AI @bot: user={user_id} group={group_id}, prompt={prompt[:50]}...")
         response = client.chat.completions.create(
             model=model,
             messages=messages,
@@ -155,24 +221,25 @@ async def handle_ai_chat(matcher: Matcher, event: MessageEvent):
         )
         reply = response.choices[0].message.content.strip()
         logger.info(f"AI 回复: {reply[:50]}...")
-
     except Exception as e:
-        logger.error(f"AI 对话失败: {e}")
-        await matcher.finish(f"AI 暂时无法回复，请稍后再试。\n错误：{e}")
+        logger.error(f"AI 调用失败: {e}")
+        await matcher.send(f"AI 暂时无法回复，请稍后再试。", reply_message=True)
+        return
 
-    # 保存回复到历史
     _add_history(user_id, "assistant", reply)
 
-    # 发送回复（超长时拆分）
+    # 回复（@ 提问者，超长拆分）
     chunks = _split_long_message(reply)
     for i, chunk in enumerate(chunks):
         if i == 0:
-            await matcher.send(chunk)
+            await matcher.send(
+                MessageSegment.at(user_id) + MessageSegment.text("\n" + chunk)
+            )
         else:
             await matcher.send(chunk)
 
 
-# ========== lg清记忆 指令（清除对话历史）==========
+# ========== lg清记忆 指令 ==========
 
 clear_cmd = on_command(
     "lg清记忆",
@@ -192,3 +259,125 @@ async def handle_clear_history(matcher: Matcher, event: MessageEvent):
         await matcher.finish("已清除你的对话记忆，下次对话将重新开始。")
     else:
         await matcher.finish("当前没有对话记忆，无需清除。")
+
+
+# ========== 开启AI（超级用户）==========
+
+enable_ai_cmd = on_command(
+    "开启AI",
+    aliases={"开启ai", "开启lgai", "启用AI", "启用ai"},
+    permission=SUPERUSER,
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+@enable_ai_cmd.handle()
+async def handle_enable_ai(matcher: Matcher, event: MessageEvent):
+    """超级用户开启群聊 AI 功能"""
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish("请在群聊中发送此指令。")
+    group_id = str(event.group_id)
+    if is_ai_group_enabled(group_id):
+        await matcher.finish("AI 功能已经开启。")
+    enable_ai_group(group_id)
+    await matcher.finish("✅ 已开启本群 AI 功能，@机器人 + 问题 即可使用！")
+
+
+# ========== 关闭AI（超级用户）==========
+
+disable_ai_cmd = on_command(
+    "关闭AI",
+    aliases={"关闭ai", "关闭lgai", "禁用AI", "禁用ai"},
+    permission=SUPERUSER,
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+@disable_ai_cmd.handle()
+async def handle_disable_ai(matcher: Matcher, event: MessageEvent):
+    """超级用户关闭群聊 AI 功能"""
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish("请在群聊中发送此指令。")
+    group_id = str(event.group_id)
+    if not is_ai_group_enabled(group_id):
+        await matcher.finish("AI 功能已经关闭。")
+    disable_ai_group(group_id)
+    await matcher.finish("❌ 已关闭本群 AI 功能。")
+
+
+# ========== AI拉黑（超级用户）==========
+
+ai_blacklist_cmd = on_command(
+    "AI拉黑",
+    aliases={"ai拉黑", "lgai拉黑"},
+    permission=SUPERUSER,
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+@ai_blacklist_cmd.handle()
+async def handle_ai_blacklist(matcher: Matcher, event: MessageEvent):
+    """超级用户将用户加入 AI 黑名单
+    用法：AI拉黑 @用户  或  AI拉黑 QQ号
+    """
+    # 优先从 @ 提取
+    at_users = _extract_at_users(event.message)
+    if at_users:
+        target_id = at_users[0]
+    else:
+        text = event.get_plaintext().strip()
+        # 去掉命令名，提取 QQ 号
+        parts = text.split()
+        if len(parts) >= 2 and parts[-1].isdigit():
+            target_id = parts[-1]
+        else:
+            await matcher.finish("请 @要拉黑的用户，或输入 QQ 号。\n例如：AI拉黑 @某人  或  AI拉黑 123456789")
+            return
+
+    if is_ai_blacklisted(target_id):
+        await matcher.finish(f"用户 {target_id} 已在黑名单中。")
+
+    add_ai_blacklist(target_id)
+    await matcher.finish(f"✅ 已将用户 {target_id} 加入 AI 黑名单，该用户无法使用 AI 功能。")
+
+
+# ========== AI解除（超级用户）==========
+
+ai_unblacklist_cmd = on_command(
+    "AI解除",
+    aliases={"ai解除", "lgai解除", "AI取消拉黑", "ai取消拉黑"},
+    permission=SUPERUSER,
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+@ai_unblacklist_cmd.handle()
+async def handle_ai_unblacklist(matcher: Matcher, event: MessageEvent):
+    """超级用户将用户移出 AI 黑名单
+    用法：AI解除 @用户  或  AI解除 QQ号
+    """
+    at_users = _extract_at_users(event.message)
+    if at_users:
+        target_id = at_users[0]
+    else:
+        text = event.get_plaintext().strip()
+        parts = text.split()
+        if len(parts) >= 2 and parts[-1].isdigit():
+            target_id = parts[-1]
+        else:
+            await matcher.finish("请 @要解除的用户，或输入 QQ 号。\n例如：AI解除 @某人  或  AI解除 123456789")
+            return
+
+    if not is_ai_blacklisted(target_id):
+        await matcher.finish(f"用户 {target_id} 不在黑名单中。")
+
+    remove_ai_blacklist(target_id)
+    await matcher.finish(f"✅ 已将用户 {target_id} 移出 AI 黑名单，恢复 AI 使用权限。")
