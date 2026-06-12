@@ -20,7 +20,7 @@ from nonebot.matcher import Matcher
 require("nonebot_plugin_localstore")
 require("nonebot_plugin_apscheduler")
 
-from .common import points_commands, restart
+from .common import points_commands, restart, life_utils, ai_chat
 from .pet import pet_commands
 from .search import commands
 from .config import Config, init_enabled_groups
@@ -133,6 +133,10 @@ def _generate_help_image() -> str:
         ("生活工具", [
             ("lg天气 城市", "查询天气（支持今天/明天/后天）"),
             ("lg换算 金额 来源 目标", "汇率换算（如 lg换算 100 人民币 美元）"),
+        ]),
+        ("AI 对话", [
+            ("lg问 / lgai", "基于 DeepSeek 的 AI 问答（如 lg问 今天天气怎么样）"),
+            ("lg清记忆", "清除当前对话历史"),
         ]),
         ("宠物系统", [
             ("我的宠物", "查看或领养宠物"),

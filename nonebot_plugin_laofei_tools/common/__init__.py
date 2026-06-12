@@ -1,1 +1,1 @@
-from . import points_commands, restart, life_utils
+from . import points_commands, restart, life_utils, ai_chat

@@ -20,6 +20,10 @@ class Config(BaseModel):
     # 默认开启搜图的群聊（为空表示默认关闭）
     longge_search_enabled_groups: Set[str] = set()
 
+    # DeepSeek AI 配置
+    deepseek_api_key: str = ""
+    deepseek_model: str = "deepseek-v4-flash"
+
 
 # 数据文件路径
 DATA_DIR = Path("data/laofei_tools")
