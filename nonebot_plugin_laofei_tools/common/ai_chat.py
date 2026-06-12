@@ -280,11 +280,10 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
 
     _add_history(user_id, "assistant", reply)
 
-    # 回复（引用原消息，@ 提问者，超长拆分）
+    # 回复（引用原消息，超长拆分，不带 @ 昵称）
     chunks = _split_long_message(reply)
-    for i, chunk in enumerate(chunks):
-        msg = MessageSegment.at(user_id) + MessageSegment.text("\n" + chunk)
-        await matcher.send(msg, reply_message=True)
+    for chunk in chunks:
+        await matcher.send(chunk, reply_message=True)
 
 
 # ========== lg清记忆 指令 ==========
@@ -365,7 +364,6 @@ ai_blacklist_cmd = on_command(
     permission=SUPERUSER,
     priority=5,
     block=True,
-    force_whitespace=True,
 )
 
 
@@ -403,7 +401,6 @@ ai_unblacklist_cmd = on_command(
     permission=SUPERUSER,
     priority=5,
     block=True,
-    force_whitespace=True,
 )
 
 
