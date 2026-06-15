@@ -279,10 +279,40 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
 
     _add_history(user_id, "assistant", reply)
 
-    # 回复（引用原消息，超长拆分，不带 @ 昵称）
-    chunks = _split_long_message(reply)
-    for chunk in chunks:
-        await matcher.send(chunk, reply_message=True)
+    # 回复：超过 100 字用合并转发，否则直接引用回复
+    if len(reply) > 100:
+        # 合并转发消息格式
+        bot_name = "龙哥"
+        try:
+            bot_info = await bot.get_login_info()
+            bot_name = bot_info.get("nickname", "龙哥")
+        except Exception:
+            pass
+
+        forward_msgs = []
+        chunks = _split_long_message(reply)
+        for chunk in chunks:
+            forward_msgs.append({
+                "type": "node",
+                "data": {
+                    "name": bot_name,
+                    "uin": bot.self_id,
+                    "content": chunk,
+                },
+            })
+
+        try:
+            await bot.call_api(
+                "send_group_forward_msg",
+                group_id=event.group_id,
+                messages=forward_msgs,
+            )
+        except Exception as e:
+            logger.warning(f"合并转发失败，降级为普通回复: {e}")
+            for chunk in chunks:
+                await matcher.send(chunk, reply_message=True)
+    else:
+        await matcher.send(reply, reply_message=True)
 
 
 # ========== lg清记忆 指令 ==========
