@@ -167,19 +167,27 @@ def _strip_at_segments(message) -> str:
 # ========== @bot 触发规则 ==========
 
 async def _at_bot_rule(event: MessageEvent) -> bool:
-    """检查消息是否 @了机器人（仅 at，排除回复/引用触发）"""
+    """仅 @机器人触发，排除回复/引用触发"""
     if isinstance(event, PrivateMessageEvent):
         return False
 
-    # is_tome() 处理 id 比对最可靠
     if not (hasattr(event, "is_tome") and callable(event.is_tome) and event.is_tome()):
         return False
 
-    # is_tome() 同时响应 @ 和回复/引用，这里排除回复触发
+    # 排除回复/引用：OneBot v11 中回复消息在 event 层面有 reply 字段
+    if getattr(event, "reply", None) is not None:
+        logger.debug(f"AI @bot 忽略 (回复): group={getattr(event, 'group_id', 'N/A')}")
+        return False
+
+    # 再兜底检查消息段中的 reply
     for seg in event.message:
         if seg.type == "reply":
-            logger.debug(f"AI @bot 忽略 (回复/引用触发): group={getattr(event, 'group_id', 'N/A')}")
+            logger.debug(f"AI @bot 忽略 (reply段): group={getattr(event, 'group_id', 'N/A')}")
             return False
+
+    # 调试：理论上不会到这里，如果到了说明 is_tome 是通过未知方式触发的
+    seg_types = [seg.type for seg in event.message]
+    logger.warning(f"AI @bot 触发但无 reply 无 at? segs={seg_types}, event.reply={getattr(event, 'reply', 'N/A')}")
 
     logger.debug(f"AI @bot 匹配: group={getattr(event, 'group_id', 'N/A')}")
     return True
