@@ -171,15 +171,20 @@ async def _at_bot_rule(event: MessageEvent) -> bool:
     if isinstance(event, PrivateMessageEvent):
         return False
 
-    # 直接从 event 拿 bot 的 qq 号（比 get_bots() 更可靠）
-    bot_self_id = str(event.self_id)
+    # 用 is_tome() 做基础判断（id 比对等细节它处理得更好）
+    if not (hasattr(event, "is_tome") and callable(event.is_tome)):
+        return False
+    if not event.is_tome():
+        return False
 
-    # 手动遍历 @ 段，避免 is_tome() 误判回复/引用消息
+    # is_tome() 会同时检测 @ 和回复/引用，这里额外过滤：
+    # 必须消息中有 at 段才算，纯回复/引用不触发 AI
     for seg in event.message:
-        if seg.type == "at" and str(seg.data.get("qq", "")) == bot_self_id:
+        if seg.type == "at":
             logger.debug(f"AI @bot 匹配: group={getattr(event, 'group_id', 'N/A')}")
             return True
 
+    logger.debug(f"AI @bot 忽略 (回复/引用触发): group={getattr(event, 'group_id', 'N/A')}")
     return False
 
 
