@@ -358,8 +358,9 @@ _CURRENCY_MAP = {
     "卢布": "RUB", "rub": "RUB", "RUB": "RUB",
     "印度卢比": "INR", "inr": "INR", "INR": "INR",
     "瑞士法郎": "CHF", "chf": "CHF", "CHF": "CHF",
-    "新台币": "TWD", "twd": "TWD", "TWD": "TWD",
+    "新台币": "TWD", "台币": "TWD", "twd": "TWD", "TWD": "TWD",
     "澳门元": "MOP", "mop": "MOP", "MOP": "MOP",
+    "越南盾": "VND", "vnd": "VND", "VND": "VND",
 }
 
 
