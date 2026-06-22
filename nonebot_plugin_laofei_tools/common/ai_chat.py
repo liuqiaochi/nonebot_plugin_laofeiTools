@@ -167,36 +167,27 @@ def _strip_at_segments(message) -> str:
 # ========== @bot 触发规则 ==========
 
 async def _at_bot_rule(event: MessageEvent) -> bool:
-    """检查消息是否 @了机器人"""
+    """检查消息是否 @了机器人（仅 at 段，不含回复/引用）"""
     if isinstance(event, PrivateMessageEvent):
         return False
 
-    # 优先用 NoneBot 内置方法
-    if hasattr(event, "is_tome") and callable(event.is_tome):
-        result = event.is_tome()
-        if result:
-            logger.debug(f"AI @bot 匹配 (is_tome): group={getattr(event, 'group_id', 'N/A')}")
-        return result
-
-    # 兜底：手动遍历 @ 段
+    # 获取 bot 自己的 qq 号
     try:
         bots = get_bots()
         if not bots:
             logger.warning("AI @bot: get_bots() 返回空，跳过")
             return False
-        bot_self_id = list(bots.keys())[0]
-        logger.debug(f"AI @bot: bot_self_id={bot_self_id}, checking message segments")
+        bot_self_id = str(list(bots.keys())[0])
     except Exception as e:
         logger.error(f"AI @bot: get_bots() 异常: {e}")
         return False
 
+    # 手动遍历 @ 段，避免 is_tome() 误判回复/引用消息
     for seg in event.message:
-        seg_qq = seg.data.get("qq", "") if seg.type == "at" else ""
-        if seg.type == "at" and str(seg_qq) == str(bot_self_id):
-            logger.debug(f"AI @bot 匹配 (手动): group={getattr(event, 'group_id', 'N/A')}")
+        if seg.type == "at" and str(seg.data.get("qq", "")) == bot_self_id:
+            logger.debug(f"AI @bot 匹配: group={getattr(event, 'group_id', 'N/A')}")
             return True
 
-    logger.debug(f"AI @bot 未匹配: group={getattr(event, 'group_id', 'N/A')}")
     return False
 
 
