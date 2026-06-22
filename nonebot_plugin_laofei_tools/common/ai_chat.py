@@ -167,25 +167,22 @@ def _strip_at_segments(message) -> str:
 # ========== @bot 触发规则 ==========
 
 async def _at_bot_rule(event: MessageEvent) -> bool:
-    """检查消息是否 @了机器人（仅 at 段，不含回复/引用）"""
+    """检查消息是否 @了机器人（仅 at，排除回复/引用触发）"""
     if isinstance(event, PrivateMessageEvent):
         return False
 
-    # 用 is_tome() 做基础判断（id 比对等细节它处理得更好）
-    if not (hasattr(event, "is_tome") and callable(event.is_tome)):
-        return False
-    if not event.is_tome():
+    # is_tome() 处理 id 比对最可靠
+    if not (hasattr(event, "is_tome") and callable(event.is_tome) and event.is_tome()):
         return False
 
-    # is_tome() 会同时检测 @ 和回复/引用，这里额外过滤：
-    # 必须消息中有 at 段才算，纯回复/引用不触发 AI
+    # is_tome() 同时响应 @ 和回复/引用，这里排除回复触发
     for seg in event.message:
-        if seg.type == "at":
-            logger.debug(f"AI @bot 匹配: group={getattr(event, 'group_id', 'N/A')}")
-            return True
+        if seg.type == "reply":
+            logger.debug(f"AI @bot 忽略 (回复/引用触发): group={getattr(event, 'group_id', 'N/A')}")
+            return False
 
-    logger.debug(f"AI @bot 忽略 (回复/引用触发): group={getattr(event, 'group_id', 'N/A')}")
-    return False
+    logger.debug(f"AI @bot 匹配: group={getattr(event, 'group_id', 'N/A')}")
+    return True
 
 
 # ========== @bot AI 对话 ==========
