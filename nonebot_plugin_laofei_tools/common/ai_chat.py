@@ -171,16 +171,8 @@ async def _at_bot_rule(event: MessageEvent) -> bool:
     if isinstance(event, PrivateMessageEvent):
         return False
 
-    # 获取 bot 自己的 qq 号
-    try:
-        bots = get_bots()
-        if not bots:
-            logger.warning("AI @bot: get_bots() 返回空，跳过")
-            return False
-        bot_self_id = str(list(bots.keys())[0])
-    except Exception as e:
-        logger.error(f"AI @bot: get_bots() 异常: {e}")
-        return False
+    # 直接从 event 拿 bot 的 qq 号（比 get_bots() 更可靠）
+    bot_self_id = str(event.self_id)
 
     # 手动遍历 @ 段，避免 is_tome() 误判回复/引用消息
     for seg in event.message:
