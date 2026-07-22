@@ -1176,7 +1176,7 @@ async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
     last_pk_msg = ""
     for t in targets:
         pk = do_pk(user_id, t)
-        last_pk_msg = pk["message"]
+        last_pk_msg = pk.get("message", "")
         if pk["success"]:
             pk_done = pk
             break
