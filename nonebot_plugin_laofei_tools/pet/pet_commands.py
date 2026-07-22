@@ -1124,14 +1124,13 @@ def _get_random_targets(user_id: str, n: int = 10) -> list:
     return candidates[:n]
 
 
-# ========== 一键宠物日常指令（仅超级管理员） ==========
+# ========== 一键宠物日常指令 ==========
 pet_daily_cmd = on_command(
     "宠物日常",
     aliases={"一键日常", "宠物打卡"},
     priority=5,
     block=True,
     force_whitespace=True,
-    permission=SUPERUSER,
 )
 
 
