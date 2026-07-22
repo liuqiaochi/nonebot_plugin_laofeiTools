@@ -13,6 +13,8 @@ from typing import Dict, Optional
 
 from loguru import logger
 
+from .data_utils import safe_json_save
+
 # 数据文件路径（锚定项目根目录，不依赖运行时 CWD，避免覆盖文件后数据丢失）
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "laofei_tools"
 USER_DATA_FILE = DATA_DIR / "user_points.json"
@@ -114,8 +116,7 @@ def _load_user_data() -> Dict[str, dict]:
 
 
 def _save_user_data():
-    """保存用户数据"""
-    _ensure_data_dir()
+    """安全保存用户数据"""
     data = {}
     for user_id, user in _user_data.items():
         data[user_id] = {
@@ -128,8 +129,11 @@ def _save_user_data():
             "bank_interest_hidden": user.bank_interest_hidden,
             "newbie_claimed": user.newbie_claimed,
         }
-    with open(USER_DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    safe_json_save(
+        USER_DATA_FILE, data,
+        cache_is_empty=not bool(_user_data),
+        cache_name="积分",
+    )
 
 
 def _load_bank_data() -> dict:
@@ -145,10 +149,8 @@ def _load_bank_data() -> dict:
 
 
 def _save_bank_data(data: dict):
-    """保存银行数据"""
-    _ensure_data_dir()
-    with open(BANK_DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """安全保存银行数据"""
+    safe_json_save(BANK_DATA_FILE, data)
 
 
 def migrate_bank_points():
@@ -176,8 +178,7 @@ def migrate_bank_points():
         
         # 如果有迁移，保存数据
         if migrated_count > 0:
-            with open(USER_DATA_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            safe_json_save(USER_DATA_FILE, data)
             
             logger.info(f"[积分系统] 已迁移 {migrated_count} 位用户的银行积分，共 {total_migrated} 积分")
             
@@ -285,8 +286,7 @@ def _load_guess_games() -> Dict[str, dict]:
 
 
 def _save_guess_games():
-    """保存猜数字游戏数据"""
-    _ensure_data_dir()
+    """安全保存猜数字游戏数据"""
     data = {}
     for user_id, game in _guess_games.items():
         if game.is_active:
@@ -296,8 +296,7 @@ def _save_guess_games():
                 "bet": game.bet,
                 "is_active": game.is_active,
             }
-    with open(GUESS_GAME_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    safe_json_save(GUESS_GAME_FILE, data)
 
 
 def get_guess_game(user_id: str) -> Optional[GuessGame]:
@@ -451,9 +450,7 @@ def calculate_bank_interest():
                 user_data["bank_interest_hidden"] = total_hidden
     
     # 保存数据
-    _ensure_data_dir()
-    with open(USER_DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    safe_json_save(USER_DATA_FILE, data)
     
     # 更新缓存中的银行积分
     for user_id, user_data in data.items():
@@ -500,10 +497,8 @@ def _load_game_limits() -> dict:
 
 
 def _save_game_limits(data: dict):
-    """保存每日游戏次数数据"""
-    _ensure_data_dir()
-    with open(GAME_LIMIT_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """安全保存每日游戏次数数据"""
+    safe_json_save(GAME_LIMIT_FILE, data)
 
 
 def get_game_remaining(user_id: str, game_type: str) -> int:
@@ -562,10 +557,8 @@ def _load_fortune_data() -> dict:
 
 
 def _save_fortune_data(data: dict):
-    """保存每日抽签记录"""
-    _ensure_data_dir()
-    with open(FORTUNE_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """安全保存每日抽签记录"""
+    safe_json_save(FORTUNE_FILE, data)
 
 
 def draw_fortune(user_id: str) -> dict:

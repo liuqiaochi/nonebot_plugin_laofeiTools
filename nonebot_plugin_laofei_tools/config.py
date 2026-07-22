@@ -10,6 +10,8 @@ from typing import Set
 from nonebot import get_driver
 from pydantic import BaseModel
 
+from .common.data_utils import safe_json_save
+
 
 class Config(BaseModel):
     """插件配置类"""
@@ -52,14 +54,8 @@ def _load_enabled_groups() -> Set[str]:
 
 
 def _save_enabled_groups(groups: Set[str]):
-    """保存已开启的群聊列表到文件"""
-    _ensure_data_dir()
-    try:
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump({"enabled_groups": list(groups)}, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        from nonebot.log import logger
-        logger.error(f"保存群聊配置失败: {e}")
+    """安全保存已开启的群聊列表到文件"""
+    safe_json_save(DATA_FILE, {"enabled_groups": list(groups)})
 
 
 # ========== 积分系统开关 ==========
@@ -78,14 +74,8 @@ def _load_points_disabled_groups() -> Set[str]:
 
 
 def _save_points_disabled_groups(groups: Set[str]):
-    """保存已关闭积分系统的群聊列表到文件"""
-    _ensure_data_dir()
-    try:
-        with open(POINTS_DISABLED_FILE, "w", encoding="utf-8") as f:
-            json.dump({"disabled_groups": list(groups)}, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        from nonebot.log import logger
-        logger.error(f"保存积分系统配置失败: {e}")
+    """安全保存已关闭积分系统的群聊列表到文件"""
+    safe_json_save(POINTS_DISABLED_FILE, {"disabled_groups": list(groups)})
 
 
 # 运行时状态存储（从文件加载）
@@ -157,13 +147,7 @@ def _load_ai_enabled_groups() -> Set[str]:
 
 
 def _save_ai_enabled_groups(groups: Set[str]):
-    _ensure_data_dir()
-    try:
-        with open(AI_ENABLED_FILE, "w", encoding="utf-8") as f:
-            json.dump({"enabled_groups": list(groups)}, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        from nonebot.log import logger
-        logger.error(f"保存 AI 群聊配置失败: {e}")
+    safe_json_save(AI_ENABLED_FILE, {"enabled_groups": list(groups)})
 
 
 def _load_ai_blacklist() -> Set[str]:
@@ -179,13 +163,7 @@ def _load_ai_blacklist() -> Set[str]:
 
 
 def _save_ai_blacklist(blacklist: Set[str]):
-    _ensure_data_dir()
-    try:
-        with open(AI_BLACKLIST_FILE, "w", encoding="utf-8") as f:
-            json.dump({"blacklist": list(blacklist)}, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        from nonebot.log import logger
-        logger.error(f"保存 AI 黑名单失败: {e}")
+    safe_json_save(AI_BLACKLIST_FILE, {"blacklist": list(blacklist)})
 
 
 # 初始化

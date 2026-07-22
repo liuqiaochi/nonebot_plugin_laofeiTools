@@ -15,6 +15,7 @@ from typing import Dict, List, Optional
 
 from loguru import logger
 
+from .data_utils import safe_json_save
 from .points_data import get_user, save_user
 
 # 数据文件路径（锚定项目根目录，不依赖运行时 CWD，避免覆盖文件后数据丢失）
@@ -52,10 +53,8 @@ def _load_lottery_pool() -> dict:
 
 
 def _save_lottery_pool(data: dict):
-    """保存奖池状态"""
-    _ensure_data_dir()
-    with open(LOTTERY_POOL_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """安全保存奖池状态"""
+    safe_json_save(LOTTERY_POOL_FILE, data)
 
 
 def _get_default_pool() -> dict:
@@ -83,10 +82,8 @@ def _load_lottery_bets() -> dict:
 
 
 def _save_lottery_bets(data: dict):
-    """保存押注记录"""
-    _ensure_data_dir()
-    with open(LOTTERY_BETS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """安全保存押注记录"""
+    safe_json_save(LOTTERY_BETS_FILE, data)
 
 
 def _load_lottery_history() -> list:
@@ -103,10 +100,8 @@ def _load_lottery_history() -> list:
 
 
 def _save_lottery_history(data: list):
-    """保存开奖历史"""
-    _ensure_data_dir()
-    with open(LOTTERY_HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """安全保存开奖历史"""
+    safe_json_save(LOTTERY_HISTORY_FILE, data)
 
 
 def get_current_round() -> int:
