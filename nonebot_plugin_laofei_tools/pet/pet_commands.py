@@ -5,6 +5,7 @@
 """
 
 from pathlib import Path
+import random
 
 from nonebot import on_command, logger
 from nonebot.adapters.onebot.v11 import (
@@ -30,6 +31,7 @@ from .pet_data import (
     do_walk, do_pat, do_feed, do_pk,
     refresh_stamina_if_needed,
     do_work, do_steal, get_item_by_id,
+    get_all_pet_owners,
 )
 
 # 宠物图片目录（插件根目录下的 image 文件夹）
@@ -1109,4 +1111,140 @@ async def handle_rename(matcher: Matcher, event: MessageEvent, args: Message = C
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
         MessageSegment.text(f"✅ 改名成功！{old_name} → {new_name}\n消耗500积分")
+    ]))
+
+
+# ========== 随机对手选择辅助函数 ==========
+
+def _get_random_targets(user_id: str, n: int = 10) -> list:
+    """返回最多 n 个其他养宠玩家的随机 ID 列表（打乱顺序）"""
+    candidates = [u for u in get_all_pet_owners() if u != user_id]
+    random.shuffle(candidates)
+    return candidates[:n]
+
+
+# ========== 一键宠物日常指令（仅超级管理员） ==========
+pet_daily_cmd = on_command(
+    "宠物日常",
+    aliases={"一键日常", "宠物打卡"},
+    priority=5,
+    block=True,
+    force_whitespace=True,
+    permission=SUPERUSER,
+)
+
+
+@pet_daily_cmd.handle()
+async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
+    """一键完成宠物日常：抚摸 → 随机PK → 打工 → 散步至体力耗尽 → 随机偷取"""
+    # 群聊检查积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
+
+    user_id = str(event.user_id)
+    pet = get_pet(user_id)
+    if pet is None:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("你还没有领养宠物，请先发送「我的宠物」领养一只")
+        ]))
+        return
+
+    # 先确保体力已按日刷新
+    refresh_stamina_if_needed(user_id)
+
+    lines = []
+
+    # 1. 宠物抚摸
+    pat = do_pat(user_id)
+    if pat["success"]:
+        lines.append(
+            f"🤚 抚摸：好感 {pat['affection_before']} → {pat['affection_after']}（+{pat['affection_gain']}）"
+        )
+    else:
+        lines.append(f"🤚 抚摸：{pat['message']}")
+
+    # 2. 随机 PK 一个玩家（尝试多个对手直到成功）
+    targets = _get_random_targets(user_id, n=10)
+    pk_done = None
+    last_pk_msg = ""
+    for t in targets:
+        pk = do_pk(user_id, t)
+        last_pk_msg = pk["message"]
+        if pk["success"]:
+            pk_done = pk
+            break
+    if pk_done is not None:
+        winner = pk_done["attacker_name"] if pk_done["attacker_won"] else pk_done["defender_name"]
+        lines.append(
+            f"⚔️ PK：对方 {pk_done['defender_name']}（胜率 {pk_done['win_rate']:.1f}%），"
+            f"{winner} 获胜，奖励 {pk_done['reward_food']}"
+        )
+    elif targets:
+        lines.append(f"⚔️ PK：未找到合适对手（{last_pk_msg}）")
+    else:
+        lines.append("⚔️ PK：未找到其他玩家")
+
+    # 3. 宠物打工 x1
+    work = do_work(user_id)
+    if work["success"]:
+        extra = "，额外获得 " + "、".join(work["dropped_items"]) if work["dropped_items"] else ""
+        lines.append(f"💼 打工：+{work['points_earned']} 积分{extra}")
+    else:
+        lines.append(f"💼 打工：{work['message']}")
+
+    # 4. 宠物散步，一直到体力用完（上限 30 次防止异常死循环）
+    walk_count = 0
+    walk_drops = []
+    while walk_count < 30:
+        cur = get_pet(user_id)
+        if cur.stamina < 20:
+            break
+        w = do_walk(user_id)
+        if not w["success"]:
+            break
+        walk_count += 1
+        if w["dropped"]:
+            walk_drops.append(w["dropped_item"])
+    pet_after = get_pet(user_id)
+    drop_text = "，捡到 " + "、".join(walk_drops) if walk_drops else "，未掉落道具"
+    lines.append(
+        f"🐾 散步：共 {walk_count} 次（体力 {pet_after.stamina}/{pet_after.max_stamina}）{drop_text}"
+    )
+
+    # 5. 随机偷取一个玩家
+    steal_targets = _get_random_targets(user_id, n=5)
+    st_text = "未找到其他玩家"
+    for t in steal_targets:
+        st = do_steal(user_id, t)
+        if st["success"]:
+            if st["stolen"]:
+                st_text = f"从 {st['target_pet_name']} 处偷到「{st['item_name']}」"
+            else:
+                st_text = st["message"]
+            break
+        else:
+            st_text = st["message"]
+            # 每日已使用则无需再尝试其他目标
+            if "今日已使用" in st["message"]:
+                break
+    lines.append(f"🤫 偷取：{st_text}")
+
+    # 汇总输出
+    pet = get_pet(user_id)
+    level = get_pet_level(pet.exp)
+    aff = get_affection_level(pet.affection)
+    header = (
+        f"📋 {get_display_name(pet)} 日常完成\n"
+        f"等级 Lv.{level} | 好感 Lv.{aff} | 体力 {pet.stamina}/{pet.max_stamina}\n"
+        f"————————————\n"
+    )
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(header + "\n".join(lines))
     ]))

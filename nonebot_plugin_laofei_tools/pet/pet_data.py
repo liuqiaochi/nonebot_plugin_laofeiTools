@@ -285,6 +285,11 @@ def get_pet(user_id: str) -> Optional[PetData]:
     return _pet_cache.get(user_id)
 
 
+def get_all_pet_owners() -> list:
+    """返回所有已领养宠物的用户 ID 列表（用于随机选对手等）"""
+    return list(_pet_cache.keys())
+
+
 def create_pet(user_id: str, pet_type: str) -> PetData:
     """创建宠物并持久化存储
 
