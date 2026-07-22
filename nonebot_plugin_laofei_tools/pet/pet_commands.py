@@ -8,6 +8,7 @@ from pathlib import Path
 import random
 
 from nonebot import on_command, logger
+from nonebot.permission import SUPERUSER
 from nonebot.adapters.onebot.v11 import (
     Bot,
     GroupMessageEvent,
