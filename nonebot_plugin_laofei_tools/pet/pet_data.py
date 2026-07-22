@@ -12,8 +12,8 @@ from typing import Dict, Optional
 
 from loguru import logger
 
-# 数据文件路径
-DATA_DIR = Path("data/laofei_tools")
+# 数据文件路径（锚定项目根目录，不依赖运行时 CWD，避免覆盖文件后数据丢失）
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "laofei_tools"
 PET_DATA_FILE = DATA_DIR / "pet_data.json"
 PET_INVENTORY_FILE = DATA_DIR / "pet_inventory.json"
 PET_PK_RECORD_FILE = DATA_DIR / "pet_pk_records.json"
@@ -186,6 +186,10 @@ def _load_pet_data() -> Dict[str, dict]:
 def _save_pet_data():
     """将 _pet_cache 序列化为 JSON 并写入 PET_DATA_FILE"""
     _ensure_data_dir()
+    # 保险：缓存为空但数据文件已存在时，不覆盖写入，防止误清空已有数据
+    if not _pet_cache and PET_DATA_FILE.exists():
+        logger.warning("[宠物系统] 内存缓存为空但 pet_data.json 已存在，跳过保存以防误清空")
+        return
     data = {}
     for user_id, pet in _pet_cache.items():
         data[user_id] = {
@@ -221,6 +225,10 @@ def _load_inventory_data() -> Dict[str, dict]:
 def _save_inventory_data():
     """将 _inventory_cache 序列化为 JSON 并写入 PET_INVENTORY_FILE"""
     _ensure_data_dir()
+    # 保险：缓存为空但数据文件已存在时，不覆盖写入，防止误清空已有数据
+    if not _inventory_cache and PET_INVENTORY_FILE.exists():
+        logger.warning("[宠物系统] 内存缓存为空但 pet_inventory.json 已存在，跳过保存以防误清空")
+        return
     data = {}
     for user_id, inv in _inventory_cache.items():
         data[user_id] = {
