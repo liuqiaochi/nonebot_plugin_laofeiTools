@@ -28,7 +28,7 @@ class Config(BaseModel):
 
 
 # 数据文件路径（锚定项目根目录，不依赖运行时 CWD，避免覆盖文件后数据丢失）
-DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "laofei_tools"
+DATA_DIR = Path("data/laofei_tools")
 DATA_FILE = DATA_DIR / "enabled_groups.json"
 POINTS_DISABLED_FILE = DATA_DIR / "points_disabled_groups.json"
 AI_ENABLED_FILE = DATA_DIR / "ai_enabled_groups.json"

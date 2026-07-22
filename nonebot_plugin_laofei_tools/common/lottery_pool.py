@@ -19,7 +19,7 @@ from .data_utils import safe_json_save
 from .points_data import get_user, save_user
 
 # 数据文件路径（锚定项目根目录，不依赖运行时 CWD，避免覆盖文件后数据丢失）
-DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "laofei_tools"
+DATA_DIR = Path("data/laofei_tools")
 LOTTERY_POOL_FILE = DATA_DIR / "lottery_pool.json"
 LOTTERY_BETS_FILE = DATA_DIR / "lottery_bets.json"
 LOTTERY_HISTORY_FILE = DATA_DIR / "lottery_history.json"
