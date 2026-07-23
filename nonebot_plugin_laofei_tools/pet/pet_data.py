@@ -1039,7 +1039,7 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     双方根据等级计算最大血量（200 + (等级-1)×100），
     幸运高的先出手，每回合伤害 = 出手方有效武力值，
     谁先血量 ≤ 0 谁负。胜利方获得随机 1 个食物奖励。
-    双方各扣除体力（攻击方-20，防守方-10）。
+    仅攻击方扣除体力（-20），防守方不扣除体力。
 
     Args:
         attacker_id: 发起方用户 ID
@@ -1067,20 +1067,14 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     if a_pet.stamina < 20:
         return {"success": False, "message": f"你的宠物体力不足（当前体力: {a_pet.stamina}，需要20）"}
 
-    # 5. 检查防守方体力
-    if b_pet.stamina < 10:
-        return {"success": False, "message": f"对方宠物体力不足，无法PK"}
-
-    # 6. 记录PK
+    # 5. 记录PK
     record_pk(attacker_id, defender_id)
 
-    # 7. 扣除双方体力
+    # 6. 扣除攻击方体力（防守方不再扣除体力）
     a_pet.stamina -= 20
-    b_pet.stamina -= 10
     save_pet(attacker_id)
-    save_pet(defender_id)
 
-    # 8. 计算双方有效属性
+    # 7. 计算双方有效属性
     a_force = get_effective_force(a_pet)
     a_luck = get_effective_luck(a_pet)
     b_force = get_effective_force(b_pet)
@@ -1095,16 +1089,16 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     a_name = get_display_name(a_pet)
     b_name = get_display_name(b_pet)
 
-    # 9. 计算双方血量
+    # 8. 计算双方血量
     a_hp = get_pet_max_hp(a_pet)
     b_hp = get_pet_max_hp(b_pet)
     a_max_hp = a_hp
     b_max_hp = b_hp
 
-    # 10. 确定先手：幸运高的先出手，幸运相同则攻击方先
+    # 9. 确定先手：幸运高的先出手，幸运相同则攻击方先
     a_first = a_luck >= b_luck
 
-    # 11. 回合制战斗
+    # 10. 回合制战斗
     battle_log = []
     if a_first:
         battle_log.append(f"⚡ {a_name}（幸运{a_luck}）先手！")
@@ -1152,7 +1146,7 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     if attacker_won is None:
         attacker_won = a_hp >= b_hp
 
-    # 12. 胜利奖励（胜利方获得食物）+ 防守方经验
+    # 11. 胜利奖励（胜利方获得食物）+ 防守方经验
     reward_food = random.choice(list(FOODS.keys()))
     if attacker_won:
         add_item(attacker_id, "food", reward_food)
@@ -1166,7 +1160,7 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     battle_log.append("——————————")
     battle_log.append(f"🏆 {winner_name} 获胜！")
 
-    # 13. 返回结果
+    # 12. 返回结果
     return {
         "success": True,
         "attacker_name": a_name,
