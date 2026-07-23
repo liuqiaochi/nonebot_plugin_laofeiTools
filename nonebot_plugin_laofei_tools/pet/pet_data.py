@@ -1123,6 +1123,7 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
             turn += 1
             a_hp -= b_force
             battle_log.append(f"第{turn}手：{b_name} 反击 {a_name}，造成 {b_force} 伤害，{a_name} 剩余 {max(a_hp, 0)} HP")
+            battle_log.append("")
             if a_hp <= 0:
                 attacker_won = False
                 break
@@ -1138,6 +1139,7 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
             turn += 1
             b_hp -= a_force
             battle_log.append(f"第{turn}手：{a_name} 反击 {b_name}，造成 {a_force} 伤害，{b_name} 剩余 {max(b_hp, 0)} HP")
+            battle_log.append("")
             if b_hp <= 0:
                 attacker_won = True
                 break

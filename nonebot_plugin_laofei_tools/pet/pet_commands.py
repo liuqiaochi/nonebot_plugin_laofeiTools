@@ -43,6 +43,25 @@ PET_IMAGE_DIR = Path(__file__).parent.parent / "image"
 _abandon_confirm: dict = {}
 
 
+def make_hp_bar(current: int, max_hp: int, bar_length: int = 10) -> str:
+    """生成文本血量条，格式 [████████░░] HP: current/max
+
+    Args:
+        current: 当前血量
+        max_hp: 最大血量
+        bar_length: 血量条长度（方块数），默认 10
+
+    Returns:
+        血量条字符串
+    """
+    ratio = current / max_hp if max_hp > 0 else 0
+    filled = round(ratio * bar_length)
+    if current > 0 and filled == 0:
+        filled = 1
+    bar = "█" * filled + "░" * (bar_length - filled)
+    return f"[{bar}] HP: {current}/{max_hp}"
+
+
 # ========== 我的宠物指令 ==========
 my_pet_cmd = on_command("我的宠物", aliases={"宠物"}, priority=5, block=True, force_whitespace=True)
 
@@ -89,7 +108,9 @@ async def handle_my_pet(matcher: Matcher, event: MessageEvent):
     # 使用昵称或默认名
     display_name = pet.nickname if pet.nickname else pet_info['name']
 
+    max_hp = get_pet_max_hp(pet)
     msg = f"🐾 {display_name}\n"
+    msg += f"  {make_hp_bar(max_hp, max_hp)}\n"
 
     # 计算当前经验和升级所需经验
     remaining_exp = pet.exp
@@ -102,7 +123,6 @@ async def handle_my_pet(matcher: Matcher, event: MessageEvent):
     msg += f"体力: {pet.stamina}/{pet.max_stamina}\n"
     msg += f"幸运: {eff_luck}\n"
     msg += f"武力: {eff_force}\n"
-    msg += f"血量: {get_pet_max_hp(pet)}\n"
     msg += f"配饰: {acc_text}\n"
     msg += f"天赋「{pet_info['talent']}」: {pet_info['talent_desc']}"
 
@@ -478,7 +498,7 @@ pet_pk_cmd = on_command("宠物pk", aliases={"宠物PK", "宠物Pk", "宠物pK"}
 
 
 @pet_pk_cmd.handle()
-async def handle_pk(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()):
+async def handle_pk(matcher: Matcher, bot: Bot, event: MessageEvent, args: Message = CommandArg()):
     """宠物PK对战"""
     # PK需要@人，仅群聊可用
     if isinstance(event, PrivateMessageEvent):
@@ -489,7 +509,8 @@ async def handle_pk(matcher: Matcher, event: MessageEvent, args: Message = Comma
         return
 
     # 检查群聊是否开启积分系统
-    if not is_points_enabled(str(event.group_id)):
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
             await matcher.finish(Message([
                 MessageSegment.reply(event.message_id),
                 MessageSegment.text("本群积分系统已关闭")
@@ -537,14 +558,27 @@ async def handle_pk(matcher: Matcher, event: MessageEvent, args: Message = Comma
         ]))
         return
 
-    msg = "⚔️ 宠物PK对战\n"
-    msg += "\n".join(result["battle_log"])
-    msg += f"\n🎁 胜者奖励: {result['reward_food']}"
+    # 构建合并转发消息
+    battle_text = "⚔️ 宠物PK对战\n\n"
+    # battle_log 已包含空行分隔
+    battle_text += "\n".join(result["battle_log"])
+    battle_text += f"\n🎁 胜者奖励: {result['reward_food']}"
 
-    await matcher.finish(Message([
-        MessageSegment.reply(event.message_id),
-        MessageSegment.text(msg)
-    ]))
+    # 以合并转发方式发送
+    node_content = Message(MessageSegment.text(battle_text))
+    await bot.send_group_forward_msg(
+        group_id=event.group_id,
+        messages=[{
+            "type": "node",
+            "data": {
+                "name": "宠物对战",
+                "uin": str(bot.self_id),
+                "content": node_content,
+            },
+        }],
+    )
+
+    await matcher.finish()
 
 
 # ========== 宠物商店指令 ==========
