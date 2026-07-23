@@ -1136,7 +1136,7 @@ pet_daily_cmd = on_command(
 
 @pet_daily_cmd.handle()
 async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
-    """一键完成宠物日常：抚摸 → 随机PK → 打工 → 散步至体力耗尽 → 随机偷取"""
+    """一键完成宠物日常：抚摸 → 打工 → 散步至体力耗尽 → 随机偷取"""
     # 群聊检查积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
@@ -1169,28 +1169,7 @@ async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
     else:
         lines.append(f"🤚 抚摸：{pat['message']}")
 
-    # 2. 随机 PK 一个玩家（尝试多个对手直到成功）
-    targets = _get_random_targets(user_id, n=10)
-    pk_done = None
-    last_pk_msg = ""
-    for t in targets:
-        pk = do_pk(user_id, t)
-        last_pk_msg = pk.get("message", "")
-        if pk["success"]:
-            pk_done = pk
-            break
-    if pk_done is not None:
-        winner = pk_done["attacker_name"] if pk_done["attacker_won"] else pk_done["defender_name"]
-        lines.append(
-            f"⚔️ PK：对方 {pk_done['defender_name']}（胜率 {pk_done['win_rate']:.1f}%），"
-            f"{winner} 获胜，奖励 {pk_done['reward_food']}"
-        )
-    elif targets:
-        lines.append(f"⚔️ PK：未找到合适对手（{last_pk_msg}）")
-    else:
-        lines.append("⚔️ PK：未找到其他玩家")
-
-    # 3. 宠物打工 x1
+    # 2. 宠物打工 x1
     work = do_work(user_id)
     if work["success"]:
         # 发放积分（do_work 只计算结果不入账，由调用方发放，与独立打工指令一致）
@@ -1202,7 +1181,7 @@ async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
     else:
         lines.append(f"💼 打工：{work['message']}")
 
-    # 4. 宠物散步，一直到体力用完（上限 30 次防止异常死循环）
+    # 3. 宠物散步，一直到体力用完（上限 30 次防止异常死循环）
     walk_count = 0
     walk_drops = []
     while walk_count < 30:
@@ -1221,7 +1200,7 @@ async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
         f"🐾 散步：共 {walk_count} 次（体力 {pet_after.stamina}/{pet_after.max_stamina}）{drop_text}"
     )
 
-    # 5. 随机偷取一个玩家
+    # 4. 随机偷取一个玩家
     steal_targets = _get_random_targets(user_id, n=5)
     st_text = "未找到其他玩家"
     for t in steal_targets:
