@@ -1193,6 +1193,10 @@ async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
     # 3. 宠物打工 x1
     work = do_work(user_id)
     if work["success"]:
+        # 发放积分（do_work 只计算结果不入账，由调用方发放，与独立打工指令一致）
+        points_user = get_points_user(user_id)
+        points_user.points += work["points_earned"]
+        save_points_user(user_id)
         extra = "，额外获得 " + "、".join(work["dropped_items"]) if work["dropped_items"] else ""
         lines.append(f"💼 打工：+{work['points_earned']} 积分{extra}")
     else:
