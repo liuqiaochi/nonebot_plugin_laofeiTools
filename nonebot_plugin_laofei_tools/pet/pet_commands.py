@@ -26,6 +26,7 @@ from .pet_data import (
     PET_TYPES, FOODS, ACCESSORIES, AFFECTION_LEVELS,
     get_pet, create_pet, save_pet, abandon_pet,
     get_pet_level, get_affection_level, get_effective_force, get_effective_luck,
+    get_pet_max_hp,
     get_display_name,
     get_inventory, add_item, remove_item, save_inventory,
     equip_accessory, unequip_accessory,
@@ -101,6 +102,7 @@ async def handle_my_pet(matcher: Matcher, event: MessageEvent):
     msg += f"体力: {pet.stamina}/{pet.max_stamina}\n"
     msg += f"幸运: {eff_luck}\n"
     msg += f"武力: {eff_force}\n"
+    msg += f"血量: {get_pet_max_hp(pet)}\n"
     msg += f"配饰: {acc_text}\n"
     msg += f"天赋「{pet_info['talent']}」: {pet_info['talent_desc']}"
 
@@ -535,14 +537,9 @@ async def handle_pk(matcher: Matcher, event: MessageEvent, args: Message = Comma
         ]))
         return
 
-    msg = f"⚔️ 宠物PK\n"
-    msg += f"🔴 {result['attacker_name']} 体力-20\n"
-    msg += f"🔵 {result['defender_name']} 体力-10\n"
-    if result["attacker_won"]:
-        msg += f"🎉 {result['attacker_name']} 获胜！\n"
-    else:
-        msg += f"😢 {result['defender_name']} 获胜！\n"
-    msg += f"🎁 胜者奖励: {result['reward_food']}"
+    msg = "⚔️ 宠物PK对战\n"
+    msg += "\n".join(result["battle_log"])
+    msg += f"\n🎁 胜者奖励: {result['reward_food']}"
 
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),

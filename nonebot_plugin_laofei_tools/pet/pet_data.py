@@ -45,7 +45,7 @@ PET_TYPES = {
         "luck": 0,
         "force": 20,
         "talent": "我的刀盾",
-        "talent_desc": "PK胜率加5%",
+        "talent_desc": "PK武力加5",
         "image": "pet-dog.gif",
         "fav_food": "骨头",
     },
@@ -547,6 +547,12 @@ def get_effective_luck(pet: PetData) -> int:
     return pet.base_luck + acc_bonus
 
 
+def get_pet_max_hp(pet: PetData) -> int:
+    """计算宠物最大血量 = 200 + (等级 - 1) × 100"""
+    level = get_pet_level(pet.exp)
+    return 200 + (level - 1) * 100
+
+
 def get_display_name(pet: PetData) -> str:
     """获取宠物显示名（昵称优先，无昵称则用种类名）"""
     return pet.nickname if pet.nickname else PET_TYPES[pet.pet_type]["name"]
@@ -1028,18 +1034,19 @@ def record_pk(attacker_id: str, defender_id: str):
 # ========== PK 逻辑 ==========
 
 def do_pk(attacker_id: str, defender_id: str) -> dict:
-    """宠物 PK 对战逻辑
+    """宠物 PK 对战逻辑（回合制）
 
-    根据双方宠物的武力和幸运计算胜率，随机决定胜负。
-    胜利方获得随机 1 个食物奖励。
-    双方各扣除 20 点体力。
+    双方根据等级计算最大血量（200 + (等级-1)×100），
+    幸运高的先出手，每回合伤害 = 出手方有效武力值，
+    谁先血量 ≤ 0 谁负。胜利方获得随机 1 个食物奖励。
+    双方各扣除体力（攻击方-20，防守方-10）。
 
     Args:
         attacker_id: 发起方用户 ID
         defender_id: 防守方用户 ID
 
     Returns:
-        dict: PK 结果，包含 success、双方属性、胜率、胜负和奖励信息
+        dict: PK 结果，包含 success、双方属性、血量、战斗日志、胜负和奖励信息
     """
     # 1. 获取攻击方宠物
     a_pet = get_pet(attacker_id)
@@ -1073,25 +1080,79 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     save_pet(attacker_id)
     save_pet(defender_id)
 
-    # 5. 计算双方有效属性
+    # 8. 计算双方有效属性
     a_force = get_effective_force(a_pet)
     a_luck = get_effective_luck(a_pet)
     b_force = get_effective_force(b_pet)
+    b_luck = get_effective_luck(b_pet)
 
-    # 8. 计算胜率
-    # 幸运值采用平方根递减：低幸运变化大，高幸运变化小
-    # luck=10 → ~4.7%, luck=20 → ~6.7%, luck=50 → ~10.6%, luck=100 → ~15%
-    import math
-    luck_bonus = math.sqrt(a_luck) * 1.5 if a_luck > 0 else 0
-    win_rate = 50 + (a_force - b_force) * 2 + luck_bonus
-    if a_pet.pet_type == "dog":  # 刀盾狗天赋
-        win_rate += 5
-    win_rate = max(5, min(95, win_rate))  # clamp to [5%, 95%]
+    # 刀盾狗天赋：PK 时武力 +5
+    if a_pet.pet_type == "dog":
+        a_force += 5
+    if b_pet.pet_type == "dog":
+        b_force += 5
 
-    # 7. 掷骰子判断胜负
-    attacker_won = random.random() * 100 < win_rate
+    a_name = get_display_name(a_pet)
+    b_name = get_display_name(b_pet)
 
-    # 8. 胜利奖励（胜利方获得食物）+ 防守方经验
+    # 9. 计算双方血量
+    a_hp = get_pet_max_hp(a_pet)
+    b_hp = get_pet_max_hp(b_pet)
+    a_max_hp = a_hp
+    b_max_hp = b_hp
+
+    # 10. 确定先手：幸运高的先出手，幸运相同则攻击方先
+    a_first = a_luck >= b_luck
+
+    # 11. 回合制战斗
+    battle_log = []
+    if a_first:
+        battle_log.append(f"⚡ {a_name}（幸运{a_luck}）先手！")
+    else:
+        battle_log.append(f"⚡ {b_name}（幸运{b_luck}）先手！")
+    battle_log.append(f"🔴 {a_name} HP {a_max_hp} | 武力 {a_force}")
+    battle_log.append(f"🔵 {b_name} HP {b_max_hp} | 武力 {b_force}")
+    battle_log.append("——————————")
+
+    turn = 0
+    attacker_won = None
+    while turn < 500:  # 上限 500 手防止死循环
+        if a_first:
+            # 攻击方出手
+            turn += 1
+            b_hp -= a_force
+            battle_log.append(f"第{turn}手：{a_name} 攻击 {b_name}，造成 {a_force} 伤害，{b_name} 剩余 {max(b_hp, 0)} HP")
+            if b_hp <= 0:
+                attacker_won = True
+                break
+            # 防守方反击
+            turn += 1
+            a_hp -= b_force
+            battle_log.append(f"第{turn}手：{b_name} 反击 {a_name}，造成 {b_force} 伤害，{a_name} 剩余 {max(a_hp, 0)} HP")
+            if a_hp <= 0:
+                attacker_won = False
+                break
+        else:
+            # 防守方先出手
+            turn += 1
+            a_hp -= b_force
+            battle_log.append(f"第{turn}手：{b_name} 攻击 {a_name}，造成 {b_force} 伤害，{a_name} 剩余 {max(a_hp, 0)} HP")
+            if a_hp <= 0:
+                attacker_won = False
+                break
+            # 攻击方反击
+            turn += 1
+            b_hp -= a_force
+            battle_log.append(f"第{turn}手：{a_name} 反击 {b_name}，造成 {a_force} 伤害，{b_name} 剩余 {max(b_hp, 0)} HP")
+            if b_hp <= 0:
+                attacker_won = True
+                break
+
+    # 兜底：500 手未分胜负，按剩余血量多者胜
+    if attacker_won is None:
+        attacker_won = a_hp >= b_hp
+
+    # 12. 胜利奖励（胜利方获得食物）+ 防守方经验
     reward_food = random.choice(list(FOODS.keys()))
     if attacker_won:
         add_item(attacker_id, "food", reward_food)
@@ -1101,18 +1162,25 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
         b_pet.exp += 10  # 防守方赢了获得10点经验
     save_pet(defender_id)
 
-    # 9. 返回结果
+    winner_name = a_name if attacker_won else b_name
+    battle_log.append("——————————")
+    battle_log.append(f"🏆 {winner_name} 获胜！")
+
+    # 13. 返回结果
     return {
         "success": True,
-        "attacker_name": get_display_name(a_pet),
-        "defender_name": get_display_name(b_pet),
+        "attacker_name": a_name,
+        "defender_name": b_name,
         "attacker_force": a_force,
-        "attacker_luck": a_luck,
         "defender_force": b_force,
-        "defender_luck": get_effective_luck(b_pet),
-        "win_rate": win_rate,
+        "attacker_luck": a_luck,
+        "defender_luck": b_luck,
+        "attacker_max_hp": a_max_hp,
+        "defender_max_hp": b_max_hp,
         "attacker_won": attacker_won,
+        "winner_name": winner_name,
         "reward_food": reward_food,
+        "battle_log": battle_log,
         "attacker_stamina": a_pet.stamina,
         "defender_stamina": b_pet.stamina,
     }
