@@ -43,13 +43,13 @@ PET_IMAGE_DIR = Path(__file__).parent.parent / "image"
 _abandon_confirm: dict = {}
 
 
-def make_hp_bar(current: int, max_hp: int, bar_length: int = 10) -> str:
-    """生成文本血量条，格式 [████████░░] HP: current/max
+def make_hp_bar(current: int, max_hp: int, bar_length: int = 5) -> str:
+    """生成文本血量条，格式 HP:[█████] 200
 
     Args:
         current: 当前血量
         max_hp: 最大血量
-        bar_length: 血量条长度（方块数），默认 10
+        bar_length: 血量条长度（方块数），默认 5
 
     Returns:
         血量条字符串
@@ -59,7 +59,7 @@ def make_hp_bar(current: int, max_hp: int, bar_length: int = 10) -> str:
     if current > 0 and filled == 0:
         filled = 1
     bar = "█" * filled + "░" * (bar_length - filled)
-    return f"[{bar}] HP: {current}/{max_hp}"
+    return f"HP:[{bar}] {current}"
 
 
 # ========== 我的宠物指令 ==========
