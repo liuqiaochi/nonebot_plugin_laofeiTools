@@ -1,7 +1,7 @@
 """
 宠物钓鱼系统 - 指令处理
 
-指令：钓鱼、钓鱼图鉴、钓鱼箱、钓鱼出售
+指令：钓鱼、快速钓鱼、钓鱼图鉴、钓鱼箱、钓鱼出售
 """
 
 import asyncio
@@ -160,6 +160,172 @@ async def handle_fishing(
         MessageSegment.image(get_fish_image_path(fish["id"])),
         MessageSegment.text(msg)
     ]))
+
+
+# ========== 快速钓鱼指令 ==========
+
+fishing_quick_cmd = on_command(
+    "快速钓鱼",
+    aliases={"连续钓鱼"},
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+@fishing_quick_cmd.handle()
+async def handle_quick_fishing(
+    bot: Bot, matcher: Matcher, event: MessageEvent
+):
+    """快速钓鱼：自动消耗体力钓鱼直到体力不足，无延迟，结果合并转发返回"""
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("快速钓鱼仅在群聊可用")
+        ]))
+        return
+
+    if not is_points_enabled(str(event.group_id)):
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("本群积分系统已关闭")
+        ]))
+        return
+
+    user_id = str(event.user_id)
+    pet = get_pet(user_id)
+    if pet is None:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("你还没有领养宠物，请先发送「我的宠物」领养一只")
+        ]))
+        return
+
+    refresh_stamina_if_needed(pet)
+    if pet.stamina < FISHING_STAMINA_COST:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(f"你的宠物体力不足，钓鱼需要 {FISHING_STAMINA_COST} 点体力（当前 {pet.stamina} 点）")
+        ]))
+        return
+
+    nodes = []
+    catch_count = 0
+    fish_count = 0
+    junk_count = 0
+    rarity_counts = {"legendary": 0, "super_rare": 0, "rare": 0, "common": 0}
+    total_value = 0
+
+    while catch_count < 30:
+        pet = get_pet(user_id)
+        if pet.stamina < FISHING_STAMINA_COST:
+            break
+
+        pet.stamina -= FISHING_STAMINA_COST
+        save_pet(user_id)
+
+        fish = roll_fish()
+        catch_count += 1
+
+        # ─── 杂物 ───
+        if fish["rarity"] == "junk":
+            junk_count += 1
+            junk_short = {
+                "臭鞋子": "太臭了！",
+                "海带": "今晚加菜？",
+                "塑料袋": "不环保...",
+                "破抹布": "太旧了...",
+                "群友": "快放回去！",
+            }.get(fish["name"], "啥玩意...")
+            node_text = f"🎣 第{catch_count}次：🗑️ {fish['name']}\n💬 {junk_short}"
+            nodes.append({
+                "type": "node",
+                "data": {
+                    "name": "快速钓鱼",
+                    "uin": str(bot.self_id),
+                    "content": str(Message(MessageSegment.text(node_text))),
+                },
+            })
+            continue
+
+        # ─── 正常鱼 ───
+        fish_count += 1
+        rarity_counts[fish["rarity"]] += 1
+        add_caught_fish(user_id, fish["id"])
+        sell_price = get_sell_price(fish)
+        total_value += sell_price
+
+        rarity_tag = {
+            "legendary": "💎💎💎",
+            "super_rare": "✨✨✨",
+            "rare": "✨✨",
+            "common": "",
+        }.get(fish["rarity"], "")
+
+        node_text = (
+            f"🎣 第{catch_count}次：{rarity_tag}\n"
+            f"🐟 {fish['rarity_cn']}: {fish['name']}\n"
+            f"💰 售价: {sell_price} 积分"
+        )
+
+        image_path = get_fish_image_path(fish["id"])
+        if image_path.exists():
+            node_content = Message([
+                MessageSegment.image(image_path),
+                MessageSegment.text(f"\n{node_text}")
+            ])
+        else:
+            node_content = Message(MessageSegment.text(f"🐟 {node_text}"))
+
+        nodes.append({
+            "type": "node",
+            "data": {
+                "name": fish["name"],
+                "uin": str(bot.self_id),
+                "content": str(node_content),
+            },
+        })
+
+    if catch_count == 0:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("体力不足，无法钓鱼")
+        ]))
+        return
+
+    # 汇总节点
+    pet_after = get_pet(user_id)
+    summary = (
+        f"⚡ 快速钓鱼完成！\n"
+        f"🎣 共钓鱼 {catch_count} 次\n"
+        f"🐟 钓到鱼: {fish_count} 条"
+    )
+    if rarity_counts["legendary"]:
+        summary += f"（💎{rarity_counts['legendary']}）"
+    if rarity_counts["super_rare"]:
+        summary += f"（✨{rarity_counts['super_rare']}）"
+    if rarity_counts["rare"]:
+        summary += f"（⭐{rarity_counts['rare']}）"
+    if rarity_counts["common"]:
+        summary += f"（普通{rarity_counts['common']}）"
+    summary += f"\n🗑️ 杂物: {junk_count} 个"
+    summary += f"\n💰 预估总价值: {total_value} 积分"
+    summary += f"\n⚡ 剩余体力: {pet_after.stamina}/{pet_after.max_stamina}"
+
+    nodes.insert(0, {
+        "type": "node",
+        "data": {
+            "name": "快速钓鱼汇总",
+            "uin": str(bot.self_id),
+            "content": str(Message(MessageSegment.text(summary))),
+        },
+    })
+
+    await bot.send_group_forward_msg(
+        group_id=event.group_id,
+        messages=nodes,
+    )
+    await matcher.finish()
 
 
 # ========== 钓鱼图鉴指令 ==========
@@ -662,6 +828,8 @@ async def handle_fishing_help(matcher: Matcher, event: MessageEvent):
             "🎣 宠物钓鱼系统\n"
             "━━━━━━━━━━━━━━━\n"
             "🐟 钓鱼     — 消耗10体力抛竿钓鱼，稀有度越高等待越久\n"
+            "⚡ 快速钓鱼 — 自动钓鱼至体力耗尽，无延迟，合并转发结果\n"
+            "   别名：连续钓鱼\n"
             "📖 钓鱼图鉴 — 查看全部36种鱼的收集进度\n"
             "   别名：鱼图鉴\n"
             "🎒 钓鱼箱   — 查看已钓到的鱼，可进行售卖\n"

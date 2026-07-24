@@ -234,6 +234,7 @@ async def handle_pet_help(matcher: Matcher, event: MessageEvent):
 领养 宠物名 - 领养指定宠物
 宠物散步 - 消耗体力散步获取经验和道具
 宠物打工 - 消耗体力打工赚取积分（4小时间隔）
+快速打工 - 自动打工至体力耗尽，合并转发结果
 宠物抚摸 - 每日抚摸提升好感度
 宠物喂食 食物名 [数量] - 喂食恢复体力和好感度
 宠物pk @某人 - 与他人宠物PK对战
@@ -939,6 +940,103 @@ async def handle_work(matcher: Matcher, event: MessageEvent):
         MessageSegment.reply(event.message_id),
         MessageSegment.text(msg)
     ]))
+
+
+# ========== 快速打工指令 ==========
+pet_quick_work_cmd = on_command("快速打工", aliases={"连续打工"}, priority=5, block=True, force_whitespace=True)
+
+
+@pet_quick_work_cmd.handle()
+async def handle_quick_work(bot: Bot, matcher: Matcher, event: MessageEvent):
+    """快速打工：自动消耗体力打工直到体力不足，结果合并转发返回"""
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("快速打工仅在群聊可用")
+        ]))
+        return
+
+    if not is_points_enabled(str(event.group_id)):
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("本群积分系统已关闭")
+        ]))
+        return
+
+    user_id = str(event.user_id)
+    pet = get_pet(user_id)
+    if pet is None:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("你还没有领养宠物，请先发送「我的宠物」领养一只")
+        ]))
+        return
+
+    refresh_stamina_if_needed(user_id)
+
+    nodes = []
+    total_points = 0
+    total_drops = []
+    work_count = 0
+
+    while work_count < 30:
+        result = do_work(user_id)
+        if not result["success"]:
+            break
+        work_count += 1
+        total_points += result["points_earned"]
+        total_drops.extend(result["dropped_items"])
+
+        # 发放积分
+        points_user = get_points_user(user_id)
+        points_user.points += result["points_earned"]
+        save_points_user(user_id)
+
+        # 构建节点
+        node_text = f"💼 第{work_count}次打工\n获得 {result['points_earned']} 积分\n体力: {result['stamina_after']}"
+        if result["dropped_items"]:
+            node_text += f"\n🎁 额外获得: {'、'.join(result['dropped_items'])}"
+        nodes.append({
+            "type": "node",
+            "data": {
+                "name": result["pet_name"],
+                "uin": str(bot.self_id),
+                "content": str(Message(MessageSegment.text(node_text))),
+            },
+        })
+
+    if work_count == 0:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(f"体力不足，无法打工（当前体力: {get_pet(user_id).stamina}，需要30）")
+        ]))
+        return
+
+    # 汇总节点
+    pet_after = get_pet(user_id)
+    summary = (
+        f"⚡ 快速打工完成！\n"
+        f"💼 共打工 {work_count} 次\n"
+        f"💰 共获得 {total_points} 积分\n"
+        f"⚡ 剩余体力: {pet_after.stamina}/{pet_after.max_stamina}"
+    )
+    if total_drops:
+        summary += f"\n🎁 额外掉落: {'、'.join(total_drops)}"
+
+    nodes.insert(0, {
+        "type": "node",
+        "data": {
+            "name": "快速打工汇总",
+            "uin": str(bot.self_id),
+            "content": str(Message(MessageSegment.text(summary))),
+        },
+    })
+
+    await bot.send_group_forward_msg(
+        group_id=event.group_id,
+        messages=nodes,
+    )
+    await matcher.finish()
 
 
 # ========== 飞龙探云手（偷窃技能）指令 ==========
