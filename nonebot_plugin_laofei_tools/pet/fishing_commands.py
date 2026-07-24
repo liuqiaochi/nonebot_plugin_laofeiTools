@@ -27,6 +27,8 @@ from .fishing_data import (
     FISH_BY_RARITY,
     RARITY_CN_MAP,
     FISHING_STAMINA_COST,
+    FISH_IMAGE_DIR,
+    get_fish_image_path,
     add_caught_fish,
     get_fish_info,
     get_fish_by_name,
@@ -132,6 +134,7 @@ async def handle_fishing(
 
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
+        MessageSegment.image(get_fish_image_path(fish["id"])),
         MessageSegment.text(msg)
     ]))
 
@@ -173,31 +176,58 @@ async def handle_fishing_guide(
     total_count = len(ALL_FISH)
     caught_count = len(caught_ids)
 
-    # 构建合并转发节点：三个稀有度各一个节点
+    # 构建合并转发节点：每条鱼一个节点（图+文字），按稀有度分组
     nodes = []
 
     for rarity_key in ["legendary", "super_rare", "rare", "common"]:
         rarity_cn = RARITY_CN_MAP[rarity_key]
         fish_list = FISH_BY_RARITY.get(rarity_key, [])
 
-        node_text = f"🐟 钓鱼图鉴（{caught_count}/{total_count}）\n"
-        node_text += f"━━ {rarity_cn} ━━\n"
         for fish in fish_list:
             owned = fish["id"] in caught_ids
             status = "✅" if owned else "⬜"
             name = fish["name"]
             if owned:
                 price = f"{fish['min_price']}~{fish['max_price']}"
-                node_text += f"  {status} {name}（{price}）\n"
+                info = f"{status} {name}（{price}）"
             else:
-                node_text += f"  {status} {name}（???）\n"
+                info = f"{status} {name}（???）"
 
-        nodes.append({
+            image_path = get_fish_image_path(fish["id"])
+
+            if image_path.exists():
+                node_content = Message([
+                    MessageSegment.image(image_path),
+                    MessageSegment.text(f"\n{info}")
+                ])
+            else:
+                node_content = Message([
+                    MessageSegment.text(f"🐟 {info}")
+                ])
+
+            nodes.append({
+                "type": "node",
+                "data": {
+                    "name": f"钓鱼图鉴-{rarity_cn}",
+                    "uin": str(bot.self_id),
+                    "content": str(node_content),
+                },
+            })
+
+    # 首个节点放统计摘要
+    if nodes:
+        nodes.insert(0, {
             "type": "node",
             "data": {
-                "name": f"钓鱼图鉴-{rarity_cn}",
+                "name": "钓鱼图鉴",
                 "uin": str(bot.self_id),
-                "content": str(Message(MessageSegment.text(node_text))),
+                "content": str(Message(MessageSegment.text(
+                    f"🐟 钓鱼图鉴（{caught_count}/{total_count}）\n"
+                    f"💎稀世罕见 {sum(1 for f in FISH_BY_RARITY['legendary'] if f['id'] in caught_ids)}/{len(FISH_BY_RARITY['legendary'])}  "
+                    f"✨超级稀有 {sum(1 for f in FISH_BY_RARITY['super_rare'] if f['id'] in caught_ids)}/{len(FISH_BY_RARITY['super_rare'])}  "
+                    f"⭐稀有 {sum(1 for f in FISH_BY_RARITY['rare'] if f['id'] in caught_ids)}/{len(FISH_BY_RARITY['rare'])}  "
+                    f"普通 {sum(1 for f in FISH_BY_RARITY['common'] if f['id'] in caught_ids)}/{len(FISH_BY_RARITY['common'])}"
+                ))),
             },
         })
 

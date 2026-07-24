@@ -362,6 +362,20 @@ ALL_FISH.update(SUPER_RARE_FISH)
 ALL_FISH.update(RARE_FISH)
 ALL_FISH.update(COMMON_FISH)
 
+# ========== 鱼类图片 ==========
+# 图片目录（插件根目录下的 image/fish/）
+FISH_IMAGE_DIR = Path(__file__).parent.parent / "image" / "fish"
+
+# 为每条鱼注入 image 字段（图片文件名 = fish_id.png）
+for fish_id, fish_data in ALL_FISH.items():
+    fish_data["image"] = f"{fish_id}.png"
+
+
+def get_fish_image_path(fish_id: str) -> Path:
+    """获取鱼的图片绝对路径"""
+    return FISH_IMAGE_DIR / f"{fish_id}.png"
+
+
 # 稀有度 ID 到中文映射
 RARITY_CN_MAP = {
     "legendary": "稀世罕见",
