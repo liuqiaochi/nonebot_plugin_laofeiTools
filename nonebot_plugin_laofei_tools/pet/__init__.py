@@ -1,1 +1,1 @@
-from . import pet_commands
+from . import pet_commands, fishing_commands
