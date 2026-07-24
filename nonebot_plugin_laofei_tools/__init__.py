@@ -20,7 +20,7 @@ from nonebot.matcher import Matcher
 require("nonebot_plugin_localstore")
 require("nonebot_plugin_apscheduler")
 
-from .common import points_commands, restart, life_utils, ai_chat
+from .common import points_commands, restart, life_utils, ai_chat, rest_mode
 from .pet import pet_commands
 from .search import commands
 from .config import Config, init_enabled_groups
