@@ -35,6 +35,7 @@ from .pet_data import (
     do_work, do_steal, get_item_by_id,
     get_all_pet_owners,
 )
+from .fishing_data import roll_fish, add_caught_fish
 
 # 宠物图片目录（插件根目录下的 image 文件夹）
 PET_IMAGE_DIR = Path(__file__).parent.parent / "image"
@@ -1361,7 +1362,7 @@ pet_daily_cmd = on_command(
 
 @pet_daily_cmd.handle()
 async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
-    """一键完成宠物日常：签到 → 抚��� → 打工 → 散步至体力耗尽 → 随机偷取"""
+    """一键完成宠物日常：签到 → 抚摸 → 打工 → 散步 → 钓鱼 → 随机偷取"""
     # 群聊检查积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
@@ -1415,26 +1416,27 @@ async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
     else:
         lines.append(f"💼 打工：{work['message']}")
 
-    # 4. 宠物散步，一直到体力用完（上限 30 次防止异常死循环）
-    walk_count = 0
-    walk_drops = []
-    while walk_count < 30:
-        cur = get_pet(user_id)
-        if cur.stamina < 20:
-            break
-        w = do_walk(user_id)
-        if not w["success"]:
-            break
-        walk_count += 1
-        if w["dropped"]:
-            walk_drops.append(w["dropped_item"])
-    pet_after = get_pet(user_id)
-    drop_text = "，捡到 " + "、".join(walk_drops) if walk_drops else "，未掉落道具"
-    lines.append(
-        f"🐾 散步：共 {walk_count} 次（体力 {pet_after.stamina}/{pet_after.max_stamina}）{drop_text}"
-    )
+    # 4. 宠物散步 x1
+    walk = do_walk(user_id)
+    if walk["success"]:
+        drop_text = f"，捡到 {walk['dropped_item']}" if walk["dropped"] else "，未掉落道具"
+        lines.append(f"🐾 散步：{drop_text}")
+    else:
+        lines.append(f"🐾 散步：{walk['message']}")
 
-    # 5. 随机偷取一个玩家
+    # 5. 钓鱼 x1
+    pet = get_pet(user_id)
+    if pet.stamina >= 10:
+        fish = roll_fish()
+        if fish.get("rarity") == "junk":
+            lines.append(f"🎣 钓鱼：钓到了「{fish['name']}」，不值钱扔掉了")
+        else:
+            add_caught_fish(user_id, fish["id"])
+            lines.append(f"🎣 钓鱼：钓到 [{fish.get('name', '?')}]（{fish.get('rarity', '?')}）")
+    else:
+        lines.append("🎣 钓鱼：体力不足（需 10 体力）")
+
+    # 6. 随机偷取一个玩家
     steal_targets = _get_random_targets(user_id, n=5)
     st_text = "未找到其他玩家"
     for t in steal_targets:
