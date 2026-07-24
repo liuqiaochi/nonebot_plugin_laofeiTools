@@ -21,7 +21,7 @@ from nonebot.matcher import Matcher
 from nonebot.params import CommandArg
 
 from ..config import is_points_enabled
-from ..common.points_data import get_user as get_points_user, save_user as save_points_user
+from ..common.points_data import get_user as get_points_user, save_user as save_points_user, do_sign
 from .pet_data import (
     PET_TYPES, FOODS, ACCESSORIES, AFFECTION_LEVELS,
     get_pet, create_pet, save_pet, abandon_pet,
@@ -1167,7 +1167,7 @@ pet_daily_cmd = on_command(
 
 @pet_daily_cmd.handle()
 async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
-    """一键完成宠物日常：抚摸 → 打工 → 散步至体力耗尽 → 随机偷取"""
+    """一键完成宠物日常：签到 → 抚��� → 打工 → 散步至体力耗尽 → 随机偷取"""
     # 群聊检查积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
@@ -1191,7 +1191,16 @@ async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
 
     lines = []
 
-    # 1. 宠物抚摸
+    # 1. 签到
+    sign = do_sign(user_id)
+    if sign["success"]:
+        lines.append(
+            f"📝 签到：+{sign['points_gained']} 积分 +{sign['exp_gained']} 经验（连续 {sign['continuous_sign_days']} 天）"
+        )
+    else:
+        lines.append(f"📝 签到：{sign['message']}")
+
+    # 2. 宠物抚摸
     pat = do_pat(user_id)
     if pat["success"]:
         lines.append(
@@ -1200,7 +1209,7 @@ async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
     else:
         lines.append(f"🤚 抚摸：{pat['message']}")
 
-    # 2. 宠物打工 x1
+    # 3. 宠物打工 x1
     work = do_work(user_id)
     if work["success"]:
         # 发放积分（do_work 只计算结果不入账，由调用方发放，与独立打工指令一致）
@@ -1212,7 +1221,7 @@ async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
     else:
         lines.append(f"💼 打工：{work['message']}")
 
-    # 3. 宠物散步，一直到体力用完（上限 30 次防止异常死循环）
+    # 4. 宠物散步，一直到体力用完（上限 30 次防止异常死循环）
     walk_count = 0
     walk_drops = []
     while walk_count < 30:
@@ -1231,7 +1240,7 @@ async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
         f"🐾 散步：共 {walk_count} 次（体力 {pet_after.stamina}/{pet_after.max_stamina}）{drop_text}"
     )
 
-    # 4. 随机偷取一个玩家
+    # 5. 随机偷取一个玩家
     steal_targets = _get_random_targets(user_id, n=5)
     st_text = "未找到其他玩家"
     for t in steal_targets:

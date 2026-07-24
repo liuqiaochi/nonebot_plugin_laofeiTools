@@ -343,7 +343,7 @@ def generate_fishing_help_image() -> str:
         y += item_height
 
     # 稀有度说明
-    tip = "稀有度：✨超级稀有(5%)  ⭐稀有(20%)  普通(75%)"
+    tip = "稀有度：💎稀世罕见(1%)  ✨超级稀有(4%)  ⭐稀有(20%)  普通(75%)"
     tip_bbox = draw.textbbox((0, 0), tip, font=font_tip)
     tip_w = tip_bbox[2] - tip_bbox[0]
     draw.text(((width - tip_w) // 2, y), tip, fill=(130, 180, 255), font=font_tip)

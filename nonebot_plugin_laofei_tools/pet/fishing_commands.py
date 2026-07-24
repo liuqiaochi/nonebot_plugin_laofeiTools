@@ -109,6 +109,7 @@ async def handle_fishing(
 
     # 构造结果消息
     rarity_tag = {
+        "legendary": "💎💎💎",
         "super_rare": "✨✨✨",
         "rare": "✨✨",
         "common": "",
@@ -123,8 +124,10 @@ async def handle_fishing(
         f"⚡ 剩余体力: {pet.stamina}"
     )
 
-    # 超级稀有额外播报
-    if fish["rarity"] == "super_rare":
+    # 稀世罕见额外播报
+    if fish["rarity"] == "legendary":
+        msg = f"💎 传说！！！\n" + msg
+    elif fish["rarity"] == "super_rare":
         msg = f"🌟 运气爆棚！\n" + msg
 
     await matcher.finish(Message([
@@ -173,7 +176,7 @@ async def handle_fishing_guide(
     # 构建合并转发节点：三个稀有度各一个节点
     nodes = []
 
-    for rarity_key in ["super_rare", "rare", "common"]:
+    for rarity_key in ["legendary", "super_rare", "rare", "common"]:
         rarity_cn = RARITY_CN_MAP[rarity_key]
         fish_list = FISH_BY_RARITY.get(rarity_key, [])
 
@@ -248,7 +251,7 @@ async def handle_fishing_box(
         return
 
     # 按稀有度+名称排序
-    rarity_order = {"super_rare": 0, "rare": 1, "common": 2}
+    rarity_order = {"legendary": 0, "super_rare": 1, "rare": 2, "common": 3}
     sorted_items = sorted(
         inventory.items(),
         key=lambda x: (
@@ -266,6 +269,7 @@ async def handle_fishing_box(
         if fish is None:
             continue
         rarity_tag = {
+            "legendary": "💎",
             "super_rare": "✨",
             "rare": "⭐",
             "common": "",
@@ -373,6 +377,7 @@ async def handle_fishing_sell(
     save_points_user(user_id)
 
     rarity_tag = {
+        "legendary": "💎",
         "super_rare": "✨",
         "rare": "⭐",
         "common": "",
@@ -430,7 +435,7 @@ async def handle_fishing_help(matcher: Matcher, event: MessageEvent):
             "   别名：卖鱼\n"
             "   支持「钓鱼出售 全部 <鱼名>」批量卖出\n"
             "\n"
-            "稀有度：✨超级稀有(5%) ⭐稀有(20%) 普通(75%)"
+            "稀有度：💎稀世罕见(1%) ✨超级稀有(4%) ⭐稀有(20%) 普通(75%)"
         )
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),

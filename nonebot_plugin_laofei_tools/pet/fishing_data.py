@@ -17,9 +17,19 @@ DATA_DIR = Path("data/laofei_tools")
 FISHING_DATA_FILE = DATA_DIR / "fishing_records.json"
 
 # ========== 鱼类定义 ==========
-# rarity 枚举: "super_rare" | "rare" | "common"
+# rarity 枚举: "legendary" | "super_rare" | "rare" | "common"
 
-SUPER_RARE_FISH = {
+LEGENDARY_FISH = {
+    "whale": {
+        "id": "whale",
+        "name": "鲸鱼",
+        "aliases": [],
+        "rarity": "legendary",
+        "rarity_cn": "稀世罕见",
+        "min_price": 400,
+        "max_price": 500,
+    },
+}
     "coelacanth": {
         "id": "coelacanth",
         "name": "矛尾鱼",
@@ -345,12 +355,14 @@ COMMON_FISH = {
 
 # 合并所有鱼（按稀有度层级排列，供图鉴使用）
 ALL_FISH = {}
+ALL_FISH.update(LEGENDARY_FISH)
 ALL_FISH.update(SUPER_RARE_FISH)
 ALL_FISH.update(RARE_FISH)
 ALL_FISH.update(COMMON_FISH)
 
 # 稀有度 ID 到中文映射
 RARITY_CN_MAP = {
+    "legendary": "稀世罕见",
     "super_rare": "超级稀有",
     "rare": "稀有",
     "common": "普通",
@@ -358,6 +370,7 @@ RARITY_CN_MAP = {
 
 # 按稀有度分组（保持定义顺序）
 FISH_BY_RARITY: dict[str, list[dict]] = {
+    "legendary": list(LEGENDARY_FISH.values()),
     "super_rare": list(SUPER_RARE_FISH.values()),
     "rare": list(RARE_FISH.values()),
     "common": list(COMMON_FISH.values()),
@@ -365,13 +378,15 @@ FISH_BY_RARITY: dict[str, list[dict]] = {
 
 # 钓鱼概率配置
 FISHING_PROB = {
-    "super_rare": 0.05,  # 5%
+    "legendary": 0.01,   # 1%
+    "super_rare": 0.04,  # 4%
     "rare": 0.20,        # 20%
     "common": 0.75,      # 75%
 }
 
 # 延迟配置（秒）
 FISHING_DELAY = {
+    "legendary": (7.0, 9.0),
     "super_rare": (5.0, 6.0),
     "rare": (3.0, 5.0),
     "common": (1.0, 3.0),
@@ -471,14 +486,14 @@ def get_inventory(user_id: str) -> dict[str, int]:
 def roll_fish() -> dict:
     """根据概率随机钓一条鱼，返回鱼的定义 dict"""
     roll = random.random()
-    if roll < FISHING_PROB["super_rare"]:
-        pool = list(SUPER_RARE_FISH.values())
-    elif roll < FISHING_PROB["super_rare"] + FISHING_PROB["rare"]:
-        pool = list(RARE_FISH.values())
-    else:
-        pool = list(COMMON_FISH.values())
-
-    return random.choice(pool)
+    cumulative = 0
+    for rarity_key in ["legendary", "super_rare", "rare"]:
+        cumulative += FISHING_PROB[rarity_key]
+        if roll < cumulative:
+            pool = list(FISH_BY_RARITY[rarity_key])
+            return random.choice(pool)
+    # 剩下的都是 common
+    return random.choice(list(COMMON_FISH.values()))
 
 
 def get_fishing_delay(rarity: str) -> float:
