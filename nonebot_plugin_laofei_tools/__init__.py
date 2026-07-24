@@ -9,6 +9,8 @@
 
 import base64
 from io import BytesIO
+from pathlib import Path
+import shutil
 
 from PIL import Image, ImageDraw, ImageFont
 from nonebot import get_driver, require, get_bots, on_command
@@ -71,6 +73,46 @@ async def daily_stamina_refresh():
     """每天0点刷新所有宠物体力"""
     refresh_all_stamina()
     logger.info("龙哥工具箱: 宠物体力刷新完成")
+
+
+@scheduler.scheduled_job("cron", hour=0, minute=0, id="daily_data_backup")
+async def daily_data_backup():
+    """每天0点备份所有数据文件到 backup 目录"""
+    data_dir = Path("data/laofei_tools")
+    if not data_dir.exists():
+        logger.warning("龙哥工具箱: 数据目录不存在，跳过备份")
+        return
+
+    # 按日期创建备份目录
+    from datetime import date
+    today = date.today().isoformat()
+    backup_root = data_dir / "backup"
+    backup_dir = backup_root / today
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    count = 0
+    for f in data_dir.iterdir():
+        if f.is_file() and f.suffix == ".json":
+            try:
+                shutil.copy2(f, backup_dir / f.name)
+                count += 1
+            except Exception as e:
+                logger.error(f"龙哥工具箱: 备份 {f.name} 失败: {e}")
+
+    logger.info(f"龙哥工具箱: 每日备份完成，共 {count} 个文件 -> {backup_dir}")
+
+    # 清理超过 30 天的旧备份
+    from datetime import timedelta
+    cutoff = date.today() - timedelta(days=30)
+    for d in backup_root.iterdir():
+        if d.is_dir():
+            try:
+                dir_date = date.fromisoformat(d.name)
+                if dir_date < cutoff:
+                    shutil.rmtree(d)
+                    logger.info(f"龙哥工具箱: 清理旧备份 {d.name}")
+            except (ValueError, OSError):
+                pass
 
 
 # ========== lg帮助图片生成 ==========

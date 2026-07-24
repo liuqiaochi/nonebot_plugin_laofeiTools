@@ -2,13 +2,11 @@
 数据文件安全写入工具
 
 提供 safe_json_save 函数，所有持久化保存必须经过此函数：
-1. 写入前自动备份（.bak），防止误覆盖导致数据丢失
-2. 先写 .tmp 再 rename（原子操作），防止写入中途崩溃导致文件损坏
-3. 可选空缓存保护，防止内存缓存为空时覆盖已有数据文件
+1. 先写 .tmp 再 rename（原子操作），防止写入中途崩溃导致文件损坏
+2. 可选空缓存保护，防止内存缓存为空时覆盖已有数据文件
 """
 
 import json
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -52,14 +50,6 @@ def safe_json_save(
                 f"跳过写入空数据（可能是路径变更导致加载失败）"
             )
         return
-
-    # --- 写入前备份 ---
-    if file_path.exists():
-        backup_path = file_path.with_name(fname + ".bak")
-        try:
-            shutil.copy2(file_path, backup_path)
-        except Exception:
-            logger.warning(f"[数据保护] 备份 {fname} 失败，继续写入")
 
     # --- 原子写入：先写 .tmp，成功后再 rename ---
     tmp_path = file_path.with_name(fname + ".tmp")

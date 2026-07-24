@@ -39,6 +39,8 @@ ENV/
 老肥积分系统1.0.md
 # Data
 data/
+*.bak
+*.tmp
 
 # Test files
 test_*.py
