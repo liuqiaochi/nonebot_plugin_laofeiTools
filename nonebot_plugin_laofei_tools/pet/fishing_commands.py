@@ -403,24 +403,36 @@ fishing_help_cmd = on_command(
 
 @fishing_help_cmd.handle()
 async def handle_fishing_help(matcher: Matcher, event: MessageEvent):
-    """钓鱼帮助：展示所有钓鱼相关指令"""
+    """钓鱼帮助：展示所有钓鱼相关指令（图片版）"""
+    help_b64 = None
+    try:
+        from .shop_image import generate_fishing_help_image
+        help_b64 = generate_fishing_help_image()
+    except Exception as e:
+        logger.error(f"生成钓鱼帮助图片失败: {e}")
 
-    msg = (
-        "🎣 宠物钓鱼系统\n"
-        "━━━━━━━━━━━━━━━\n"
-        "🐟 钓鱼     — 消耗10体力抛竿钓鱼，稀有度越高等待越久\n"
-        "📖 钓鱼图鉴 — 查看全部35种鱼的收集进度\n"
-        "   别名：鱼图鉴\n"
-        "🎒 钓鱼箱   — 查看已钓到的鱼，可进行售卖\n"
-        "   别名：鱼箱\n"
-        "💰 钓鱼出售 <鱼名> — 将鱼出售换取积分\n"
-        "   别名：卖鱼\n"
-        "   支持「钓鱼出售 全部 <鱼名>」批量卖出\n"
-        "\n"
-        "鱼的稀有度：✨超级稀有(5%) ⭐稀有(20%) 普通(75%)"
-    )
-
-    await matcher.finish(Message([
-        MessageSegment.reply(event.message_id),
-        MessageSegment.text(msg)
-    ]))
+    if help_b64:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.image(f"base64://{help_b64}"),
+        ]))
+    else:
+        # 降级为文字版
+        msg = (
+            "🎣 宠物钓鱼系统\n"
+            "━━━━━━━━━━━━━━━\n"
+            "🐟 钓鱼     — 消耗10体力抛竿钓鱼，稀有度越高等待越久\n"
+            "📖 钓鱼图鉴 — 查看全部35种鱼的收集进度\n"
+            "   别名：鱼图鉴\n"
+            "🎒 钓鱼箱   — 查看已钓到的鱼，可进行售卖\n"
+            "   别名：鱼箱\n"
+            "💰 钓鱼出售 <鱼名> — 将鱼出售换取积分\n"
+            "   别名：卖鱼\n"
+            "   支持「钓鱼出售 全部 <鱼名>」批量卖出\n"
+            "\n"
+            "稀有度：✨超级稀有(5%) ⭐稀有(20%) 普通(75%)"
+        )
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(msg)
+        ]))

@@ -281,3 +281,75 @@ def generate_help_image() -> str:
     img.save(output, format="PNG")
     output.seek(0)
     return base64.b64encode(output.getvalue()).decode()
+
+
+FISHING_HELP_ITEMS = [
+    ("钓鱼", "消耗10体力抛竿钓鱼，稀有度越高等待越久"),
+    ("钓鱼图鉴 / 鱼图鉴", "查看全部35种鱼的收集进度"),
+    ("钓鱼箱 / 鱼箱", "查看已钓到的鱼，可进行售卖"),
+    ("钓鱼出售 <鱼名>", "将鱼出售换取积分"),
+    ("  钓鱼出售 全部 <鱼名>", "批量卖出同种全部鱼"),
+    ("钓鱼帮助 / 鱼帮助", "查看本帮助信息"),
+]
+
+
+def generate_fishing_help_image() -> str:
+    """
+    生成钓鱼帮助图片
+
+    Returns:
+        base64编码的PNG图片数据
+    """
+    font_header = _try_load_font(28)
+    font_cmd = _try_load_font(20)
+    font_desc = _try_load_font(14)
+    font_tip = _try_load_font(12)
+
+    width = 500
+    item_height = 42
+    header_height = 60
+    tip_height = 35
+    padding = 25
+
+    total_height = (
+        padding
+        + header_height
+        + len(FISHING_HELP_ITEMS) * item_height
+        + tip_height
+        + padding
+    )
+
+    img = Image.new("RGB", (width, total_height), BG_COLOR)
+    draw = ImageDraw.Draw(img)
+
+    y = padding
+
+    # 标题
+    title = "🎣 宠物钓鱼系统"
+    title_bbox = draw.textbbox((0, 0), title, font=font_header)
+    title_w = title_bbox[2] - title_bbox[0]
+    draw.text(((width - title_w) // 2, y), title, fill=TITLE_COLOR, font=font_header)
+    y += header_height
+
+    # 分隔线
+    draw.line(
+        [(padding, y - 10), (width - padding, y - 10)], fill=DIVIDER_COLOR, width=1
+    )
+
+    # 指令列表
+    for cmd, desc in FISHING_HELP_ITEMS:
+        draw.text((padding, y), cmd, fill=TEXT_COLOR, font=font_cmd)
+        draw.text((padding + 10, y + 24), desc, fill=(160, 160, 180), font=font_desc)
+        y += item_height
+
+    # 稀有度说明
+    tip = "稀有度：✨超级稀有(5%)  ⭐稀有(20%)  普通(75%)"
+    tip_bbox = draw.textbbox((0, 0), tip, font=font_tip)
+    tip_w = tip_bbox[2] - tip_bbox[0]
+    draw.text(((width - tip_w) // 2, y), tip, fill=(130, 180, 255), font=font_tip)
+
+    # 输出为base64
+    output = BytesIO()
+    img.save(output, format="PNG")
+    output.seek(0)
+    return base64.b64encode(output.getvalue()).decode()
