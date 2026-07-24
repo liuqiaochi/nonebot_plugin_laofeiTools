@@ -388,3 +388,39 @@ async def handle_fishing_sell(
         MessageSegment.reply(event.message_id),
         MessageSegment.text(msg)
     ]))
+
+
+# ========== 钓鱼帮助指令 ==========
+
+fishing_help_cmd = on_command(
+    "钓鱼帮助",
+    aliases={"鱼帮助"},
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+@fishing_help_cmd.handle()
+async def handle_fishing_help(matcher: Matcher, event: MessageEvent):
+    """钓鱼帮助：展示所有钓鱼相关指令"""
+
+    msg = (
+        "🎣 宠物钓鱼系统\n"
+        "━━━━━━━━━━━━━━━\n"
+        "🐟 钓鱼     — 消耗10体力抛竿钓鱼，稀有度越高等待越久\n"
+        "📖 钓鱼图鉴 — 查看全部35种鱼的收集进度\n"
+        "   别名：鱼图鉴\n"
+        "🎒 钓鱼箱   — 查看已钓到的鱼，可进行售卖\n"
+        "   别名：鱼箱\n"
+        "💰 钓鱼出售 <鱼名> — 将鱼出售换取积分\n"
+        "   别名：卖鱼\n"
+        "   支持「钓鱼出售 全部 <鱼名>」批量卖出\n"
+        "\n"
+        "鱼的稀有度：✨超级稀有(5%) ⭐稀有(20%) 普通(75%)"
+    )
+
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(msg)
+    ]))
