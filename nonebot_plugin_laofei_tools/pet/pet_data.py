@@ -875,7 +875,7 @@ def do_work(user_id: str) -> dict:
         "success": True,
         "pet_name": get_display_name(pet),
         "stamina_after": pet.stamina,
-        "points_earned": random.randint(100, 200),
+        "points_earned": random.randint(50, 100),
         "dropped_items": dropped_items,
     }
 
