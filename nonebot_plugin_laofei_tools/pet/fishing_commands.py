@@ -327,7 +327,7 @@ fishing_sell_cmd = on_command(
     aliases={"卖鱼"},
     priority=5,
     block=True,
-    force_whitespace=True,
+    force_whitespace=False,
 )
 
 
