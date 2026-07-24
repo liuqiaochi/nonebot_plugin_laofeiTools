@@ -94,7 +94,7 @@ ACCESSORIES = {
     "短剑": {"force": 5, "luck": 5, "stamina": 0, "price": 500, "special": None, "droppable": True, "image": "accessories-stiletto.png", "id": "202"},
     "四叶草": {"force": 0, "luck": 20, "stamina": 0, "price": 1000, "special": None, "droppable": True, "image": "accessories-four-leafclover.png", "id": "203"},
     "草帽": {"force": 0, "luck": 0, "stamina": 0, "price": 1000, "special": "pat_bonus_10", "droppable": True, "image": "accessories-hat.png", "id": "204"},
-    "滑板车": {"force": 0, "luck": 0, "stamina": 25, "price": 1000, "special": None, "droppable": True, "image": "accessories-scooter.png", "id": "205"},
+    "滑板车": {"force": 0, "luck": 0, "stamina": 30, "price": 1000, "special": None, "droppable": True, "image": "accessories-scooter.png", "id": "205"},
     "彩虹戒指": {"force": 0, "luck": 50, "stamina": 0, "price": 2500, "special": None, "droppable": False, "image": "accessories-ring.png", "id": "301"},
     "青龙偃月刀": {"force": 30, "luck": 0, "stamina": 0, "price": 5000, "special": None, "droppable": False, "image": "accessories-dragonBlade.png", "id": "302"},
     "超人披风": {"force": 10, "luck": 10, "stamina": 20, "price": 6666, "special": "affection_1.2x", "droppable": False, "image": "accessories-cloak.png", "id": "303"},
