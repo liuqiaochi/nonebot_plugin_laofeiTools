@@ -20,10 +20,6 @@ from nonebot.permission import SUPERUSER
 
 rest_until: float = 0.0  # 休息截止的 Unix 时间戳，0 表示不在休息模式
 
-# ========== API 拦截钩子 ==========
-
-driver = get_driver()
-
 # 需要拦截的消息发送 API
 _MSG_APIS = frozenset({
     "send_msg",
@@ -33,25 +29,31 @@ _MSG_APIS = frozenset({
 })
 
 
-@driver.on_calling_api
-async def _rest_mode_guard(bot: Bot, api: str, data: Dict[str, Any]):
-    """休息模式：拦截所有消息发送 API。
+# ========== API 拦截钩子 ==========
 
-    在 on_calling_api 钩子中返回非 None 值，NoneBot2 会跳过原始 API 调用，
-    直接使用返回值作为 API 结果。
+driver = get_driver()
+
+
+@driver.on_bot_connect
+async def _patch_bot_for_rest_mode(bot: Bot):
+    """在每个 Bot 连接后，为其 call_api 添加休息模式拦截。
+
+    使用 monkey-patch 方式替代 on_calling_api 钩子，
+    兼容所有 NoneBot2 版本（包括 CombinedDriver）。
     """
-    if api not in _MSG_APIS:
-        return  # 非消息 API，放行（返回 None）
+    _original_call_api = bot.call_api
 
-    if rest_until and time.time() < rest_until:
-        remaining = int(rest_until - time.time())
-        logger.debug(f"[休息模式] 拦截消息发送 ({api})，剩余 {remaining}s")
-        # 返回非 None 值阻止实际 API 调用
-        if api == "send_group_forward_msg":
-            return {}
-        return {"message_id": 0}
+    async def _patched_call_api(api: str, **data: Any) -> Any:
+        if api in _MSG_APIS and rest_until and time.time() < rest_until:
+            remaining = int(rest_until - time.time())
+            logger.debug(f"[休息模式] 拦截消息发送 ({api})，剩余 {remaining}s")
+            if api == "send_group_forward_msg":
+                return {}
+            return {"message_id": 0}
+        return await _original_call_api(api=api, **data)
 
-    # 不在休息模式，返回 None 让原始 API 正常调用
+    bot.call_api = _patched_call_api  # type: ignore[method-assign]
+    logger.info(f"[休息模式] Bot 消息拦截已就绪: {bot.self_id}")
 
 
 # ========== lg休息 指令 ==========
