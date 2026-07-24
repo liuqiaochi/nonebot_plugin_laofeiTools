@@ -295,6 +295,9 @@ async def handle_fishing_box(
     total_value_max = 0
 
     for fish_id, count in sorted_items:
+        if count <= 0:
+            remove_fish(user_id, fish_id, 0)
+            continue
         fish = get_fish_info(fish_id)
         if fish is None:
             continue
@@ -391,11 +394,19 @@ async def handle_fishing_sell(
             ]))
             return
 
+        # 先清理数量 <= 0 的脏数据
+        for fish_id, count in list(inventory.items()):
+            if count <= 0:
+                remove_fish(user_id, fish_id, 0)
+                del inventory[fish_id]
+
         total_count = 0
         total_price = 0
         detail_lines = []
 
         for fish_id, count in sorted(inventory.items(), key=lambda x: x[0]):
+            if count <= 0:
+                continue
             fish = get_fish_info(fish_id)
             if fish is None:
                 continue
