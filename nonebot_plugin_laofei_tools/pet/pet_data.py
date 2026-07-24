@@ -129,6 +129,7 @@ PET_EXP_PER_LEVEL = 50
 
 # ========== 体力常量 ==========
 DEFAULT_STAMINA = 120
+DRAGON_STAMINA = 150
 MAX_STAMINA = 200
 
 
@@ -299,15 +300,21 @@ def create_pet(user_id: str, pet_type: str) -> PetData:
     """创建宠物并持久化存储
 
     根据 PET_TYPES[pet_type] 初始化所有属性。
-    基础体力统一为 DEFAULT_STAMINA。
+    奶龙初始体力为 150，其他宠物为 120。
     """
     pet_info = PET_TYPES[pet_type]
     pet = PetData()
     pet.pet_type = pet_type
     pet.base_luck = pet_info["luck"]
     pet.base_force = pet_info["force"]
-    pet.stamina = DEFAULT_STAMINA
-    pet.max_stamina = DEFAULT_STAMINA
+
+    # 奶龙初始体力 150，其他 120
+    if pet_type == "dragon":
+        pet.stamina = DRAGON_STAMINA
+        pet.max_stamina = DRAGON_STAMINA
+    else:
+        pet.stamina = DEFAULT_STAMINA
+        pet.max_stamina = DEFAULT_STAMINA
 
     pet.affection = 0
     pet.exp = 0
@@ -442,7 +449,7 @@ def equip_accessory(user_id: str, acc_name: str) -> dict:
     pet.accessory = acc_name
 
     # 重新计算 max_stamina：基础体力 + 新配饰体力加成
-    base_stamina = DEFAULT_STAMINA
+    base_stamina = DRAGON_STAMINA if pet.pet_type == "dragon" else DEFAULT_STAMINA
     pet.max_stamina = base_stamina + ACCESSORIES[acc_name]["stamina"]
 
     # 如果当前体力超过新的 max_stamina，则截断
@@ -482,7 +489,7 @@ def unequip_accessory(user_id: str) -> dict:
     pet.accessory = ""
 
     # 重置 max_stamina 为基础值
-    base_stamina = DEFAULT_STAMINA
+    base_stamina = DRAGON_STAMINA if pet.pet_type == "dragon" else DEFAULT_STAMINA
     pet.max_stamina = base_stamina
 
     # 如果当前体力超过新的 max_stamina，则截断
