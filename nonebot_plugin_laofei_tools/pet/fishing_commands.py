@@ -92,7 +92,7 @@ async def handle_fishing(
     pet.stamina -= FISHING_STAMINA_COST
     save_pet(user_id)
 
-    # 随机出鱼
+    # 随机出鱼（或杂物）
     fish = roll_fish()
 
     # 延迟
@@ -106,6 +106,29 @@ async def handle_fishing(
 
     await asyncio.sleep(delay)
 
+    # ─── 杂物分支：不入背包，趣味提示 ───
+    if fish["rarity"] == "junk":
+        junk_messages = {
+            "臭鞋子": "这鞋子也太臭了吧！赶紧扔回去...",
+            "海带": "捞上来一团海带，今晚加个菜？",
+            "塑料袋": "保护环境，人人有责...这塑料袋哪来的？",
+            "破抹布": "这抹布怕是比你的宠物还老...",
+            "群友": "你怎么把群友钓上来了！快放回去！",
+        }
+        junk_msg = junk_messages.get(fish["name"], "这什么东西啊...")
+        msg = (
+            f"🎣 钓到...杂物了！\n"
+            f"🗑️ {fish['name']}\n"
+            f"💬 {junk_msg}\n"
+            f"⚡ 剩余体力: {pet.stamina}"
+        )
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(msg)
+        ]))
+        return
+
+    # ─── 正常鱼类分支 ───
     # 记录到背包
     add_caught_fish(user_id, fish["id"])
 
@@ -648,7 +671,7 @@ async def handle_fishing_help(matcher: Matcher, event: MessageEvent):
             "💰 钓鱼出售 <鱼名1> <鱼名2> — 多品种各卖1条\n"
             "   别名：卖鱼\n"
             "\n"
-            "稀有度：💎稀世罕见(1%) ✨超级稀有(4%) ⭐稀有(20%) 普通(75%)"
+            "稀有度：💎稀世罕见(1%) ✨超级稀有(4%) ⭐稀有(20%) 普通(50%) 🗑️杂物(25%)"
         )
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),

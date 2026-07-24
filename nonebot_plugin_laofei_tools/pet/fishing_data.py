@@ -355,6 +355,16 @@ COMMON_FISH = {
     },
 }
 
+# ========== 杂物定义（非鱼，无法出售，不入图鉴） ==========
+
+JUNK_ITEMS = [
+    {"id": "junk_shoe", "name": "臭鞋子", "rarity": "junk", "rarity_cn": "杂物"},
+    {"id": "junk_kelp", "name": "海带", "rarity": "junk", "rarity_cn": "杂物"},
+    {"id": "junk_plastic", "name": "塑料袋", "rarity": "junk", "rarity_cn": "杂物"},
+    {"id": "junk_rag", "name": "破抹布", "rarity": "junk", "rarity_cn": "杂物"},
+    {"id": "junk_friend", "name": "群友", "rarity": "junk", "rarity_cn": "杂物"},
+]
+
 # 合并所有鱼（按稀有度层级排列，供图鉴使用）
 ALL_FISH = {}
 ALL_FISH.update(LEGENDARY_FISH)
@@ -397,7 +407,8 @@ FISHING_PROB = {
     "legendary": 0.01,   # 1%
     "super_rare": 0.04,  # 4%
     "rare": 0.20,        # 20%
-    "common": 0.75,      # 75%
+    "common": 0.50,      # 50%
+    "junk": 0.25,        # 25%
 }
 
 # 延迟配置（秒）
@@ -406,6 +417,7 @@ FISHING_DELAY = {
     "super_rare": (5.0, 6.0),
     "rare": (3.0, 5.0),
     "common": (1.0, 3.0),
+    "junk": (1.0, 2.0),
 }
 
 # 每次钓鱼消耗体力
@@ -500,16 +512,19 @@ def get_inventory(user_id: str) -> dict[str, int]:
 
 
 def roll_fish() -> dict:
-    """根据概率随机钓一条鱼，返回鱼的定义 dict"""
+    """根据概率随机钓一条鱼（或杂物），返回定义 dict
+
+    杂物 rarity 为 "junk"，不含 price/image 等字段。
+    """
     roll = random.random()
     cumulative = 0
-    for rarity_key in ["legendary", "super_rare", "rare"]:
+    for rarity_key in ["legendary", "super_rare", "rare", "common"]:
         cumulative += FISHING_PROB[rarity_key]
         if roll < cumulative:
             pool = list(FISH_BY_RARITY[rarity_key])
             return random.choice(pool)
-    # 剩下的都是 common
-    return random.choice(list(COMMON_FISH.values()))
+    # 剩下的都是 junk
+    return random.choice(JUNK_ITEMS)
 
 
 def get_fishing_delay(rarity: str) -> float:
