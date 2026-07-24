@@ -146,9 +146,9 @@ fishing_guide_cmd = on_command(
 
 @fishing_guide_cmd.handle()
 async def handle_fishing_guide(
-    matcher: Matcher, event: MessageEvent
+    bot: Bot, matcher: Matcher, event: MessageEvent
 ):
-    """钓鱼图鉴：展示所有鱼及已拥有/未拥有状态"""
+    """钓鱼图鉴：展示所有鱼及已拥有/未拥有状态（合并转发）"""
     # 仅群聊
     if isinstance(event, PrivateMessageEvent):
         await matcher.finish(Message([
@@ -170,29 +170,40 @@ async def handle_fishing_guide(
     total_count = len(ALL_FISH)
     caught_count = len(caught_ids)
 
-    msg = f"🐟 钓鱼图鉴（{caught_count}/{total_count}）\n"
+    # 构建合并转发节点：三个稀有度各一个节点
+    nodes = []
 
-    # 按稀有度层级排列
     for rarity_key in ["super_rare", "rare", "common"]:
         rarity_cn = RARITY_CN_MAP[rarity_key]
         fish_list = FISH_BY_RARITY.get(rarity_key, [])
 
-        msg += f"\n━━ {rarity_cn} ━━\n"
+        node_text = f"🐟 钓鱼图鉴（{caught_count}/{total_count}）\n"
+        node_text += f"━━ {rarity_cn} ━━\n"
         for fish in fish_list:
             owned = fish["id"] in caught_ids
             status = "✅" if owned else "⬜"
             name = fish["name"]
-            # 已拥有的显示售价范围
             if owned:
                 price = f"{fish['min_price']}~{fish['max_price']}"
-                msg += f"  {status} {name}（{price}）\n"
+                node_text += f"  {status} {name}（{price}）\n"
             else:
-                msg += f"  {status} {name}（???）\n"
+                node_text += f"  {status} {name}（???）\n"
 
-    await matcher.finish(Message([
-        MessageSegment.reply(event.message_id),
-        MessageSegment.text(msg)
-    ]))
+        nodes.append({
+            "type": "node",
+            "data": {
+                "name": f"钓鱼图鉴-{rarity_cn}",
+                "uin": str(bot.self_id),
+                "content": str(Message(MessageSegment.text(node_text))),
+            },
+        })
+
+    await bot.send_group_forward_msg(
+        group_id=event.group_id,
+        messages=nodes,
+    )
+
+    await matcher.finish()
 
 
 # ========== 钓鱼箱指令 ==========
