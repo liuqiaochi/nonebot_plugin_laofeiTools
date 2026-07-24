@@ -280,8 +280,9 @@ async def handle_fishing_box(
         msg += f"  {rarity_tag} {fish['name']} ×{count}（{fish['min_price']}~{fish['max_price']}）\n"
 
     msg += f"\n💰 预估总价值: {total_value_min}~{total_value_max} 积分\n"
-    msg += "💡 发送「钓鱼出售 鱼名」售卖\n"
-    msg += "💡 发送「钓鱼出售全部 鱼名」卖出该鱼全部"
+    msg += "💡 发送「钓鱼出售全部」一键出售所有鱼\n"
+    msg += "💡 发送「钓鱼出售 鱼名 数量」指定数量出售\n"
+    msg += "💡 发送「钓鱼出售 鱼名1 鱼名2」多品种各卖1条"
 
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
@@ -304,7 +305,14 @@ fishing_sell_cmd = on_command(
 async def handle_fishing_sell(
     matcher: Matcher, event: MessageEvent, args: Message = CommandArg()
 ):
-    """钓鱼出售：售卖鱼获得积分"""
+    """钓鱼出售：售卖鱼获得积分
+
+    支持四种模式：
+    1. 钓鱼出售全部              → 卖出鱼箱所有鱼
+    2. 钓鱼出售 全部 <鱼名>      → 卖出该鱼全部（兼容旧版）
+    3. 钓鱼出售 <鱼名> <数量>    → 指定数量出售
+    4. 钓鱼出售 <鱼名1> <鱼名2>  → 多品种各卖1条
+    """
     # 仅群聊
     if isinstance(event, PrivateMessageEvent):
         await matcher.finish(Message([
@@ -326,68 +334,231 @@ async def handle_fishing_sell(
     if not arg_text:
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text("请指定要出售的鱼名，如「钓鱼出售 鲤鱼」\n"
-                                "或「钓鱼出售全部 鲤鱼」卖出全部")
+            MessageSegment.text(
+                "请指定要出售的鱼名，支持以下方式：\n"
+                "· 钓鱼出售全部 — 出售鱼箱所有鱼\n"
+                "· 钓鱼出售 鲤鱼 5 — 出售指定数量\n"
+                "· 钓鱼出售 鲤鱼 鲫鱼 — 多品种各卖1条\n"
+                "· 钓鱼出售 全部 鲤鱼 — 卖出该鱼全部"
+            )
         ]))
         return
 
-    # 解析：是否"全部"出售
-    sell_all = False
-    fish_name = arg_text
-    if arg_text.startswith("全部") or arg_text.startswith("所有"):
-        sell_all = True
-        fish_name = arg_text[2:].strip() if arg_text.startswith("全部") else arg_text[2:].strip()
-
-    fish = get_fish_by_name(fish_name)
-    if fish is None:
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text(f"没有找到「{fish_name}」这种鱼")
-        ]))
-        return
-
-    fish_id = fish["id"]
-    inventory = get_inventory(user_id)
-    owned_count = inventory.get(fish_id, 0)
-
-    if owned_count <= 0:
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text(f"你的钓鱼箱里没有「{fish['name']}」")
-        ]))
-        return
-
-    # 确定卖出数量
-    sell_count = owned_count if sell_all else 1
-
-    # 计算总售价（每条独立随机）
-    total_price = sum(get_sell_price(fish) for _ in range(sell_count))
-
-    # 执行移除
-    if not remove_fish(user_id, fish_id, sell_count):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("出售失败，库存不足")
-        ]))
-        return
-
-    # 发放积分
-    points_user = get_points_user(user_id)
-    points_user.points += total_price
-    save_points_user(user_id)
-
-    rarity_tag = {
+    rarity_tag_map = {
         "legendary": "💎",
         "super_rare": "✨",
         "rare": "⭐",
         "common": "",
-    }.get(fish["rarity"], "")
+    }
 
-    msg = (
-        f"💰 出售成功！\n"
-        f"🐟 {rarity_tag} {fish['name']} ×{sell_count}\n"
-        f"💵 获得 {total_price} 积分"
-    )
+    # ─── 模式1：钓鱼出售全部 → 卖出鱼箱所有鱼 ───
+    if arg_text == "全部":
+        inventory = get_inventory(user_id)
+        if not inventory:
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("你的钓鱼箱是空的，没有鱼可以出售")
+            ]))
+            return
+
+        total_count = 0
+        total_price = 0
+        detail_lines = []
+
+        for fish_id, count in sorted(inventory.items(), key=lambda x: x[0]):
+            fish = get_fish_info(fish_id)
+            if fish is None:
+                continue
+            sell_price = sum(get_sell_price(fish) for _ in range(count))
+            if not remove_fish(user_id, fish_id, count):
+                continue
+            total_count += count
+            total_price += sell_price
+            tag = rarity_tag_map.get(fish["rarity"], "")
+            detail_lines.append(f"  {tag} {fish['name']} ×{count}  (+{sell_price})")
+
+        if total_count == 0:
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("出售失败，请重试")
+            ]))
+            return
+
+        # 发放积分
+        points_user = get_points_user(user_id)
+        points_user.points += total_price
+        save_points_user(user_id)
+
+        msg = (
+            f"💰 全部出售成功！共 {total_count} 条鱼\n"
+            + "\n".join(detail_lines)
+            + f"\n💵 合计获得 {total_price} 积分"
+        )
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(msg)
+        ]))
+        return
+
+    # ─── 模式2：钓鱼出售 全部 <鱼名> → 卖出该鱼全部（兼容旧版） ───
+    if arg_text.startswith("全部") and len(arg_text) > 2:
+        fish_name = arg_text[2:].strip()
+        if not fish_name:
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("请指定鱼名，如「钓鱼出售 全部 鲤鱼」")
+            ]))
+            return
+
+        fish = get_fish_by_name(fish_name)
+        if fish is None:
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text(f"没有找到「{fish_name}」这种鱼")
+            ]))
+            return
+
+        fish_id = fish["id"]
+        inventory = get_inventory(user_id)
+        owned_count = inventory.get(fish_id, 0)
+        if owned_count <= 0:
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text(f"你的钓鱼箱里没有「{fish['name']}」")
+            ]))
+            return
+
+        total_price = sum(get_sell_price(fish) for _ in range(owned_count))
+        if not remove_fish(user_id, fish_id, owned_count):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("出售失败，库存不足")
+            ]))
+            return
+
+        points_user = get_points_user(user_id)
+        points_user.points += total_price
+        save_points_user(user_id)
+
+        tag = rarity_tag_map.get(fish["rarity"], "")
+        msg = (
+            f"💰 出售成功！\n"
+            f"🐟 {tag} {fish['name']} ×{owned_count}\n"
+            f"💵 获得 {total_price} 积分"
+        )
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(msg)
+        ]))
+        return
+
+    # ─── Tokenize 参数 ───
+    tokens = arg_text.split()
+
+    # ─── 模式3：钓鱼出售 <鱼名> <数量> ───
+    if len(tokens) >= 2 and tokens[-1].isdigit():
+        quantity = int(tokens[-1])
+        fish_name = " ".join(tokens[:-1])
+        if quantity <= 0:
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("出售数量必须大于 0")
+            ]))
+            return
+
+        fish = get_fish_by_name(fish_name)
+        if fish is None:
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text(f"没有找到「{fish_name}」这种鱼")
+            ]))
+            return
+
+        fish_id = fish["id"]
+        inventory = get_inventory(user_id)
+        owned_count = inventory.get(fish_id, 0)
+        if owned_count <= 0:
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text(f"你的钓鱼箱里没有「{fish['name']}」")
+            ]))
+            return
+        if owned_count < quantity:
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text(f"你的钓鱼箱里「{fish['name']}」只有 {owned_count} 条，无法出售 {quantity} 条")
+            ]))
+            return
+
+        total_price = sum(get_sell_price(fish) for _ in range(quantity))
+        if not remove_fish(user_id, fish_id, quantity):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("出售失败，库存不足")
+            ]))
+            return
+
+        points_user = get_points_user(user_id)
+        points_user.points += total_price
+        save_points_user(user_id)
+
+        tag = rarity_tag_map.get(fish["rarity"], "")
+        msg = (
+            f"💰 出售成功！\n"
+            f"🐟 {tag} {fish['name']} ×{quantity}\n"
+            f"💵 获得 {total_price} 积分"
+        )
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(msg)
+        ]))
+        return
+
+    # ─── 模式4：钓鱼出售 <鱼名1> <鱼名2> ... → 多品种各卖1条 ───
+    inventory = get_inventory(user_id)
+    success_items = []
+    fail_items = []
+    total_price = 0
+
+    for name in tokens:
+        fish = get_fish_by_name(name)
+        if fish is None:
+            fail_items.append(f"❌ 没有找到「{name}」")
+            continue
+
+        fish_id = fish["id"]
+        owned_count = inventory.get(fish_id, 0)
+        if owned_count <= 0:
+            fail_items.append(f"❌ 鱼箱里没有「{fish['name']}」")
+            continue
+
+        price = get_sell_price(fish)
+        if not remove_fish(user_id, fish_id, 1):
+            fail_items.append(f"❌ 出售「{fish['name']}」失败")
+            continue
+
+        total_price += price
+        inventory[fish_id] = owned_count - 1  # 更新本地计数
+        tag = rarity_tag_map.get(fish["rarity"], "")
+        success_items.append(f"  {tag} {fish['name']} (+{price})")
+
+    if not success_items:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("没有成功出售任何鱼\n" + "\n".join(fail_items))
+        ]))
+        return
+
+    # 发放积分
+    if total_price > 0:
+        points_user = get_points_user(user_id)
+        points_user.points += total_price
+        save_points_user(user_id)
+
+    msg = f"💰 出售成功！共 {len(success_items)} 种\n" + "\n".join(success_items)
+    if fail_items:
+        msg += "\n" + "\n".join(fail_items)
+    msg += f"\n💵 合计获得 {total_price} 积分"
 
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
@@ -427,13 +598,14 @@ async def handle_fishing_help(matcher: Matcher, event: MessageEvent):
             "🎣 宠物钓鱼系统\n"
             "━━━━━━━━━━━━━━━\n"
             "🐟 钓鱼     — 消耗10体力抛竿钓鱼，稀有度越高等待越久\n"
-            "📖 钓鱼图鉴 — 查看全部35种鱼的收集进度\n"
+            "📖 钓鱼图鉴 — 查看全部36种鱼的收集进度\n"
             "   别名：鱼图鉴\n"
             "🎒 钓鱼箱   — 查看已钓到的鱼，可进行售卖\n"
             "   别名：鱼箱\n"
-            "💰 钓鱼出售 <鱼名> — 将鱼出售换取积分\n"
+            "💰 钓鱼出售全部 — 一键出售鱼箱所有鱼\n"
+            "💰 钓鱼出售 <鱼名> <数量> — 指定数量出售\n"
+            "💰 钓鱼出售 <鱼名1> <鱼名2> — 多品种各卖1条\n"
             "   别名：卖鱼\n"
-            "   支持「钓鱼出售 全部 <鱼名>」批量卖出\n"
             "\n"
             "稀有度：💎稀世罕见(1%) ✨超级稀有(4%) ⭐稀有(20%) 普通(75%)"
         )
