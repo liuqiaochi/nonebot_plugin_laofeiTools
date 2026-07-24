@@ -30,6 +30,8 @@ LEGENDARY_FISH = {
         "max_price": 500,
     },
 }
+
+SUPER_RARE_FISH = {
     "coelacanth": {
         "id": "coelacanth",
         "name": "矛尾鱼",
