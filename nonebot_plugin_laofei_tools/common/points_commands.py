@@ -236,109 +236,109 @@ Exp: {info['current_exp']} / {info['exp_needed']}
 
 
 # ========== 转账指令 ==========
-# transfer_cmd = on_command("转账", aliases={"转积分", "给积分"}, priority=5, block=True)
-# 
-# 
-# @transfer_cmd.handle()
-# async def handle_transfer(
-#     matcher: Matcher,
-#     event: MessageEvent,
-#     args: Message = CommandArg(),
-# ):
-#     """处理转账指令"""
-#     user_id = str(event.user_id)
-#     
+transfer_cmd = on_command("转账", aliases={"转积分", "给积分"}, priority=5, block=True)
+
+
+@transfer_cmd.handle()
+async def handle_transfer(
+    matcher: Matcher,
+    event: MessageEvent,
+    args: Message = CommandArg(),
+):
+    """处理转账指令"""
+    user_id = str(event.user_id)
+    
     # 检查是否在群聊
-#     if isinstance(event, PrivateMessageEvent):
-#         await matcher.finish(Message([
-#             MessageSegment.reply(event.message_id),
-#             MessageSegment.text("转账功能仅在群聊可用")
-#         ]))
-#         return
-#     
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("转账功能仅在群聊可用")
+        ]))
+        return
+    
     # 检查群聊是否开启了积分系统
-#     if not is_points_enabled(str(event.group_id)):
-#         await matcher.finish(Message([
-#             MessageSegment.reply(event.message_id),
-#             MessageSegment.text("本群积分系统已关闭")
-#         ]))
-#         return
-#     
+    if not is_points_enabled(str(event.group_id)):
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("本群积分系统已关闭")
+        ]))
+        return
+    
     # 检查是否@了某人
-#     if not event.reply and not any(seg.type == "at" for seg in args):
-#         await matcher.finish(Message([
-#             MessageSegment.reply(event.message_id),
-#             MessageSegment.text("请使用「转账 积分 @某人」格式进行转账")
-#         ]))
-#         return
-#     
+    if not event.reply and not any(seg.type == "at" for seg in args):
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("请使用「转账 积分 @某人」格式进行转账")
+        ]))
+        return
+    
     # 解析积分数量
-#     args_text = args.extract_plain_text().strip()
-#     parts = args_text.split()
-#     
-#     if not parts or not parts[0].isdigit():
-#         await matcher.finish(Message([
-#             MessageSegment.reply(event.message_id),
-#             MessageSegment.text("请使用「转账 积分 @某人」格式进行转账")
-#         ]))
-#         return
-#     
-#     amount = int(parts[0])
-#     
-#     if amount < 1:
-#         await matcher.finish(Message([
-#             MessageSegment.reply(event.message_id),
-#             MessageSegment.text("转账积分不能少于1")
-#         ]))
-#         return
-#     
+    args_text = args.extract_plain_text().strip()
+    parts = args_text.split()
+    
+    if not parts or not parts[0].isdigit():
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("请使用「转账 积分 @某人」格式进行转账")
+        ]))
+        return
+    
+    amount = int(parts[0])
+    
+    if amount < 1:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("转账积分不能少于1")
+        ]))
+        return
+    
     # 获取被@的用户
-#     target_id = None
-#     for seg in args:
-#         if seg.type == "at":
-#             target_id = seg.data.get("qq")
-#             break
-#     
+    target_id = None
+    for seg in args:
+        if seg.type == "at":
+            target_id = seg.data.get("qq")
+            break
+    
     # 如果没有在参数中找到，检查回复消息
-#     if not target_id and event.reply:
-#         target_id = str(event.reply.sender.user_id)
-#     
-#     if not target_id:
-#         await matcher.finish(Message([
-#             MessageSegment.reply(event.message_id),
-#             MessageSegment.text("请@要转账的对象")
-#         ]))
-#         return
-#     
-#     if target_id == user_id:
-#         await matcher.finish(Message([
-#             MessageSegment.reply(event.message_id),
-#             MessageSegment.text("不能给自己转账")
-#         ]))
-#         return
-#     
+    if not target_id and event.reply:
+        target_id = str(event.reply.sender.user_id)
+    
+    if not target_id:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("请@要转账的对象")
+        ]))
+        return
+    
+    if target_id == user_id:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("不能给自己转账")
+        ]))
+        return
+    
     # 检查积分是否足够
-#     user = get_user(user_id)
-#     if user.points < amount:
-#         await matcher.finish(Message([
-#             MessageSegment.reply(event.message_id),
-#             MessageSegment.text(f"积分不足，你只有 {user.points} 积分")
-#         ]))
-#         return
-#     
+    user = get_user(user_id)
+    if user.points < amount:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(f"积分不足，你只有 {user.points} 积分")
+        ]))
+        return
+    
     # 执行转账
-#     user.points -= amount
-#     save_user(user_id)
-#     
-#     target_user = get_user(target_id)
-#     target_user.points += amount
-#     save_user(target_id)
-#     
-#     await matcher.finish(Message([
-#         MessageSegment.reply(event.message_id),
-#         MessageSegment.text(f"成功将 {amount} 积分转账给Ta")
-#     ]))
-# 
+    user.points -= amount
+    save_user(user_id)
+    
+    target_user = get_user(target_id)
+    target_user.points += amount
+    save_user(target_id)
+    
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(f"成功将 {amount} 积分转账给Ta")
+    ]))
+
 
 # ========== 银行指令 ==========
 # bank_deposit_cmd = on_command("存入银行", aliases={"存入积分", "存积分", "存银行"}, priority=5, block=True)
@@ -876,32 +876,32 @@ Exp: {info['current_exp']} / {info['exp_needed']}
 
 
 # ========== 积分排行榜指令 ==========
-# ranking_cmd = on_command("积分排行", aliases={"排行榜", "今日排行"}, priority=5, block=True, force_whitespace=True)
-# 
-# 
-# @ranking_cmd.handle()
-# async def handle_ranking(matcher: Matcher, bot: Bot, event: MessageEvent):
-#     """查看积分排行榜"""
-#     ranking = get_points_ranking(10)
-#     
-#     if not ranking:
-#         await matcher.finish(Message([
-#             MessageSegment.reply(event.message_id),
-#             MessageSegment.text("暂无排行数据")
-#         ]))
-#         return
-#     
-#     msg = "🏆 积分排行榜 TOP10\n"
-#     medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
-#     for i, (user_id, total, points, bank) in enumerate(ranking):
-#         medal = medals[i] if i < len(medals) else f"{i+1}."
-#         msg += f"{medal} {user_id}  {total}分\n"
-#     
-#     await matcher.finish(Message([
-#         MessageSegment.reply(event.message_id),
-#         MessageSegment.text(msg)
-#     ]))
-# 
+ranking_cmd = on_command("积分排行", aliases={"排行榜", "今日排行"}, priority=5, block=True, force_whitespace=True)
+
+
+@ranking_cmd.handle()
+async def handle_ranking(matcher: Matcher, bot: Bot, event: MessageEvent):
+    """查看积分排行榜"""
+    ranking = get_points_ranking(10)
+    
+    if not ranking:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("暂无排行数据")
+        ]))
+        return
+    
+    msg = "🏆 积分排行榜 TOP10\n"
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+    for i, (user_id, total, points, bank) in enumerate(ranking):
+        medal = medals[i] if i < len(medals) else f"{i+1}."
+        msg += f"{medal} {user_id}  {total}分\n"
+    
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(msg)
+    ]))
+
 
 # ========== 功能列表指令 ==========
 # help_cmd = on_command("功能", priority=5, block=True, force_whitespace=True)
@@ -1143,79 +1143,79 @@ Exp: {info['current_exp']} / {info['exp_needed']}
 #             MessageSegment.text(f"打劫失败，被反杀，损失 {amount} 积分")
 #         ]))
 # ========== 发积分指令（超级用户隐藏指令） ==========
-# give_points_cmd = on_command("发积分", permission=SUPERUSER, priority=5, block=True)
-# 
-# 
-# @give_points_cmd.handle()
-# async def handle_give_points(
-#     matcher: Matcher,
-#     event: MessageEvent,
-#     args: Message = CommandArg(),
-# ):
-#     """超级用户发放积分，支持单人或全体"""
-#     args_text = args.extract_plain_text().strip()
-# 
+give_points_cmd = on_command("发积分", permission=SUPERUSER, priority=5, block=True)
+
+
+@give_points_cmd.handle()
+async def handle_give_points(
+    matcher: Matcher,
+    event: MessageEvent,
+    args: Message = CommandArg(),
+):
+    """超级用户发放积分，支持单人或全体"""
+    args_text = args.extract_plain_text().strip()
+    
     # 解析参数：发积分 数量 [全体] [@某人]
-#     parts = args_text.split()
-#     if not parts or not parts[0].isdigit():
-#         await matcher.finish(Message([
-#             MessageSegment.reply(event.message_id),
-#             MessageSegment.text("用法：发积分 数量 @某人\n      发积分 数量 全体")
-#         ]))
-#         return
-# 
-#     amount = int(parts[0])
-#     if amount < 1 or amount > 99999:
-#         await matcher.finish(Message([
-#             MessageSegment.reply(event.message_id),
-#             MessageSegment.text("积分范围是 1-99999")
-#         ]))
-#         return
-# 
+    parts = args_text.split()
+    if not parts or not parts[0].isdigit():
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("用法：发积分 数量 @某人\n      发积分 数量 全体")
+        ]))
+        return
+    
+    amount = int(parts[0])
+    if amount < 1 or amount > 99999:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("积分范围是 1-99999")
+        ]))
+        return
+    
     # 检查是否为全体发放
-#     is_all = len(parts) >= 2 and "全体" in parts[1]
-# 
-#     if is_all:
+    is_all = len(parts) >= 2 and "全体" in parts[1]
+    
+    if is_all:
         # 全体发放
-#         all_ids = get_all_user_ids()
-#         if not all_ids:
-#             await matcher.finish(Message([
-#                 MessageSegment.reply(event.message_id),
-#                 MessageSegment.text("暂无已注册用户")
-#             ]))
-#             return
-# 
-#         for uid in all_ids:
-#             user = get_user(uid)
-#             user.points += amount
-#             save_user(uid)
-# 
-#         await matcher.finish(Message([
-#             MessageSegment.reply(event.message_id),
-#             MessageSegment.text(f"已向全体 {len(all_ids)} 位用户发放 {amount} 积分")
-#         ]))
-#         return
-# 
+        all_ids = get_all_user_ids()
+        if not all_ids:
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("暂无已注册用户")
+            ]))
+            return
+        
+        for uid in all_ids:
+            user = get_user(uid)
+            user.points += amount
+            save_user(uid)
+        
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(f"已向全体 {len(all_ids)} 位用户发放 {amount} 积分")
+        ]))
+        return
+    
     # 单人发放：获取目标用户
-#     target_id = None
-#     for seg in args:
-#         if seg.type == "at":
-#             target_id = seg.data.get("qq")
-#             break
-# 
+    target_id = None
+    for seg in args:
+        if seg.type == "at":
+            target_id = seg.data.get("qq")
+            break
+    
     # 如果没有@任何人，则发给自己
-#     if not target_id:
-#         target_id = str(event.user_id)
-# 
+    if not target_id:
+        target_id = str(event.user_id)
+    
     # 发放积分
-#     target_user = get_user(target_id)
-#     target_user.points += amount
-#     save_user(target_id)
-# 
-#     await matcher.finish(Message([
-#         MessageSegment.reply(event.message_id),
-#         MessageSegment.text(f"已发放 {amount} 积分")
-#     ]))
+    target_user = get_user(target_id)
+    target_user.points += amount
+    save_user(target_id)
+    
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(f"已发放 {amount} 积分")
+    ]))
 
 
 # ========== PK 对战指令 ==========
