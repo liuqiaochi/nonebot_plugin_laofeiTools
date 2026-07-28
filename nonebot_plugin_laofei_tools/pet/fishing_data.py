@@ -6,6 +6,7 @@
 
 import json
 import random
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -423,6 +424,9 @@ FISHING_DELAY = {
 # 每次钓鱼消耗体力
 FISHING_STAMINA_COST = 10
 
+# 每人每天钓鱼次数上限
+DAILY_FISHING_LIMIT = 15
+
 # 内存缓存
 _fishing_cache: dict[str, dict] = {}
 _cache_loaded = False
@@ -454,8 +458,50 @@ def get_user_record(user_id: str) -> dict:
     """获取用户钓鱼记录，不存在则创建空记录"""
     _ensure_loaded()
     if user_id not in _fishing_cache:
-        _fishing_cache[user_id] = {"caught": [], "inventory": {}}
-    return _fishing_cache[user_id]
+        _fishing_cache[user_id] = {
+            "caught": [],
+            "inventory": {},
+            "daily_fishing": {"date": "", "count": 0},
+        }
+    rec = _fishing_cache[user_id]
+    # 向后兼容：旧记录可能缺少 daily_fishing 字段
+    if "daily_fishing" not in rec:
+        rec["daily_fishing"] = {"date": "", "count": 0}
+    if "inventory" not in rec:
+        rec["inventory"] = {}
+    if "caught" not in rec:
+        rec["caught"] = []
+    return rec
+
+
+def _today_str() -> str:
+    """返回今日日期字符串 YYYY-MM-DD"""
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def get_fishing_remaining(user_id: str) -> int:
+    """返回今日剩余可钓鱼次数（跨天后自动重置）"""
+    rec = get_user_record(user_id)
+    daily = rec["daily_fishing"]
+    today = _today_str()
+    if daily.get("date") != today:
+        daily["date"] = today
+        daily["count"] = 0
+        _save()
+    return max(0, DAILY_FISHING_LIMIT - daily["count"])
+
+
+def record_fishing(user_id: str) -> int:
+    """记录一次钓鱼（跨天后自动重置计数），返回今日已钓鱼次数"""
+    rec = get_user_record(user_id)
+    daily = rec["daily_fishing"]
+    today = _today_str()
+    if daily.get("date") != today:
+        daily["date"] = today
+        daily["count"] = 0
+    daily["count"] += 1
+    _save()
+    return daily["count"]
 
 
 def add_caught_fish(user_id: str, fish_id: str) -> None:

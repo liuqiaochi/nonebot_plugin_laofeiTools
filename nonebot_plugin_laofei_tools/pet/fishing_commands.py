@@ -27,6 +27,7 @@ from .fishing_data import (
     FISH_BY_RARITY,
     RARITY_CN_MAP,
     FISHING_STAMINA_COST,
+    DAILY_FISHING_LIMIT,
     FISH_IMAGE_DIR,
     get_fish_image_path,
     add_caught_fish,
@@ -38,6 +39,8 @@ from .fishing_data import (
     roll_fish,
     get_fishing_delay,
     get_sell_price,
+    get_fishing_remaining,
+    record_fishing,
 )
 
 # ========== 钓鱼指令 ==========
@@ -88,9 +91,22 @@ async def handle_fishing(
         ]))
         return
 
+    # 每日钓鱼次数限制
+    remaining = get_fishing_remaining(user_id)
+    if remaining <= 0:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(
+                f"今日钓鱼次数已用完（{DAILY_FISHING_LIMIT}/{DAILY_FISHING_LIMIT}），明天再来吧 🐟"
+            )
+        ]))
+        return
+
     # 扣除体力
     pet.stamina -= FISHING_STAMINA_COST
     save_pet(user_id)
+    # 记录今日钓鱼次数
+    record_fishing(user_id)
 
     # 随机出鱼（或杂物）
     fish = roll_fish()
@@ -215,14 +231,21 @@ async def handle_quick_fishing(
     junk_count = 0
     rarity_counts = {"legendary": 0, "super_rare": 0, "rare": 0, "common": 0}
     total_value = 0
+    reached_limit = False
 
     while catch_count < 30:
         pet = get_pet(user_id)
         if pet.stamina < FISHING_STAMINA_COST:
             break
 
+        # 每日钓鱼次数限制
+        if get_fishing_remaining(user_id) <= 0:
+            reached_limit = True
+            break
+
         pet.stamina -= FISHING_STAMINA_COST
         save_pet(user_id)
+        record_fishing(user_id)
 
         fish = roll_fish()
         catch_count += 1
@@ -311,6 +334,8 @@ async def handle_quick_fishing(
     summary += f"\n🗑️ 杂物: {junk_count} 个"
     summary += f"\n💰 预估总价值: {total_value} 积分"
     summary += f"\n⚡ 剩余体力: {pet_after.stamina}/{pet_after.max_stamina}"
+    if reached_limit:
+        summary += f"\n⚠️ 今日钓鱼次数已达上限（{DAILY_FISHING_LIMIT}/{DAILY_FISHING_LIMIT}）"
 
     nodes.insert(0, {
         "type": "node",
@@ -826,8 +851,8 @@ async def handle_fishing_help(matcher: Matcher, event: MessageEvent):
         msg = (
             "🎣 宠物钓鱼系统\n"
             "━━━━━━━━━━━━━━━\n"
-            "🐟 钓鱼     — 消耗10体力抛竿钓鱼，稀有度越高等待越久\n"
-            "⚡ 快速钓鱼 — 自动钓鱼至体力耗尽，无延迟，合并转发结果\n"
+            "🐟 钓鱼     — 消耗10体力抛竿钓鱼，每日限15次\n"
+            "⚡ 快速钓鱼 — 自动钓鱼至体力/次数耗尽，无延迟，合并转发结果\n"
             "   别名：连续钓鱼\n"
             "📖 钓鱼图鉴 — 查看全部36种鱼的收集进度\n"
             "   别名：鱼图鉴\n"
