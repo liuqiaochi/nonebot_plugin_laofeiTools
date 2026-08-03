@@ -1232,8 +1232,9 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     winner_name = a_name if attacker_won else b_name
     loser_name = b_name if attacker_won else a_name
     battle_log.append("——————————")
-    battle_log.append(f"💬 {winner_name}：{random.choice(PK_WIN_LINES)}")
     battle_log.append(f"🏆 {winner_name} 获胜！")
+    battle_log.append(f"🎁 胜者奖励: {reward_food}")
+    battle_log.append(f"💬 {winner_name}：{random.choice(PK_WIN_LINES)}")
     battle_log.append(f"💬 {loser_name}：{random.choice(PK_LOSE_LINES)}")
 
     # 12. 返回结果

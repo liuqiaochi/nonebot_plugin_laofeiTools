@@ -566,7 +566,6 @@ async def handle_pk(matcher: Matcher, bot: Bot, event: MessageEvent, args: Messa
     battle_text = "⚔️ 宠物PK对战\n\n"
     # battle_log 已包含空行分隔
     battle_text += "\n".join(result["battle_log"])
-    battle_text += f"\n🎁 胜者奖励: {result['reward_food']}"
 
     # 以合并转发方式发送
     node_content = Message(MessageSegment.text(battle_text))
