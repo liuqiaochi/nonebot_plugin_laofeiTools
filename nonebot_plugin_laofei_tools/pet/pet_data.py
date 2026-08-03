@@ -1033,12 +1033,64 @@ def record_pk(attacker_id: str, defender_id: str):
 
 # ========== PK 逻辑 ==========
 
+# ========== 宠物PK趣味狠话 ==========
+# 开战狠话：按先手方宠物种类挑一句，没有对应种类则随机抽通用句
+PK_OPENING_GENERIC = [
+    "「今天就让你见识见识谁才是老大！」",
+    "「呵，我劝你最好现在就认输。」",
+    "「热身完毕，准备挨打吧！」",
+    "「你的宠物看起来好像不太行啊？」",
+    "「别哭鼻子，输了不丢人，我下手轻点。」",
+]
+PK_OPENING_BY_TYPE = {
+    "dog": "「汪！我的刀盾已经饥渴难耐了！」",
+    "cat": "「喵～（哈气）你已经被我锁定了。」",
+    "dragon": "「奶龙摆尾，今天让你飞不起来！」",
+    "penguin": "「咕咕嘎嘎！企鹅之力不可阻挡！」",
+    "doro": "「欧润橘保佑，今天必胜！」",
+    "phoebe": "「啾比啾比～卖个萌就把你秒了！」",
+}
+# 回合中随机蹦出的狠话
+PK_ROUND_LINES = [
+    "「吃我一记重拳！」",
+    "「就这？挠痒痒呢？」",
+    "「你这武力是充话费送的吧？」",
+    "「躲得了初一躲不过十五！」",
+    "「看招！这招叫龙哥飞踢！」",
+    "「菜就多练练！」",
+    "「我还没用力你就倒？」",
+    "「这就是实力的差距！」",
+]
+# 血量首次跌破一半时的嘴硬台词
+PK_CRISIS_LINES = [
+    "「嘶……有点意思，我认真起来了！」",
+    "「别得意，这才刚开始！」",
+    "「血量见底？我还能再战三百回合！」",
+    "「哼，让你尝尝真正的怒火！」",
+]
+# 终结狠话（胜者）/ 败者台词
+PK_WIN_LINES = [
+    "「认输吧，菜就多练！」",
+    "「还有谁？！」",
+    "「就这？下次多带点体力再来。」",
+    "「毫无悬念，下一位！」",
+]
+PK_LOSE_LINES = [
+    "「嗯…这次是我没发挥好！」",
+    "「你给我等着，下次一定赢！」",
+    "「胜败乃兵家常事，哼！」",
+    "「不公平！肯定是你偷偷加练了！」",
+]
+
+
 def do_pk(attacker_id: str, defender_id: str) -> dict:
-    """宠物 PK 对战逻辑（回合制）
+    """宠物 PK 对战逻辑（回合制，精简播报 + 趣味狠话）
 
     双方根据等级计算最大血量（200 + (等级-1)×100），
     幸运高的先出手，每回合伤害 = 出手方有效武力值，
-    谁先血量 ≤ 0 谁负。胜利方获得随机 1 个食物奖励。
+    谁先血量 ≤ 0 谁负。战斗过程以精简回合播报呈现，
+    并穿插宠物开战狠话、残血嘴硬、回合乱叫与终结嘲讽。
+    胜利方获得随机 1 个食物奖励。
     仅攻击方扣除体力（-20），防守方不扣除体力。
 
     Args:
@@ -1098,53 +1150,70 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     # 9. 确定先手：幸运高的先出手，幸运相同则攻击方先
     a_first = a_luck >= b_luck
 
-    # 10. 回合制战斗
+    # 10. 回合制战斗（精简播报 + 趣味狠话）
     battle_log = []
-    if a_first:
-        battle_log.append(f"⚡ {a_name}（幸运{a_luck}）先手！")
-    else:
-        battle_log.append(f"⚡ {b_name}（幸运{b_luck}）先手！")
-    battle_log.append(f"🔴 {a_name} HP {a_max_hp} | 武力 {a_force}")
-    battle_log.append(f"🔵 {b_name} HP {b_max_hp} | 武力 {b_force}")
+    first_name = a_name if a_first else b_name
+    first_type = a_pet.pet_type if a_first else b_pet.pet_type
+    second_name = b_name if a_first else a_name
+    battle_log.append(f"⚔️ {a_name} VS {b_name} 开战！")
+    # 开场狠话：按先手方宠物种类挑一句，缺省随机通用句
+    opening = PK_OPENING_BY_TYPE.get(first_type, random.choice(PK_OPENING_GENERIC))
+    battle_log.append(f"💬 {first_name}：{opening}")
+    battle_log.append("")
+    battle_log.append(f"🔴 {a_name} HP{a_max_hp} 武力{a_force}　|　🔵 {b_name} HP{b_max_hp} 武力{b_force}")
     battle_log.append("——————————")
 
-    turn = 0
+    round_no = 0
     attacker_won = None
-    while turn < 500:  # 上限 500 手防止死循环
+    a_crisis = False
+    b_crisis = False
+    while round_no < 250:  # 上限保护，防止死循环（每回合=双发各一次）
+        round_no += 1
         if a_first:
             # 攻击方出手
-            turn += 1
             b_hp -= a_force
-            battle_log.append(f"第{turn}手：{a_name} 攻击 {b_name}，造成 {a_force} 伤害，{b_name} 剩余 {max(b_hp, 0)} HP")
+            battle_log.append(f"🔥 第{round_no}回合｜{a_name} 出手 -{a_force}（{b_name} 剩 {max(b_hp, 0)}）")
+            if not b_crisis and 0 < b_hp <= b_max_hp * 0.5:
+                b_crisis = True
+                battle_log.append(f"💬 {b_name}：{random.choice(PK_CRISIS_LINES)}")
             if b_hp <= 0:
                 attacker_won = True
                 break
             # 防守方反击
-            turn += 1
             a_hp -= b_force
-            battle_log.append(f"第{turn}手：{b_name} 反击 {a_name}，造成 {b_force} 伤害，{a_name} 剩余 {max(a_hp, 0)} HP")
-            battle_log.append("")
+            battle_log.append(f"🛡️ {b_name} 反击 -{b_force}（{a_name} 剩 {max(a_hp, 0)}）")
+            if not a_crisis and 0 < a_hp <= a_max_hp * 0.5:
+                a_crisis = True
+                battle_log.append(f"💬 {a_name}：{random.choice(PK_CRISIS_LINES)}")
             if a_hp <= 0:
                 attacker_won = False
                 break
         else:
             # 防守方先出手
-            turn += 1
             a_hp -= b_force
-            battle_log.append(f"第{turn}手：{b_name} 攻击 {a_name}，造成 {b_force} 伤害，{a_name} 剩余 {max(a_hp, 0)} HP")
+            battle_log.append(f"🔥 第{round_no}回合｜{b_name} 出手 -{b_force}（{a_name} 剩 {max(a_hp, 0)}）")
+            if not a_crisis and 0 < a_hp <= a_max_hp * 0.5:
+                a_crisis = True
+                battle_log.append(f"💬 {a_name}：{random.choice(PK_CRISIS_LINES)}")
             if a_hp <= 0:
                 attacker_won = False
                 break
             # 攻击方反击
-            turn += 1
             b_hp -= a_force
-            battle_log.append(f"第{turn}手：{a_name} 反击 {b_name}，造成 {a_force} 伤害，{b_name} 剩余 {max(b_hp, 0)} HP")
-            battle_log.append("")
+            battle_log.append(f"🛡️ {a_name} 反击 -{a_force}（{b_name} 剩 {max(b_hp, 0)}）")
+            if not b_crisis and 0 < b_hp <= b_max_hp * 0.5:
+                b_crisis = True
+                battle_log.append(f"💬 {b_name}：{random.choice(PK_CRISIS_LINES)}")
             if b_hp <= 0:
                 attacker_won = True
                 break
+        # 每两回合后小概率蹦一句回合狠话
+        if round_no >= 2 and random.random() < 0.4:
+            speaker = first_name if random.random() < 0.5 else second_name
+            battle_log.append(f"💬 {speaker}：{random.choice(PK_ROUND_LINES)}")
+        battle_log.append("")
 
-    # 兜底：500 手未分胜负，按剩余血量多者胜
+    # 兜底：250 回合未分胜负，按剩余血量多者胜
     if attacker_won is None:
         attacker_won = a_hp >= b_hp
 
@@ -1159,8 +1228,11 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     save_pet(defender_id)
 
     winner_name = a_name if attacker_won else b_name
+    loser_name = b_name if attacker_won else a_name
     battle_log.append("——————————")
+    battle_log.append(f"💬 {winner_name}：{random.choice(PK_WIN_LINES)}")
     battle_log.append(f"🏆 {winner_name} 获胜！")
+    battle_log.append(f"💬 {loser_name}：{random.choice(PK_LOSE_LINES)}")
 
     # 12. 返回结果
     return {
