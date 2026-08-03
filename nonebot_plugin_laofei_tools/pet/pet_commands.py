@@ -563,7 +563,7 @@ async def handle_pk(matcher: Matcher, bot: Bot, event: MessageEvent, args: Messa
         return
 
     # 构建合并转发消息
-    battle_text = "⚔️ 宠物PK对战\n\n"
+    battle_text = ""
     # battle_log 已包含空行分隔
     battle_text += "\n".join(result["battle_log"])
 
