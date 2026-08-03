@@ -245,6 +245,7 @@ async def handle_pet_help(matcher: Matcher, event: MessageEvent):
 出售 物品名 [数量] - 出售背包物品获得积分
 宠物佩戴 配饰名 - 佩戴配饰提升属性
 宠物改名 新名字 - 给宠物改名（500积分）
+宠物排行榜 [武力/幸运] - 展示等级/武力/幸运 TOP10
 宠物背包 - 查看道具背包
 宠物弃养 - 弃养宠物（需二次确认）
 宠物帮助 - 查看本帮助信息"""
@@ -1348,6 +1349,78 @@ def _get_random_targets(user_id: str, n: int = 10) -> list:
     candidates = [u for u in get_all_pet_owners() if u != user_id]
     random.shuffle(candidates)
     return candidates[:n]
+
+
+# ========== 宠物排行榜指令 ==========
+pet_rank_cmd = on_command(
+    "宠物排行榜",
+    aliases={"宠物排行", "宠物前十", "宠物榜", "宠物榜单"},
+    priority=5,
+    block=True,
+)
+
+
+@pet_rank_cmd.handle()
+async def handle_pet_rank(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()):
+    """宠物排行榜：展示等级/武力/幸运前十
+
+    宠物排行榜       → 按等级排名
+    宠物排行榜 武力  → 按有效武力排名
+    宠物排行榜 幸运  → 按有效幸运排名
+    """
+    arg = args.extract_plain_text().strip()
+
+    if "武力" in arg or "力量" in arg or "force" in arg.lower():
+        mode = "force"
+        title = "🏆 宠物武力排行榜 TOP10"
+        unit = "武力"
+        get_value = get_effective_force
+    elif "幸运" in arg or "luck" in arg.lower():
+        mode = "luck"
+        title = "🏆 宠物幸运排行榜 TOP10"
+        unit = "幸运"
+        get_value = get_effective_luck
+    else:
+        mode = "level"
+        title = "🏆 宠物等级排行榜 TOP10"
+        unit = "等级"
+        get_value = None
+
+    owners = get_all_pet_owners()
+    entries = []
+    for uid in owners:
+        pet = get_pet(uid)
+        if pet is None or not pet.pet_type:
+            continue
+        value = get_pet_level(pet.exp) if mode == "level" else get_value(pet)
+        entries.append((uid, pet, value, pet.exp))
+
+    if not entries:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("还没有人领养宠物哦～快去「我的宠物」领养一只吧！")
+        ]))
+        return
+
+    # 排序：主指标降序 → 经验降序 → QQ号升序（确定性顺序）
+    entries.sort(key=lambda x: (-x[2], -x[3], x[0]))
+    top = entries[:10]
+
+    medals = ["🥇", "🥈", "🥉"]
+    lines = [title, "━━━━━━━━━━"]
+    for i, (uid, pet, value, _exp) in enumerate(top):
+        rank = medals[i] if i < 3 else f"{i + 1}️⃣"
+        name = get_display_name(pet)
+        metric = f"Lv.{value}" if mode == "level" else f"{unit} {value}"
+        lines.append(f"{rank} {name}（{uid}）  {metric}")
+    lines.append("━━━━━━━━━━")
+    lines.append(f"共 {len(entries)} 只宠物参与排名")
+    lines.append("切换榜单：宠物排行榜 武力 / 宠物排行榜 幸运")
+
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text("\n".join(lines))
+    ]))
 
 
 # ========== 一键宠物日常指令 ==========
