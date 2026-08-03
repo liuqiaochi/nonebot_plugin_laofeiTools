@@ -1167,6 +1167,7 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     attacker_won = None
     a_crisis = False
     b_crisis = False
+    next_talk_round = random.randint(1, 4)  # 下一句回合狠话出现的回合（1~4 随机）
     while round_no < 250:  # 上限保护，防止死循环（每回合=双发各一次）
         round_no += 1
         if a_first:
@@ -1207,10 +1208,11 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
             if b_hp <= 0:
                 attacker_won = True
                 break
-        # 每两回合后小概率蹦一句回合狠话
-        if round_no >= 2 and random.random() < 0.4:
+        # 每隔 1~4 回合随机蹦一句回合狠话
+        if round_no == next_talk_round:
             speaker = first_name if random.random() < 0.5 else second_name
             battle_log.append(f"💬 {speaker}：{random.choice(PK_ROUND_LINES)}")
+            next_talk_round += random.randint(1, 4)
         battle_log.append("")
 
     # 兜底：250 回合未分胜负，按剩余血量多者胜
