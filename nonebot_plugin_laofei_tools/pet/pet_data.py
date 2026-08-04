@@ -1157,7 +1157,10 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     second_name = b_name if a_first else a_name
     # 开场狠话：按先手方宠物种类挑一句，缺省随机通用句
     opening = PK_OPENING_BY_TYPE.get(first_type, random.choice(PK_OPENING_GENERIC))
-    battle_log.append(f"⚔️ {a_name}(HP{a_max_hp}) VS {b_name}(HP{b_max_hp}) 开战！💬 {first_name}：{opening}")
+    battle_log.append(f"{a_name} VS {b_name}")
+    battle_log.append(f"HP{a_max_hp} ⚔️ HP{b_max_hp}")
+    battle_log.append("")
+    battle_log.append(f"💬 {first_name}：{opening}")
     battle_log.append("")
     battle_log.append("——————————")
 
