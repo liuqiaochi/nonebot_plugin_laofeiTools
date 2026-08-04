@@ -238,7 +238,7 @@ async def handle_pet_help(matcher: Matcher, event: MessageEvent):
 快速打工 - 自动打工至体力耗尽，合并转发结果
 快速散步 - 自动散步至体力耗尽，合并转发结果
 宠物抚摸 - 每日抚摸提升好感度
-宠物喂食 食物名 [数量] - 喂食恢复体力和好感度
+宠物喂食 食物名1 食物名2 ... - 多食物空格分隔喂食（或 食物名 数量）
 宠物pk @某人 - 与他人宠物PK对战
 宠物商店 - 查看商店商品
 购买 商品名 [数量] - 使用积分购买商品
@@ -437,59 +437,76 @@ async def handle_feed(matcher: Matcher, event: MessageEvent, args: Message = Com
         ]))
         return
 
-    food_name = args.extract_plain_text().strip()
-    if not food_name:
+    raw = args.extract_plain_text().strip()
+    if not raw:
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text("请使用「宠物喂食 食物名」或「宠物喂食 食物名 数量」格式")
+            MessageSegment.text("请使用「宠物喂食 食物名1 食物名2 ...」（空格分隔多选）或「宠物喂食 食物名 数量」格式")
         ]))
         return
 
-    # 解析名称和数量
-    parts = food_name.rsplit(None, 1)
-    count = 1
-    if len(parts) == 2 and parts[1].isdigit():
-        food_name = parts[0]
-        count = int(parts[1])
-    if count < 1:
-        count = 1
+    tokens = raw.split()
+    # 解析数量：仅当「单个食物 + 末尾纯数字」时视为该食物×数量；
+    # 多个食物用空格分隔，每种各喂 1 次（多选）
+    per_count = 1
+    if len(tokens) == 2 and tokens[1].isdigit():
+        food_list = [tokens[0]]
+        per_count = int(tokens[1])
+    else:
+        food_list = tokens
 
-    # 逐个喂食，累计结果
+    # 逐个食物喂食，累计结果
     total_stamina_gain = 0
     total_affection_gain = 0
-    fed_count = 0
-    last_result = None
+    fed_details = []   # (food_name, stamina_gain, affection_gain, is_favorite, pet_name)
+    failed = []        # (food_name, reason)
 
-    for _ in range(count):
-        # 体力已满则停止喂食
-        current_pet = get_pet(user_id)
-        if current_pet and current_pet.stamina >= current_pet.max_stamina:
-            if fed_count == 0:
-                await matcher.finish(Message([
-                    MessageSegment.reply(event.message_id),
-                    MessageSegment.text("宠物体力已满，不需要喂食")
-                ]))
-                return
-            break
-        result = do_feed(user_id, food_name)
-        if not result["success"]:
-            if fed_count == 0:
-                await matcher.finish(Message([
-                    MessageSegment.reply(event.message_id),
-                    MessageSegment.text(result["message"])
-                ]))
-                return
-            break
-        fed_count += 1
-        total_stamina_gain += result["stamina_gain"]
-        total_affection_gain += result["affection_gain"]
-        last_result = result
+    for food_name in food_list:
+        for _ in range(per_count):
+            # 体力已满则停止后续喂食
+            current_pet = get_pet(user_id)
+            if current_pet and current_pet.stamina >= current_pet.max_stamina:
+                if not fed_details:
+                    await matcher.finish(Message([
+                        MessageSegment.reply(event.message_id),
+                        MessageSegment.text("宠物体力已满，不需要喂食")
+                    ]))
+                    return
+                break
+            result = do_feed(user_id, food_name)
+            if not result["success"]:
+                failed.append((food_name, result["message"]))
+                break
+            fed_details.append((
+                result["food_name"],
+                result["stamina_gain"],
+                result["affection_gain"],
+                result["is_favorite"],
+                result["pet_name"],
+            ))
+            total_stamina_gain += result["stamina_gain"]
+            total_affection_gain += result["affection_gain"]
 
-    msg = f"🐾 你喂了 {last_result['pet_name']} {fed_count}个 {last_result['food_name']}~\n"
-    msg += f"体力: +{total_stamina_gain}\n"
-    msg += f"好感度: +{total_affection_gain}"
-    if last_result["is_favorite"]:
-        msg += f"\n💕 {last_result['pet_name']} 最爱吃 {last_result['food_name']}！"
+    # 一种都没喂成功（如全部背包缺货 / 无此食物）
+    if not fed_details:
+        reason = failed[0][1] if failed else "喂食失败"
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(reason)
+        ]))
+        return
+
+    pet_name = fed_details[0][4]
+    msg = f"🐾 你喂了 {pet_name}：\n"
+    for fn, sg, ag, fav, _ in fed_details:
+        tag = " 💕最爱" if fav else ""
+        msg += f"  {fn}　+{sg}体力 +{ag}好感{tag}\n"
+    msg += f"——————————\n合计 体力 +{total_stamina_gain}　好感 +{total_affection_gain}"
+    if failed:
+        uniq = {}
+        for fn, r in failed:
+            uniq[fn] = r
+        msg += "\n未喂食：" + "、".join(f"{fn}({r})" for fn, r in uniq.items())
 
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
