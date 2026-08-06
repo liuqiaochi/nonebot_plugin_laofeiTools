@@ -122,6 +122,16 @@ AFFECTION_LEVELS = {
     8: 770,
     9: 960,
     10: 1170,
+    11: 1400,
+    12: 1650,
+    13: 1920,
+    14: 2210,
+    15: 2520,
+    16: 2850,
+    17: 3200,
+    18: 3570,
+    19: 3960,
+    20: 4370,
 }
 
 # ========== 宠物等级经验需求 ==========
@@ -522,7 +532,7 @@ def get_pet_level(exp: int) -> int:
 
 
 def get_affection_level(affection: int) -> int:
-    """根据好感点数计算好感等级（Lv1 ~ Lv10）
+    """根据好感点数计算好感等级（Lv1 ~ Lv20）
 
     使用 AFFECTION_LEVELS 阈值表，返回最高满足阈值的等级
     """
@@ -531,6 +541,24 @@ def get_affection_level(affection: int) -> int:
         if affection >= threshold:
             result = level
     return result
+
+
+def get_affection_damage(force: int, affection: int) -> int:
+    """好感每级 +1% 伤害，向下取整（无小数部分）
+
+    例：武力 100、好感 Lv5 → 100 + (100 * 5) // 100 = 105
+    """
+    level = get_affection_level(affection)
+    return force + (force * level) // 100
+
+
+def get_affection_reward(base: int, affection: int, per_level_pct: int = 2) -> int:
+    """好感每级 +per_level_pct% 收益，向下取整（无小数部分）
+
+    例：收益 20、好感 Lv5、per_level 2 → 20 + (20 * 5 * 2) // 100 = 22
+    """
+    level = get_affection_level(affection)
+    return base + (base * level * per_level_pct) // 100
 
 
 def get_effective_force(pet: PetData) -> int:
@@ -630,9 +658,9 @@ def do_walk(user_id: str) -> dict:
     old_stamina = pet.stamina
     old_exp = pet.exp
 
-    # 4. 扣除体力，增加经验
+    # 4. 扣除体力，增加经验（好感每级 +2% 经验，向下取整）
     pet.stamina -= 20
-    pet.exp += 20
+    pet.exp += get_affection_reward(20, pet.affection)
 
     # 5. 计算掉落概率
     affection_level = get_affection_level(pet.affection)
@@ -875,7 +903,7 @@ def do_work(user_id: str) -> dict:
         "success": True,
         "pet_name": get_display_name(pet),
         "stamina_after": pet.stamina,
-        "points_earned": random.randint(50, 100),
+        "points_earned": get_affection_reward(random.randint(50, 100), pet.affection),
         "dropped_items": dropped_items,
     }
 
@@ -1138,6 +1166,10 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     if b_pet.pet_type == "dog":
         b_force += 5
 
+    # 好感增伤：每级好感 +1% 伤害（向下取整），用于本场战斗的实际伤害
+    a_dmg = get_affection_damage(a_force, a_pet.affection)
+    b_dmg = get_affection_damage(b_force, b_pet.affection)
+
     a_name = get_display_name(a_pet)
     b_name = get_display_name(b_pet)
 
@@ -1178,8 +1210,8 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
             next_talk_round += random.randint(1, 4)
         if a_first:
             # 攻击方出手
-            b_hp -= a_force
-            battle_log.append(f"🔥 第{round_no}回合｜{a_name} 出手 -{a_force}（{b_name} 剩 {max(b_hp, 0)}）")
+            b_hp -= a_dmg
+            battle_log.append(f"🔥 第{round_no}回合｜{a_name} 出手 -{a_dmg}（{b_name} 剩 {max(b_hp, 0)}）")
             if not b_crisis and 0 < b_hp <= b_max_hp * 0.5:
                 b_crisis = True
                 battle_log.append(f"💬 {b_name}：{random.choice(PK_CRISIS_LINES)}")
@@ -1187,8 +1219,8 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
                 attacker_won = True
                 break
             # 防守方反击
-            a_hp -= b_force
-            battle_log.append(f"🛡️ {b_name} 反击 -{b_force}（{a_name} 剩 {max(a_hp, 0)}）")
+            a_hp -= b_dmg
+            battle_log.append(f"🛡️ {b_name} 反击 -{b_dmg}（{a_name} 剩 {max(a_hp, 0)}）")
             if not a_crisis and 0 < a_hp <= a_max_hp * 0.5:
                 a_crisis = True
                 battle_log.append(f"💬 {a_name}：{random.choice(PK_CRISIS_LINES)}")
@@ -1197,8 +1229,8 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
                 break
         else:
             # 防守方先出手
-            a_hp -= b_force
-            battle_log.append(f"🔥 第{round_no}回合｜{b_name} 出手 -{b_force}（{a_name} 剩 {max(a_hp, 0)}）")
+            a_hp -= b_dmg
+            battle_log.append(f"🔥 第{round_no}回合｜{b_name} 出手 -{b_dmg}（{a_name} 剩 {max(a_hp, 0)}）")
             if not a_crisis and 0 < a_hp <= a_max_hp * 0.5:
                 a_crisis = True
                 battle_log.append(f"💬 {a_name}：{random.choice(PK_CRISIS_LINES)}")
@@ -1206,8 +1238,8 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
                 attacker_won = False
                 break
             # 攻击方反击
-            b_hp -= a_force
-            battle_log.append(f"🛡️ {a_name} 反击 -{a_force}（{b_name} 剩 {max(b_hp, 0)}）")
+            b_hp -= a_dmg
+            battle_log.append(f"🛡️ {a_name} 反击 -{a_dmg}（{b_name} 剩 {max(b_hp, 0)}）")
             if not b_crisis and 0 < b_hp <= b_max_hp * 0.5:
                 b_crisis = True
                 battle_log.append(f"💬 {b_name}：{random.choice(PK_CRISIS_LINES)}")
