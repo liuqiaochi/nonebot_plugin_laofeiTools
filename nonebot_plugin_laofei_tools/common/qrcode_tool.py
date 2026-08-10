@@ -58,11 +58,20 @@ GEN_KEYWORDS = {"生成二维码", "二维码生成", "做二维码", "创建二
 MAX_QR_TEXT_LEN = 2000
 
 
+def _plain_text(message) -> str:
+    """跨 nonebot 版本获取消息纯文本（新版 get_plaintext / 旧版 extract_plain_text）"""
+    if hasattr(message, "get_plaintext"):
+        return message.get_plaintext()
+    if hasattr(message, "extract_plain_text"):
+        return message.extract_plain_text()
+    return str(message)
+
+
 def _make_text_rule(keywords: set) -> Rule:
     """构造一个 on_message 规则：消息纯文本（忽略前置 @机器人）命中关键字集合"""
 
     def _rule(event: MessageEvent) -> bool:
-        text = event.message.get_plaintext().strip()
+        text = _plain_text(event.message).strip()
         return any(text == kw or text.startswith(kw + " ") for kw in keywords)
 
     return Rule(_rule)
@@ -96,10 +105,10 @@ def _get_qr_text(event: MessageEvent, matched_kw: str) -> str:
     if reply is not None:
         rmsg = getattr(reply, "message", None)
         if rmsg is not None:
-            t = rmsg.get_plaintext().strip()
+            t = _plain_text(rmsg).strip()
             if t:
                 return t
-    text = event.message.get_plaintext().strip()
+    text = _plain_text(event.message).strip()
     if text == matched_kw:
         return ""
     if text.startswith(matched_kw + " "):
@@ -200,7 +209,7 @@ async def handle_qr_decode(matcher: Matcher, event: MessageEvent) -> None:
 
 @qr_gen_cmd.handle()
 async def handle_qr_gen(matcher: Matcher, event: MessageEvent) -> None:
-    text = event.message.get_plaintext().strip()
+    text = _plain_text(event.message).strip()
     matched_kw = next(
         (kw for kw in GEN_KEYWORDS if text == kw or text.startswith(kw + " ")),
         None,
