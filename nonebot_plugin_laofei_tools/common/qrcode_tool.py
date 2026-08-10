@@ -13,10 +13,8 @@
 
 依赖：
    - 生成：qrcode（pip install qrcode，底层用 Pillow，已在项目依赖中）
-   - 识别：pyzbar + 系统 zbar 库
-       · macOS:  brew install zbar
-       · Linux:  apt-get install libzbar0
-       · pip install pyzbar
+   - 识别：opencv-python-headless（pip install opencv-python-headless，纯 pip、无需系统库）
+       · 内部使用 cv2.QRCodeDetector，支持多二维码（opencv>=4.7 的 detectAndDecodeMulti）
 """
 
 import base64
@@ -32,12 +30,14 @@ from nonebot.matcher import Matcher
 from nonebot.rule import Rule
 from PIL import Image
 
-# 识别库（pyzbar）按需导入：缺失时识别功能给出友好提示，不影响生成功能
+# 识别库（opencv）按需导入：缺失时识别功能给出友好提示，不影响生成功能
+# opencv-python-headless 纯 pip 安装，无需系统库；内部用 cv2.QRCodeDetector 解码
 try:
-    from pyzbar.pyzbar import decode as _qr_decode
+    import cv2
+    import numpy as np
 
     _HAS_DECODE = True
-except Exception:  # pragma: no cover - 取决于环境是否装了 zbar
+except Exception:  # pragma: no cover - 取决于环境是否装了 opencv
     _HAS_DECODE = False
 
 # 生成库（qrcode）按需导入
@@ -158,6 +158,29 @@ async def _get_image_bytes(seg) -> Optional[bytes]:
 # ============ 识别二维码 ============
 
 
+def _decode_qr_image(img) -> list:
+    """用 cv2.QRCodeDetector 解码图片中的二维码，返回解码文本列表（支持多码）"""
+    arr = np.array(img.convert("RGB"))
+    # opencv 需要 BGR 顺序
+    bgr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+    detector = cv2.QRCodeDetector()
+
+    # opencv >= 4.7 支持一次解码多个二维码
+    if hasattr(detector, "detectAndDecodeMulti"):
+        try:
+            ok, data_list, _pts = detector.detectAndDecodeMulti(bgr)
+            if ok and data_list:
+                return [d for d in data_list if d]
+        except Exception as e:
+            logger.debug(f"二维码: detectAndDecodeMulti 失败，回退单码: {e}")
+
+    # 单码回退（兼容旧版本 opencv）
+    data, _pts, _straight = detector.detectAndDecode(bgr)
+    if data:
+        return [data]
+    return []
+
+
 @qr_decode_cmd.handle()
 async def handle_qr_decode(matcher: Matcher, event: MessageEvent) -> None:
     seg = _find_image_seg(event)
@@ -172,16 +195,14 @@ async def handle_qr_decode(matcher: Matcher, event: MessageEvent) -> None:
 
     if not _HAS_DECODE:
         await matcher.finish(
-            "二维码识别功能未启用：请在 bot 环境安装 zbar 系统库与 pyzbar\n"
-            "· macOS: brew install zbar\n"
-            "· Linux: apt-get install libzbar0\n"
-            "· pip install pyzbar"
+            "二维码识别功能未启用：请在 bot 环境安装 opencv\n"
+            "· pip install opencv-python-headless"
         )
         return
 
     try:
         img = Image.open(io.BytesIO(data))
-        results = _qr_decode(img)
+        results = _decode_qr_image(img)
     except Exception as e:
         logger.error(f"二维码: 识别失败: {e}")
         await matcher.finish("二维码识别失败：图片无法解析~")
@@ -191,12 +212,7 @@ async def handle_qr_decode(matcher: Matcher, event: MessageEvent) -> None:
         await matcher.finish("这张图片里没有识别到二维码~")
         return
 
-    texts = []
-    for r in results:
-        try:
-            texts.append(r.data.decode("utf-8"))
-        except Exception:
-            texts.append(str(r.data))
+    texts = list(results)
 
     lines = [f"🔍 识别到 {len(texts)} 个二维码："]
     for i, t in enumerate(texts, 1):
