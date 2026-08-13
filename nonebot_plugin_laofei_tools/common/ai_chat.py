@@ -601,12 +601,13 @@ async def _download_image_bytes(bot, event: MessageEvent) -> Optional[bytes]:
     return None
 
 
-# --- 添加配图 ---
+# --- 添加配图（仅超管） ---
 add_img_cmd = on_command(
     "ai图添加",
     aliases={"加配图", "添加配图"},
     priority=5,
     block=True,
+    permission=SUPERUSER,
     rule=Rule(lambda e: _find_image_seg(e) is not None),
 )
 
@@ -645,7 +646,7 @@ async def handle_list_img(matcher: Matcher) -> None:
     imgs = _load_ai_images()
     await matcher.finish(
         f"🖼 当前配图共 {len(imgs)} 张\n"
-        f"· 添加：引用/附带图片发「ai图添加」\n"
+        f"· 添加：引用/附带图片发「ai图添加」（超管）\n"
         f"· 删除：ai图删除 <序号>（超管）\n"
         f"· 重置：ai图重置（超管，恢复内置基础图）"
     )
