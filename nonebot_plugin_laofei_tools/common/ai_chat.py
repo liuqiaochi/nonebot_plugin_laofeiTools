@@ -12,10 +12,12 @@ import re
 import shutil
 import time
 from collections import defaultdict
+from io import BytesIO
 from pathlib import Path
 from typing import Optional
 
 import httpx
+from PIL import Image, ImageDraw, ImageFont
 
 from openai import OpenAI
 from nonebot import on_command, on_message, get_driver, get_bots
@@ -731,7 +733,105 @@ async def handle_reset_img(matcher: Matcher) -> None:
     await matcher.finish(f"♻ 已重置为内置基础图，当前共 {len(imgs)} 张")
 
 
-# --- AI 帮助 ---
+# --- AI 帮助（图片返回，与 lg帮助 风格一致） ---
+_BG_COLOR = (45, 45, 55)
+_TEXT_COLOR = (255, 255, 255)
+_TITLE_COLOR = (255, 200, 100)
+_SECTION_COLOR = (100, 200, 255)
+_DESC_COLOR = (160, 160, 180)
+_DIVIDER_COLOR = (80, 80, 95)
+_ADMIN_COLOR = (255, 160, 100)
+
+
+def _ai_help_try_load_font(size: int):
+    """尝试加载中文字体"""
+    font_paths = [
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "C:/Windows/Fonts/msyh.ttc",
+        "C:/Windows/Fonts/simhei.ttf",
+    ]
+    for fp in font_paths:
+        try:
+            return ImageFont.truetype(fp, size)
+        except (OSError, IOError):
+            continue
+    return ImageFont.load_default()
+
+
+def _generate_ai_help_image() -> str:
+    """生成 AI帮助 图片，返回 base64 PNG"""
+    font_title = _ai_help_try_load_font(30)
+    font_section = _ai_help_try_load_font(22)
+    font_cmd = _ai_help_try_load_font(20)
+    font_desc = _ai_help_try_load_font(14)
+
+    width = 520
+    padding = 25
+    header_height = 70
+    section_gap = 15
+    item_height = 50
+
+    sections = [
+        ("对话", [
+            ("@机器人 + 问题", "群聊需先开启，私聊直接用"),
+            ("lg清记忆 / lg清空记忆", "清除当前对话历史"),
+        ]),
+        ("管理（超管）", [
+            ("开启AI / 关闭AI", "开启 / 关闭本群 AI 功能"),
+            ("AI拉黑 @用户/QQ", "将用户加入 AI 黑名单"),
+            ("AI解除 @用户/QQ", "将用户移出 AI 黑名单"),
+        ], True),
+        ("配图（资源目录）", [
+            ("ai图添加", "超管：引用/附带图片存入资源目录"),
+            ("ai图列表", "查看配图数量与用法"),
+            ("ai图删除 <序号>", "超管：删除配图（支持 1 3 5 或 1-3）"),
+            ("ai图重置", "超管：恢复内置基础图"),
+        ], True),
+    ]
+
+    total_height = padding + header_height
+    for name, items, *rest in sections:
+        total_height += 35 + len(items) * item_height + section_gap
+    total_height += padding
+
+    img = Image.new("RGB", (width, total_height), _BG_COLOR)
+    draw = ImageDraw.Draw(img)
+
+    y = padding
+    title = "蓝色大肥鱼 · AI 指令"
+    title_bbox = draw.textbbox((0, 0), title, font=font_title)
+    title_w = title_bbox[2] - title_bbox[0]
+    draw.text(((width - title_w) // 2, y), title, fill=_TITLE_COLOR, font=font_title)
+    y += header_height
+
+    for section_name, items, *rest in sections:
+        is_admin = rest[0] if rest else False
+        section_color = _ADMIN_COLOR if is_admin else _SECTION_COLOR
+        draw.line([(padding, y - 5), (width - padding, y - 5)], fill=_DIVIDER_COLOR, width=1)
+        draw.text((padding, y), f"【{section_name}】", fill=section_color, font=font_section)
+        y += 35
+        for cmd, desc in items:
+            draw.text((padding + 10, y), cmd, fill=_TEXT_COLOR, font=font_cmd)
+            draw.text((padding + 20, y + 25), desc, fill=_DESC_COLOR, font=font_desc)
+            y += item_height
+        y += section_gap
+
+    footer = "AI 每次回复会随机附带一张配图"
+    fb_bbox = draw.textbbox((0, 0), footer, font=font_desc)
+    fb_w = fb_bbox[2] - fb_bbox[0]
+    draw.text(((width - fb_w) // 2, total_height - padding - 5), footer, fill=(100, 100, 110), font=font_desc)
+
+    output = BytesIO()
+    img.save(output, format="PNG")
+    output.seek(0)
+    return base64.b64encode(output.getvalue()).decode()
+
+
 ai_help_cmd = on_command(
     "AI帮助",
     aliases={"ai帮助", "AI指令", "ai指令", "lg ai帮助", "lg ai指令"},
@@ -743,25 +843,16 @@ ai_help_cmd = on_command(
 
 @ai_help_cmd.handle()
 async def handle_ai_help(matcher: Matcher) -> None:
-    """列出所有 AI 相关指令及用法"""
-    await matcher.finish(
-        "🤖 蓝色大肥鱼 · AI 指令一览\n"
-        "━━━━━━━━━━━━━━━━\n"
-        "【对话】\n"
-        "· @机器人 + 问题（群聊需开启，私聊直用）\n"
-        "· lg清记忆 / lg清空记忆（清除你的对话记忆）\n"
-        "━━━━━━━━━━━━━━━━\n"
-        "【管理·超管】\n"
-        "· 开启AI（开启本群 AI）\n"
-        "· 关闭AI（关闭本群 AI）\n"
-        "· AI拉黑 @用户/QQ（拉黑用户）\n"
-        "· AI解除 @用户/QQ（解除拉黑）\n"
-        "━━━━━━━━━━━━━━━━\n"
-        "【配图·资源目录】\n"
-        "· ai图添加（超管，引用/附带图片存入）\n"
-        "· ai图列表（查看数量与用法）\n"
-        "· ai图删除 <序号>（超管，支持 1 3 5 或 1-3）\n"
-        "· ai图重置（超管，恢复内置基础图）\n"
-        "━━━━━━━━━━━━━━━━\n"
-        "提示：AI 每次回复会随机附带一张配图。"
-    )
+    """列出所有 AI 相关指令及用法（图片返回）"""
+    try:
+        img_b64 = _generate_ai_help_image()
+        await matcher.finish(MessageSegment.image(f"base64://{img_b64}"))
+    except Exception as e:
+        logger.error(f"[AI帮助] 图片生成失败: {e}")
+        await matcher.finish(
+            "🤖 蓝色大肥鱼 · AI 指令\n"
+            "· @机器人 + 问题（群聊需开启，私聊直用）\n"
+            "· lg清记忆（清除对话历史）\n"
+            "· 管理（超管）：开启AI / 关闭AI / AI拉黑 / AI解除\n"
+            "· 配图：ai图添加 / ai图列表 / ai图删除 <序号> / ai图重置"
+        )
