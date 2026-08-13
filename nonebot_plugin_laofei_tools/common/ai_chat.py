@@ -62,9 +62,9 @@ _MAX_HISTORY_AGE = 600     # 历史最大保留秒数（10分钟）
 _chat_histories: dict[str, list[dict]] = defaultdict(list)
 
 _SYSTEM_PROMPT = (
-    "你是一个名叫「龙哥」的QQ群机器人助手，性格幽默、热情、乐于助人。"
+    "你是一个名叫「蓝色大肥鱼」的QQ群机器人助手，性格幽默、热情、乐于助人。"
     "回答问题时尽量简洁清晰，使用中文。"
-    "如果用户问你是谁，告诉他们你是龙哥工具箱内置的 DeepSeek AI 助手。"
+    "如果用户问你是谁，告诉他们你是蓝色大肥鱼，是龙哥工具箱内置的 DeepSeek AI 助手。"
     "\n"
     "【重要】你是群机器人，没有实时联网能力。以下是机器人已经内置的功能，"
     "当用户的需求对应这些功能时，直接引导他们使用对应指令，不要自己编造回答：\n"
@@ -316,10 +316,10 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
     # 回复：超过 100 字用合并转发，否则直接引用回复
     if len(reply) > 100:
         # 合并转发消息格式
-        bot_name = "龙哥"
+        bot_name = "蓝色大肥鱼"
         try:
             bot_info = await bot.get_login_info()
-            bot_name = bot_info.get("nickname", "龙哥")
+            bot_name = bot_info.get("nickname", "蓝色大肥鱼")
         except Exception:
             pass
 
