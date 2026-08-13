@@ -6,9 +6,12 @@ AI 对话模块 — 基于 DeepSeek API
 黑名单：超级管理员可管理用户黑名单
 """
 
+import base64
+import random
 import re
 import time
 from collections import defaultdict
+from pathlib import Path
 
 from openai import OpenAI
 from nonebot import on_command, on_message, get_driver, get_bots
@@ -195,6 +198,39 @@ async def _at_bot_rule(event: MessageEvent) -> bool:
 
 # ========== @bot AI 对话 ==========
 
+# ============ AI 回复随机配图 ============
+# ds 目录下预置图片，AI 每次回复随机附一张（路径相对本模块，部署位置无关）
+_DS_IMAGE_DIR = Path(__file__).resolve().parent / "image" / "ds"
+_DS_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif")
+_DS_IMAGES: list = []
+
+
+def _load_ds_images() -> list:
+    """懒加载并缓存 ds 目录下的图片列表"""
+    global _DS_IMAGES
+    if not _DS_IMAGES and _DS_IMAGE_DIR.is_dir():
+        _DS_IMAGES = [
+            p for p in _DS_IMAGE_DIR.iterdir()
+            if p.is_file() and p.suffix.lower() in _DS_IMAGE_EXTS
+        ]
+    return _DS_IMAGES
+
+
+def _random_ds_image():
+    """随机选一张 ds 图片，返回 base64 的 MessageSegment；目录无图或读取失败返回 None"""
+    imgs = _load_ds_images()
+    if not imgs:
+        return None
+    path = random.choice(imgs)
+    try:
+        data = path.read_bytes()
+    except Exception as e:
+        logger.warning(f"AI 配图读取失败 {path}: {e}")
+        return None
+    b64 = base64.b64encode(data).decode()
+    return MessageSegment.image(f"base64://{b64}")
+
+
 ai_chat_matcher = on_message(
     rule=Rule(_at_bot_rule),
     priority=10,
@@ -272,6 +308,9 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
 
     _add_history(user_id, "assistant", reply)
 
+    # 随机配图：每次回复附带一张 ds 目录图片（无图则跳过）
+    img_seg = _random_ds_image()
+
     # 回复：超过 100 字用合并转发，否则直接引用回复
     if len(reply) > 100:
         # 合并转发消息格式
@@ -300,12 +339,19 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
                 group_id=event.group_id,
                 messages=forward_msgs,
             )
+            if img_seg is not None:
+                await matcher.send(img_seg)
         except Exception as e:
             logger.warning(f"合并转发失败，降级为普通回复: {e}")
             for chunk in chunks:
                 await matcher.send(chunk, reply_message=True)
+            if img_seg is not None:
+                await matcher.send(img_seg)
     else:
-        await matcher.send(reply, reply_message=True)
+        if img_seg is not None:
+            await matcher.send(MessageSegment.text(reply) + img_seg, reply_message=True)
+        else:
+            await matcher.send(reply, reply_message=True)
 
 
 # ========== lg清记忆 指令 ==========
