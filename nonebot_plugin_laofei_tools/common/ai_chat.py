@@ -200,7 +200,7 @@ async def _at_bot_rule(event: MessageEvent) -> bool:
 
 # ============ AI 回复随机配图 ============
 # ds 目录下预置图片，AI 每次回复随机附一张（路径相对本模块，部署位置无关）
-_DS_IMAGE_DIR = Path(__file__).resolve().parent / "image" / "ds"
+_DS_IMAGE_DIR = Path(__file__).resolve().parent.parent / "image" / "ds"
 _DS_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif")
 _DS_IMAGES: list = []
 
@@ -219,7 +219,9 @@ def _load_ds_images() -> list:
 def _random_ds_image():
     """随机选一张 ds 图片，返回 base64 的 MessageSegment；目录无图或读取失败返回 None"""
     imgs = _load_ds_images()
+    logger.info(f"[AI配图-DBG] dir={_DS_IMAGE_DIR} exists={_DS_IMAGE_DIR.is_dir()} count={len(imgs)}")
     if not imgs:
+        logger.warning(f"[AI配图] ds 目录未找到图片: {_DS_IMAGE_DIR}")
         return None
     path = random.choice(imgs)
     try:
