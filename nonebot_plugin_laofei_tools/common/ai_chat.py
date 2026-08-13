@@ -9,9 +9,13 @@ AI 对话模块 — 基于 DeepSeek API
 import base64
 import random
 import re
+import shutil
 import time
 from collections import defaultdict
 from pathlib import Path
+from typing import Optional
+
+import httpx
 
 from openai import OpenAI
 from nonebot import on_command, on_message, get_driver, get_bots
@@ -35,6 +39,7 @@ from ..config import (
     is_ai_blacklisted,
     add_ai_blacklist,
     remove_ai_blacklist,
+    DATA_DIR,
 )
 
 # ========== 启动时检查 API Key ==========
@@ -198,36 +203,54 @@ async def _at_bot_rule(event: MessageEvent) -> bool:
 
 # ========== @bot AI 对话 ==========
 
-# ============ AI 回复随机配图 ============
-# ds 目录下预置图片，AI 每次回复随机附一张（路径相对本模块，部署位置无关）
-_DS_IMAGE_DIR = Path(__file__).resolve().parent.parent / "image" / "ds"
-_DS_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif")
-_DS_IMAGES: list = []
+# ============ AI 回复配图（动态资源目录） ============
+# 资源目录：data/laofei_tools/ai_images/（运行时动态增删，无需重启，不入库）
+# 内置基础图：插件 image/ds/ 的 15 张，首次初始化时复制到资源目录作为基础集
+_AI_IMG_DIR = DATA_DIR / "ai_images"
+_BUILTIN_DS_DIR = Path(__file__).resolve().parent.parent / "image" / "ds"
+_AI_IMG_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif")
 
 
-def _load_ds_images() -> list:
-    """懒加载并缓存 ds 目录下的图片列表"""
-    global _DS_IMAGES
-    if not _DS_IMAGES and _DS_IMAGE_DIR.is_dir():
-        _DS_IMAGES = [
-            p for p in _DS_IMAGE_DIR.iterdir()
-            if p.is_file() and p.suffix.lower() in _DS_IMAGE_EXTS
-        ]
-    return _DS_IMAGES
+def _ensure_ai_img_dir() -> Path:
+    """确保资源目录存在；首次为空时从内置 ds 复制基础图作为初始集"""
+    _AI_IMG_DIR.mkdir(parents=True, exist_ok=True)
+    files = [p for p in _AI_IMG_DIR.iterdir()
+             if p.is_file() and p.suffix.lower() in _AI_IMG_EXTS]
+    if not files:
+        copied = 0
+        if _BUILTIN_DS_DIR.is_dir():
+            for src in _BUILTIN_DS_DIR.iterdir():
+                if src.is_file() and src.suffix.lower() in _AI_IMG_EXTS:
+                    try:
+                        shutil.copy(src, _AI_IMG_DIR / src.name)
+                        copied += 1
+                    except Exception as e:
+                        logger.warning(f"[AI配图] 复制内置图失败 {src}: {e}")
+        logger.info(f"[AI配图] 资源目录初始化完成，基础图 {copied} 张 -> {_AI_IMG_DIR}")
+    return _AI_IMG_DIR
 
 
-def _random_ds_image():
-    """随机选一张 ds 图片，返回 base64 的 MessageSegment；目录无图或读取失败返回 None"""
-    imgs = _load_ds_images()
-    logger.info(f"[AI配图-DBG] dir={_DS_IMAGE_DIR} exists={_DS_IMAGE_DIR.is_dir()} count={len(imgs)}")
+def _load_ai_images() -> list:
+    """实时读取资源目录图片列表（每次都读，支持不重启动态增删）"""
+    d = _ensure_ai_img_dir()
+    return sorted(
+        p for p in d.iterdir()
+        if p.is_file() and p.suffix.lower() in _AI_IMG_EXTS
+    )
+
+
+def _random_ai_image():
+    """随机选一张资源目录图片，返回 base64 的 MessageSegment；无图返回 None"""
+    imgs = _load_ai_images()
+    logger.info(f"[AI配图-DBG] dir={_AI_IMG_DIR} count={len(imgs)}")
     if not imgs:
-        logger.warning(f"[AI配图] ds 目录未找到图片: {_DS_IMAGE_DIR}")
+        logger.warning(f"[AI配图] 资源目录无图片: {_AI_IMG_DIR}")
         return None
     path = random.choice(imgs)
     try:
         data = path.read_bytes()
     except Exception as e:
-        logger.warning(f"AI 配图读取失败 {path}: {e}")
+        logger.warning(f"[AI配图] 读取失败 {path}: {e}")
         return None
     b64 = base64.b64encode(data).decode()
     return MessageSegment.image(f"base64://{b64}")
@@ -310,8 +333,8 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
 
     _add_history(user_id, "assistant", reply)
 
-    # 随机配图：每次回复附带一张 ds 目录图片（无图则跳过）
-    img_seg = _random_ds_image()
+    # 随机配图：每次回复从资源目录随机取一张（无图则跳过）
+    img_seg = _random_ai_image()
 
     # 回复：超过 100 字用合并转发，否则直接引用回复
     if len(reply) > 100:
@@ -505,3 +528,203 @@ async def handle_ai_unblacklist(matcher: Matcher, event: MessageEvent):
 
     remove_ai_blacklist(target_id)
     await matcher.finish(f"✅ 已将用户 {target_id} 移出 AI 黑名单，恢复 AI 使用权限。")
+
+
+# ========== AI 配图管理（动态资源目录，无需重启）==========
+
+def _find_image_seg(event: MessageEvent):
+    """优先取当前消息图片，其次取被引用(reply)消息里的图片"""
+    for seg in event.message:
+        if seg.type == "image":
+            return seg
+    reply = getattr(event, "reply", None)
+    if reply is not None:
+        rmsg = getattr(reply, "message", None)
+        if rmsg is not None:
+            for seg in rmsg:
+                if seg.type == "image":
+                    return seg
+    return None
+
+
+def _guess_img_ext(seg) -> str:
+    """从图片段推断扩展名，推断不出默认 .jpg"""
+    for raw in (seg.data.get("url"), seg.data.get("file")):
+        if raw:
+            ext = Path(raw.split("?")[0]).suffix.lower()
+            if ext in _AI_IMG_EXTS:
+                return ext
+    return ".jpg"
+
+
+def _arg_plain_text(args) -> str:
+    """跨 nonebot 版本取 CommandArg 纯文本"""
+    if hasattr(args, "extract_plain_text"):
+        return args.extract_plain_text().strip()
+    if hasattr(args, "get_plaintext"):
+        return args.get_plaintext().strip()
+    return str(args).strip()
+
+
+async def _download_image_bytes(bot, event: MessageEvent) -> Optional[bytes]:
+    """从消息图片段取二进制：base64:// / http(s) 下载 / bot.get_image 兜底"""
+    seg = _find_image_seg(event)
+    if seg is None:
+        return None
+    # 1) base64 内嵌
+    for raw in (seg.data.get("url"), seg.data.get("file")):
+        if raw and raw.startswith("base64://"):
+            try:
+                return base64.b64decode(raw.split("base64://", 1)[1])
+            except Exception:
+                pass
+    # 2) http(s) 下载
+    dl = seg.data.get("url") or seg.data.get("file")
+    if dl and (dl.startswith("http://") or dl.startswith("https://")):
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                resp = await client.get(dl)
+                if resp.status_code == 200:
+                    return resp.content
+        except Exception as e:
+            logger.warning(f"[AI配图] 下载图片失败: {e}")
+    # 3) bot.get_image 兜底（同机可用）
+    f = seg.data.get("file")
+    if f and not f.startswith("base64://"):
+        try:
+            info = await bot.get_image(f)
+            fp = info.get("file")
+            if fp and Path(fp).is_file():
+                return Path(fp).read_bytes()
+        except Exception as e:
+            logger.warning(f"[AI配图] get_image 失败: {e}")
+    return None
+
+
+# --- 添加配图 ---
+add_img_cmd = on_command(
+    "ai图添加",
+    aliases={"加配图", "添加配图"},
+    priority=5,
+    block=True,
+    rule=Rule(lambda e: _find_image_seg(e) is not None),
+)
+
+
+@add_img_cmd.handle()
+async def handle_add_img(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
+    """引用或附带一张图片，发送「ai图添加」存入资源目录"""
+    data = await _download_image_bytes(bot, event)
+    if not data:
+        await matcher.finish("没找到图片，请引用或附带一张图片后再发送「ai图添加」~")
+    seg = _find_image_seg(event)
+    ext = _guess_img_ext(seg) if seg else ".jpg"
+    d = _ensure_ai_img_dir()
+    fname = f"img_{int(time.time() * 1000)}_{random.randint(1000, 9999)}{ext}"
+    try:
+        (d / fname).write_bytes(data)
+    except Exception as e:
+        logger.error(f"[AI配图] 保存失败: {e}")
+        await matcher.finish("配图保存失败，请联系管理员~")
+        return
+    imgs = _load_ai_images()
+    await matcher.finish(f"✅ 已添加配图，当前共 {len(imgs)} 张")
+
+
+# --- 配图列表 ---
+list_img_cmd = on_command(
+    "ai图列表",
+    aliases={"配图列表", "ai配图列表"},
+    priority=5,
+    block=True,
+)
+
+
+@list_img_cmd.handle()
+async def handle_list_img(matcher: Matcher) -> None:
+    imgs = _load_ai_images()
+    await matcher.finish(
+        f"🖼 当前配图共 {len(imgs)} 张\n"
+        f"· 添加：引用/附带图片发「ai图添加」\n"
+        f"· 删除：ai图删除 <序号>（超管）\n"
+        f"· 重置：ai图重置（超管，恢复内置基础图）"
+    )
+
+
+# --- 删除配图（仅超管） ---
+del_img_cmd = on_command(
+    "ai图删除",
+    aliases={"删配图", "删除配图"},
+    priority=5,
+    block=True,
+    permission=SUPERUSER,
+)
+
+
+def _parse_img_indexes(text: str, n: int) -> list:
+    """解析 '1 3 5' 或 '1-3' 形式的序号（1-based），越界忽略"""
+    out = []
+    for part in text.split():
+        if "-" in part:
+            lo_s, _, hi_s = part.partition("-")
+            try:
+                lo, hi = int(lo_s), int(hi_s)
+            except ValueError:
+                continue
+            for i in range(lo, hi + 1):
+                if 1 <= i <= n and i not in out:
+                    out.append(i)
+        else:
+            try:
+                i = int(part)
+            except ValueError:
+                continue
+            if 1 <= i <= n and i not in out:
+                out.append(i)
+    return out
+
+
+@del_img_cmd.handle()
+async def handle_del_img(matcher: Matcher, event: MessageEvent, args: CommandArg) -> None:
+    arg = _arg_plain_text(args)
+    imgs = _load_ai_images()
+    if not imgs:
+        await matcher.finish("当前没有任何配图~")
+    idxs = _parse_img_indexes(arg, len(imgs)) if arg else []
+    if not idxs:
+        await matcher.finish(
+            f"用法：ai图删除 <序号>（当前共 {len(imgs)} 张，可用「ai图列表」查看）"
+        )
+    removed = []
+    for i in idxs:
+        try:
+            imgs[i - 1].unlink()
+            removed.append(i)
+        except Exception as e:
+            logger.warning(f"[AI配图] 删除失败 {imgs[i - 1]}: {e}")
+    left = _load_ai_images()
+    await matcher.finish(f"🗑 已删除 {len(removed)} 张（序号 {removed}），当前剩 {len(left)} 张")
+
+
+# --- 重置配图（仅超管，恢复内置基础图） ---
+reset_img_cmd = on_command(
+    "ai图重置",
+    aliases={"重置配图"},
+    priority=5,
+    block=True,
+    permission=SUPERUSER,
+)
+
+
+@reset_img_cmd.handle()
+async def handle_reset_img(matcher: Matcher) -> None:
+    if _AI_IMG_DIR.is_dir():
+        for p in _AI_IMG_DIR.iterdir():
+            if p.is_file():
+                try:
+                    p.unlink()
+                except Exception:
+                    pass
+    _ensure_ai_img_dir()  # 重新复制内置基础图
+    imgs = _load_ai_images()
+    await matcher.finish(f"♻ 已重置为内置基础图，当前共 {len(imgs)} 张")
