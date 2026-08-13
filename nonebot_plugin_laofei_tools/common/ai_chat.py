@@ -729,3 +729,39 @@ async def handle_reset_img(matcher: Matcher) -> None:
     _ensure_ai_img_dir()  # 重新复制内置基础图
     imgs = _load_ai_images()
     await matcher.finish(f"♻ 已重置为内置基础图，当前共 {len(imgs)} 张")
+
+
+# --- AI 帮助 ---
+ai_help_cmd = on_command(
+    "AI帮助",
+    aliases={"ai帮助", "AI指令", "ai指令", "lg ai帮助", "lg ai指令"},
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+@ai_help_cmd.handle()
+async def handle_ai_help(matcher: Matcher) -> None:
+    """列出所有 AI 相关指令及用法"""
+    await matcher.finish(
+        "🤖 蓝色大肥鱼 · AI 指令一览\n"
+        "━━━━━━━━━━━━━━━━\n"
+        "【对话】\n"
+        "· @机器人 + 问题（群聊需开启，私聊直用）\n"
+        "· lg清记忆 / lg清空记忆（清除你的对话记忆）\n"
+        "━━━━━━━━━━━━━━━━\n"
+        "【管理·超管】\n"
+        "· 开启AI（开启本群 AI）\n"
+        "· 关闭AI（关闭本群 AI）\n"
+        "· AI拉黑 @用户/QQ（拉黑用户）\n"
+        "· AI解除 @用户/QQ（解除拉黑）\n"
+        "━━━━━━━━━━━━━━━━\n"
+        "【配图·资源目录】\n"
+        "· ai图添加（超管，引用/附带图片存入）\n"
+        "· ai图列表（查看数量与用法）\n"
+        "· ai图删除 <序号>（超管，支持 1 3 5 或 1-3）\n"
+        "· ai图重置（超管，恢复内置基础图）\n"
+        "━━━━━━━━━━━━━━━━\n"
+        "提示：AI 每次回复会随机附带一张配图。"
+    )
