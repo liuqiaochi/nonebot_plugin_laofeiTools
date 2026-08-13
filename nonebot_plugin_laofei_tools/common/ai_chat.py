@@ -335,14 +335,23 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
                 },
             })
 
+        # 配图作为合并转发的最后一个节点一起发出（而非单独消息）
+        if img_seg is not None:
+            forward_msgs.append({
+                "type": "node",
+                "data": {
+                    "name": bot_name,
+                    "uin": bot.self_id,
+                    "content": str(img_seg),
+                },
+            })
+
         try:
             await bot.call_api(
                 "send_group_forward_msg",
                 group_id=event.group_id,
                 messages=forward_msgs,
             )
-            if img_seg is not None:
-                await matcher.send(img_seg)
         except Exception as e:
             logger.warning(f"合并转发失败，降级为普通回复: {e}")
             for chunk in chunks:
