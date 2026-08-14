@@ -24,6 +24,7 @@ from nonebot import on_command, on_message, get_driver, get_bots
 from nonebot.adapters.onebot.v11 import (
     Bot,
     GroupMessageEvent,
+    Message,
     MessageEvent,
     MessageSegment,
     PrivateMessageEvent,
@@ -603,6 +604,11 @@ async def _download_image_bytes(bot, event: MessageEvent) -> Optional[bytes]:
     return None
 
 
+def _has_image_seg(event: MessageEvent) -> bool:
+    """Rule 检查：消息中是否含图片段（含引用消息）"""
+    return _find_image_seg(event) is not None
+
+
 # --- 添加配图（仅超管） ---
 add_img_cmd = on_command(
     "ai图添加",
@@ -610,7 +616,7 @@ add_img_cmd = on_command(
     priority=5,
     block=True,
     permission=SUPERUSER,
-    rule=Rule(lambda e: _find_image_seg(e) is not None),
+    rule=Rule(_has_image_seg),
 )
 
 
@@ -688,7 +694,7 @@ def _parse_img_indexes(text: str, n: int) -> list:
 
 
 @del_img_cmd.handle()
-async def handle_del_img(matcher: Matcher, event: MessageEvent, args: CommandArg) -> None:
+async def handle_del_img(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()) -> None:
     arg = _arg_plain_text(args)
     imgs = _load_ai_images()
     if not imgs:
@@ -846,7 +852,6 @@ async def handle_ai_help(matcher: Matcher) -> None:
     """列出所有 AI 相关指令及用法（图片返回）"""
     try:
         img_b64 = _generate_ai_help_image()
-        await matcher.finish(MessageSegment.image(f"base64://{img_b64}"))
     except Exception as e:
         logger.error(f"[AI帮助] 图片生成失败: {e}")
         await matcher.finish(
@@ -856,3 +861,4 @@ async def handle_ai_help(matcher: Matcher) -> None:
             "· 管理（超管）：开启AI / 关闭AI / AI拉黑 / AI解除\n"
             "· 配图：ai图添加 / ai图列表 / ai图删除 <序号> / ai图重置"
         )
+    await matcher.finish(MessageSegment.image(f"base64://{img_b64}"))
