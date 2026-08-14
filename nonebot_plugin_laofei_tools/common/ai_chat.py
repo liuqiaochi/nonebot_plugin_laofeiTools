@@ -339,8 +339,8 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
     # 随机配图：每次回复从资源目录随机取一张（无图则跳过）
     img_seg = _random_ai_image()
 
-    # 回复：超过 100 字用合并转发，否则直接引用回复
-    if len(reply) > 100:
+    # 回复：超过 150 字用合并转发，否则直接引用回复
+    if len(reply) > 150:
         # 合并转发消息格式
         bot_name = "蓝色大肥鱼"
         try:
@@ -350,6 +350,18 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
             pass
 
         forward_msgs = []
+
+        # 配图作为合并转发的第一个节点一起发出（图片在前，文本在后）
+        if img_seg is not None:
+            forward_msgs.append({
+                "type": "node",
+                "data": {
+                    "name": bot_name,
+                    "uin": bot.self_id,
+                    "content": str(img_seg),
+                },
+            })
+
         chunks = _split_long_message(reply)
         for chunk in chunks:
             forward_msgs.append({
@@ -361,17 +373,6 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
                 },
             })
 
-        # 配图作为合并转发的最后一个节点一起发出（而非单独消息）
-        if img_seg is not None:
-            forward_msgs.append({
-                "type": "node",
-                "data": {
-                    "name": bot_name,
-                    "uin": bot.self_id,
-                    "content": str(img_seg),
-                },
-            })
-
         try:
             await bot.call_api(
                 "send_group_forward_msg",
@@ -380,13 +381,14 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
             )
         except Exception as e:
             logger.warning(f"合并转发失败，降级为普通回复: {e}")
-            for chunk in chunks:
-                await matcher.send(chunk, reply_message=True)
             if img_seg is not None:
                 await matcher.send(img_seg)
+            for chunk in chunks:
+                await matcher.send(chunk, reply_message=True)
     else:
+        # 图片在前、文本在后
         if img_seg is not None:
-            await matcher.send(MessageSegment.text(reply) + img_seg, reply_message=True)
+            await matcher.send(img_seg + MessageSegment.text(reply), reply_message=True)
         else:
             await matcher.send(reply, reply_message=True)
 
