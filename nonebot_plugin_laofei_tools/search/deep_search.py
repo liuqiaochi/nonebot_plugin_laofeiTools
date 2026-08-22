@@ -16,6 +16,15 @@ from io import BytesIO
 from typing import List
 from urllib.parse import urlparse
 
+# 显式加载项目根目录 .env，使 SAUCENAO_API_KEY 进入 os.environ
+# （nonebot 默认不会自动读取 .env，仅靠 shell export 易丢失）
+try:
+    from dotenv import find_dotenv, load_dotenv
+
+    load_dotenv(find_dotenv(), override=False)
+except Exception:
+    pass
+
 import httpx
 from bs4 import BeautifulSoup
 from PIL import Image

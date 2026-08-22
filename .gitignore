@@ -31,6 +31,9 @@ venv/
 env/
 ENV/
 
+# 本地密钥（切勿提交，含 API Key）
+.env
+
 # IDE
 .idea/
 .vscode/
