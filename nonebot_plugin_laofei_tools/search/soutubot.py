@@ -84,44 +84,79 @@ class SoutubotClient:
             "X-Requested-With": "XMLHttpRequest",
         }
 
-    def _compress_image(self, image_data: bytes, max_size: int = 5 * 1024 * 1024) -> bytes:
+    def _compress_image(self, image_data: bytes, target_size: int = 1024 * 1024) -> bytes:
         """
-        压缩图片（soutubot 要求 >5KB 的图片需要压缩）
-        
-        Args:
-            image_data: 原始图片数据
-            max_size: 最大字节数（默认5MB）
-        
-        Returns:
-            压缩后的 JPEG 数据
+        上传前将图片压缩到 target_size（默认 1MB）以内，避免服务器返回 413。
+
+        策略：
+        1. 已为支持格式且体积达标 -> 直接返回；
+        2. 限制最大边长，避免超大分辨率拖垮压缩；
+        3. 迭代降低 JPEG 质量（90 -> 20）直到达标；
+        4. 仅靠质量仍不达标则逐步缩小尺寸后重试；
+        5. 极端情况仍无法达标，返回当前能生成的最小体积结果。
         """
-        if len(image_data) <= max_size:
-            # 检查是否已经是支持的格式
+        # 已达标且为可直接上传的格式，原样返回
+        if len(image_data) <= target_size:
             try:
                 img = Image.open(BytesIO(image_data))
                 if img.format in ("JPEG", "PNG", "WEBP"):
                     return image_data
             except Exception:
                 pass
-        
-        # 需要压缩
-        img = Image.open(BytesIO(image_data))
-        
-        # 转换为 RGB（处理 RGBA 等模式）
-        if img.mode in ("RGBA", "P"):
+
+        try:
+            img = Image.open(BytesIO(image_data))
+        except Exception:
+            return image_data
+
+        # 统一转 RGB（处理 RGBA / P 等带透明通道或调色板的模式）
+        if img.mode in ("RGBA", "P", "LA"):
             img = img.convert("RGB")
-        
-        # 限制最大尺寸
-        max_width = 2000
-        if img.width > max_width:
-            ratio = max_width / img.width
-            new_height = int(img.height * ratio)
-            img = img.resize((max_width, new_height), Image.LANCZOS)
-        
-        # 压缩输出
-        output = BytesIO()
-        img.save(output, format="JPEG", quality=90, optimize=True)
-        return output.getvalue()
+
+        # 限制最大边长，防止超大分辨率导致单张难以压到目标
+        max_dim = 2000
+        if max(img.width, img.height) > max_dim:
+            ratio = max_dim / max(img.width, img.height)
+            img = img.resize(
+                (int(img.width * ratio), int(img.height * ratio)),
+                Image.LANCZOS,
+            )
+
+        def _save(im, quality: int) -> bytes:
+            buf = BytesIO()
+            im.save(buf, format="JPEG", quality=quality, optimize=True, progressive=True)
+            return buf.getvalue()
+
+        # 第一遍：仅降质量
+        result = None
+        quality = 90
+        while quality >= 20:
+            data = _save(img, quality)
+            if len(data) <= target_size:
+                result = data
+                break
+            quality -= 10
+
+        # 第二遍：缩小尺寸 + 降质量（应对高分辨率大图）
+        if result is None:
+            scale = 0.9
+            while scale > 0.3:
+                w, h = int(img.width * scale), int(img.height * scale)
+                small = img.resize((w, h), Image.LANCZOS)
+                for q in range(80, 10, -10):
+                    data = _save(small, q)
+                    if len(data) <= target_size:
+                        result = data
+                        break
+                if result is not None:
+                    break
+                scale -= 0.1
+
+        # 兜底：返回能生成的最小体积结果（交由上传阶段处理）
+        if result is None:
+            result = _save(img, 20)
+
+        return result
 
     async def search(
         self,
