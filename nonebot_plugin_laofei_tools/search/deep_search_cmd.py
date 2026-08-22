@@ -8,6 +8,7 @@ lg深度搜图 指令
 """
 
 import asyncio
+import os
 from typing import Dict, List
 
 from nonebot import get_driver, on_command
@@ -83,7 +84,10 @@ async def handle_deep_search(
         return
 
     # 5. 并行调用三个服务
-    api_key = getattr(get_driver().config, "saucenao_api_key", "")
+    # 优先 nonebot 配置，缺省时回退环境变量 SAUCENAO_API_KEY
+    api_key = getattr(get_driver().config, "saucenao_api_key", "") or os.environ.get(
+        "SAUCENAO_API_KEY", ""
+    )
     try:
         async with (
             IQDBClient() as iqdb,

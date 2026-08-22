@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from io import BytesIO
@@ -169,7 +170,8 @@ class SauceNAOClient:
     """SauceNAO 反向搜图客户端（免费、需 API Key）"""
 
     def __init__(self, api_key: str = "", timeout: float = 30.0):
-        self.api_key = api_key
+        # 优先使用显式传入的 Key；为空时回退读取环境变量 SAUCENAO_API_KEY
+        self.api_key = api_key or os.environ.get("SAUCENAO_API_KEY", "")
         self._client = httpx.AsyncClient(
             headers={"User-Agent": _DEFAULT_UA},
             timeout=httpx.Timeout(timeout, connect=10.0),
