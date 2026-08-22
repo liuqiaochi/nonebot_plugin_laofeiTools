@@ -8,10 +8,9 @@ lg深度搜图 指令
 """
 
 import asyncio
-import os
 from typing import Dict, List
 
-from nonebot import get_driver, on_command
+from nonebot import on_command
 from nonebot.adapters.onebot.v11 import (
     Bot,
     GroupMessageEvent,
@@ -83,15 +82,11 @@ async def handle_deep_search(
         await matcher.finish("图片下载失败，请重试")
         return
 
-    # 5. 并行调用三个服务
-    # 优先 nonebot 配置，缺省时回退环境变量 SAUCENAO_API_KEY
-    api_key = getattr(get_driver().config, "saucenao_api_key", "") or os.environ.get(
-        "SAUCENAO_API_KEY", ""
-    )
+    # 5. 并行调用三个服务（SauceNAO 的 Key 仅取自环境变量 SAUCENAO_API_KEY，未配置则该引擎不可用）
     try:
         async with (
             IQDBClient() as iqdb,
-            SauceNAOClient(api_key) as saucenao,
+            SauceNAOClient() as saucenao,
             Ascii2dClient() as ascii2d,
         ):
             iqdb_res, saucenao_res, ascii2d_res = await asyncio.gather(
