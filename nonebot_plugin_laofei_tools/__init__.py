@@ -25,6 +25,7 @@ require("nonebot_plugin_apscheduler")
 from .common import points_commands, restart, life_utils, ai_chat, rest_mode, qrcode_tool
 from .pet import pet_commands
 from .search import commands
+from .search import deep_search_cmd
 from .config import Config, init_enabled_groups
 from .common.points_data import init_data
 from .pet.pet_data import init_pet_data, refresh_all_stamina
@@ -170,6 +171,7 @@ def _generate_help_image() -> str:
         ]),
         ("搜图功能", [
             ("lg搜图", "引用图片进行搜索"),
+            ("lg深度搜图", "多引擎深度反搜（IQDB/SauceNAO/ascii2d）"),
             ("搜图帮助", "查看搜图帮助"),
         ]),
         ("生活工具", [

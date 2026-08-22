@@ -26,6 +26,9 @@ class Config(BaseModel):
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-v4-flash"
 
+    # SauceNAO 反向搜图 API Key（免费注册 https://saucenao.com 获取）
+    saucenao_api_key: str = ""
+
 
 # 数据文件路径（锚定项目根目录，不依赖运行时 CWD，避免覆盖文件后数据丢失）
 DATA_DIR = Path("data/laofei_tools")

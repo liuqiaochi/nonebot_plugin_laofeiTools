@@ -367,6 +367,7 @@ async def handle_search_help(matcher: Matcher, event: MessageEvent):
     sections = [
         ("搜图指令", [
             ("lg搜图", "引用图片进行搜索"),
+            ("lg深度搜图", "多引擎深度反搜（IQDB/SauceNAO/ascii2d）"),
         ]),
         ("管理指令", [
             ("开启lg搜图", "开启搜图功能（超管）"),
