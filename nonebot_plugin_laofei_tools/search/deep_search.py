@@ -184,7 +184,7 @@ class SauceNAOClient:
                 SearchResult(
                     source="SauceNAO",
                     title="未配置 API Key",
-                    extra="未设置环境变量 SAUCENAO_API_KEY，该引擎不可用（不影响 IQDB / ascii2d）",
+                    extra="未设置环境变量 SAUCENAO_API_KEY（请写入项目根目录 .env 文件），该引擎不可用（不影响 IQDB / ascii2d）",
                 )
             ]
         data = _prepare_upload(image_data)
@@ -249,7 +249,16 @@ class Ascii2dClient:
 
     def __init__(self, timeout: float = 30.0):
         self._client = httpx.AsyncClient(
-            headers={"User-Agent": _DEFAULT_UA},
+            headers={
+                "User-Agent": _DEFAULT_UA,
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                    "image/avif,image/webp,*/*;q=0.8"
+                ),
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                "Referer": ASCII2D_BASE + "/",
+                "Origin": ASCII2D_BASE,
+            },
             timeout=httpx.Timeout(timeout, connect=10.0),
             trust_env=False,
             follow_redirects=True,
@@ -258,6 +267,11 @@ class Ascii2dClient:
     async def search(self, image_data: bytes) -> List[SearchResult]:
         data = _prepare_upload(image_data)
         try:
+            # 先访问首页建立会话 cookie，规避 Cloudflare 基础 bot 防护（403）
+            try:
+                await self._client.get(ASCII2D_BASE + "/")
+            except Exception:
+                pass
             # 上传后服务端 302 跳转到 /search/<hash>，follow_redirects 已自动跟随
             resp = await self._client.post(
                 ASCII2D_BASE + "/search",
