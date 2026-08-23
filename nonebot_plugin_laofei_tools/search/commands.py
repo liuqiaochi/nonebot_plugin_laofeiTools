@@ -164,109 +164,6 @@ async def handle_disable_search(
     await matcher.finish("❌ 已关闭本群搜图功能")
 
 
-# ========== 文字搜图指令（DuckDuckGo / ddgs） ==========
-ddgs_image = on_command(
-    "lg网页搜图",
-    priority=5,
-    block=True,
-    force_whitespace=True,
-)
-
-
-async def _fetch_ddgs_image_base64(image_url: str) -> Optional[str]:
-    """下载 ddgs 图片直链并压缩至 1MB 以内，返回 base64（不含前缀）"""
-    import base64
-    import httpx
-    from .soutubot import SoutubotClient
-
-    try:
-        async with httpx.AsyncClient(timeout=30.0, trust_env=False, follow_redirects=True) as client:
-            resp = await client.get(image_url)
-            resp.raise_for_status()
-            data = resp.content
-        if not data:
-            return None
-        compressed = SoutubotClient()._compress_image(data)
-        return base64.b64encode(compressed).decode()
-    except Exception as e:
-        logger.warning(f"下载/压缩 ddgs 图片失败 {image_url}: {e}")
-        return None
-
-
-@ddgs_image.handle()
-async def handle_ddgs_image(
-    matcher: Matcher,
-    bot: Bot,
-    event: MessageEvent,
-    args: Message = CommandArg(),
-):
-    """处理文字搜图指令（基于 DuckDuckGo 图片搜索）"""
-    query = args.extract_plain_text().strip()
-    if not query:
-        await matcher.finish("用法：lg网页搜图 <关键词>，例如「lg网页搜图 猫」")
-        return
-
-    await matcher.send("正在搜索图片，请稍候...")
-
-    try:
-        from ddgs import DDGS
-        with DDGS() as ddgs:
-            results = ddgs.images(query, max_results=10)
-    except Exception as e:
-        logger.exception("ddgs 搜索失败")
-        await matcher.finish(f"搜索失败：{e}")
-        return
-
-    if not results:
-        await bot.send(event, "未找到任何图片结果")
-        return
-
-    nodes = [{
-        "type": "node",
-        "data": {
-            "name": "图片搜索",
-            "uin": str(bot.self_id),
-            "content": f"「{query}」网页图片搜索结果（共 {len(results)} 条）",
-        },
-    }]
-
-    for idx, r in enumerate(results[:10], 1):
-        title = (r.get("title") or "")[:60]
-        image_url = r.get("image", "")
-        source_url = r.get("url", "")
-        source_name = r.get("source", "")
-
-        info = f"{idx}. {title}\n来源: {source_name}"
-        if source_url:
-            info += f"\n链接: {source_url}"
-
-        if image_url:
-            b64 = await _fetch_ddgs_image_base64(image_url)
-            content = f"{info}\n[CQ:image,file=base64://{b64}]" if b64 else info + "\n(图片下载失败)"
-        else:
-            content = info
-
-        nodes.append({
-            "type": "node",
-            "data": {
-                "name": f"{idx}. {source_name}",
-                "uin": str(bot.self_id),
-                "content": content,
-            },
-        })
-
-    group_id = getattr(event, "group_id", None)
-    if group_id is not None:
-        try:
-            await bot.call_api("send_group_forward_msg", group_id=group_id, messages=nodes)
-            return
-        except Exception as e:
-            logger.warning(f"合并转发失败，降级逐条发送: {e}")
-
-    for node in nodes:
-        await bot.send(event, node["data"]["content"])
-
-
 # ========== 工具函数 ==========
 
 
@@ -470,7 +367,6 @@ async def handle_search_help(matcher: Matcher, event: MessageEvent):
     sections = [
         ("搜图指令", [
             ("lg搜图", "引用图片进行搜索"),
-            ("lg网页搜图", "文字关键词搜图（DuckDuckGo）"),
         ]),
         ("管理指令", [
             ("开启lg搜图", "开启搜图功能（超管）"),
