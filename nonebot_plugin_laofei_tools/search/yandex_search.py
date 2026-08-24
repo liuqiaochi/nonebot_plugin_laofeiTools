@@ -22,9 +22,12 @@ from io import BytesIO
 from typing import List, Optional
 from urllib.parse import parse_qs, urlparse
 
+import logging
 import httpx
 from bs4 import BeautifulSoup
 from PIL import Image
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -71,12 +74,14 @@ class YandexReverseSearch:
 
     async def search(self, image_data: bytes, limit: int = 10) -> List[YandexResult]:
         jpeg = _to_jpeg(image_data)
+        logger.info("[Yandex反搜] 开始：jpeg=%d bytes", len(jpeg))
         try:
             # 1. 先访问首页建立会话 cookie（规避部分风控）
             try:
                 await self._client.get(YANDEX_BASE + "/images/", timeout=10.0)
-            except Exception:
-                pass
+                logger.info("[Yandex反搜] 首页 GET 完成")
+            except Exception as e:
+                logger.warning("[Yandex反搜] 首页 GET 失败（忽略）: %s", e)
 
             # 2. 上传图片触发反搜，服务端 302 跳转到带 cbir_id 的结果页
             resp = await self._client.post(
@@ -84,8 +89,13 @@ class YandexReverseSearch:
                 files={"upfile": ("image.jpg", jpeg, "image/jpeg")},
                 data={"rpt": "imageview", "srv": "yandex"},
             )
+            logger.info(
+                "[Yandex反搜] 上传响应 status=%s, html长度=%d, Location=%r",
+                resp.status_code, len(resp.text), resp.headers.get("location"),
+            )
             resp.raise_for_status()
             results = self._parse(resp.text)
+            logger.info("[Yandex反搜] 初次解析得到 %d 条", len(results))
 
             # 3. 若仍在上传页（无结果），尝试跟随 Location 跳转
             if not results:
@@ -93,15 +103,39 @@ class YandexReverseSearch:
                 if loc:
                     if loc.startswith("//"):
                         loc = "https:" + loc
+                    logger.info("[Yandex反搜] 跟随 Location 跳转: %s", loc)
                     r2 = await self._client.get(loc, timeout=15.0)
                     results = self._parse(r2.text)
+                    logger.info("[Yandex反搜] 跳转后解析得到 %d 条", len(results))
 
-            # 4. 把缩略图统一解析为内联 base64，便于直接发送
+            # 4. 空结果诊断（区分验证码页 / 结构变化 / 真无结果）
+            if not results:
+                self._diagnose(resp.text)
+
+            # 5. 把缩略图统一解析为内联 base64，便于直接发送
             await asyncio.gather(*[self._resolve_thumb(r) for r in results])
 
+            logger.info("[Yandex反搜] 最终返回 %d 条", len(results))
             return results[:limit]
-        except Exception as e:
-            return [YandexResult(title=f"搜索失败：{e}")]
+        except Exception:
+            logger.exception("[Yandex反搜] 搜索过程异常")
+            return [YandexResult(title="搜索失败，详情见日志")]
+
+    def _diagnose(self, html: str) -> None:
+        """结果数为 0 时打印诊断信息，便于定位原因。"""
+        soup = BeautifulSoup(html, "html.parser")
+        serp = soup.select("div.serp-item")
+        bem = soup.select("[data-bem]")
+        low = html.lower()
+        logger.warning(
+            "[Yandex诊断] serp-item 计数=%d, data-bem 元素=%d, 含'img_href'=%d, "
+            "含'captcha'=%s, 含'robot'=%s, 含'just moment'=%s, 含'are you a robot'=%s",
+            len(serp), len(bem), html.count("img_href"),
+            "captcha" in low, "robot" in low, "just moment" in low,
+            "are you a robot" in low,
+        )
+        snippet = " ".join(html[:1000].split())
+        logger.warning("[Yandex诊断] HTML 前 1000 字符: %s", snippet)
 
     # ---------- 解析 ----------
 

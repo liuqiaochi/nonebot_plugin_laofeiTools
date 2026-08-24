@@ -165,6 +165,13 @@ async def send_yandex_forward(
     results: List[YandexResult],
 ) -> None:
     """把 Yandex 反搜结果以合并转发返回（图片在前、文本在后）"""
+    logger.info("[Yandex发送] 结果数=%d", len(results))
+    for i, r in enumerate(results[:10], 1):
+        logger.info(
+            "[Yandex发送] #%d title=%r thumb=%s img=%s source=%s",
+            i, r.title, bool(r.thumb), bool(r.image_url),
+            (r.source[:50] if r.source else ""),
+        )
     if not results:
         await bot.send(event, "Bot酱没有找到任何结果")
         return
