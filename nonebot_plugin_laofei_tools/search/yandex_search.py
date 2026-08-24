@@ -8,10 +8,10 @@ Yandex Images 反向搜图（以图搜图）
 
 注意：
   - Yandex 对 NSFW 容忍度高于 Google，且反爬强度低于 Google，适合通用以图搜图。
-  - yandex.com 国际版对多数非俄区/自动化请求会返回 "The service is under construction"
-    限制页，因此主入口改用 yandex.ru（俄语主站，图片反搜真实可用），并保留
-    yandex.com 作为回退域名。
-  - 若两个域名都返回拦截页，多为部署机地域/数据中心 IP 被 Yandex 限制，需走
+  - 反搜固定使用 yandex.com（国际版）。yandex.com 对多数非俄区/自动化请求会
+    返回 "The service is under construction" 限制页，此时需通过环境变量
+    YANDEX_PROXY 配置代理（如 http://host:port 或 socks5://...）后方可正常返回。
+  - 若仍返回拦截页，多为部署机地域/数据中心 IP 被 Yandex 限制，需走
     代理或真实浏览器引擎（Playwright）才能解决。
   - 代理通过环境变量 YANDEX_PROXY 配置（可放根目录 .env，如
     http://host:port 或 socks5://user:pass@host:port）；为空则直连。
@@ -51,8 +51,8 @@ _HEADERS = {
     ),
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     "Accept-Encoding": "gzip, deflate, br",
-    "Referer": "https://yandex.ru/images/",
-    "Origin": "https://yandex.ru",
+    "Referer": "https://yandex.com/images/",
+    "Origin": "https://yandex.com",
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
     "DNT": "1",
@@ -66,10 +66,10 @@ _HEADERS = {
     "Upgrade-Insecure-Requests": "1",
 }
 
-# 反搜主域名：yandex.ru 是真正可用的图片反搜入口；yandex.com 国际版对多数
-# 非俄区/自动化请求会返回 "The service is under construction" 限制页。
-# 顺序即优先级，命中拦截页时自动回退到下一个域名。
-YANDEX_DOMAINS = ["https://yandex.ru", "https://yandex.com"]
+# 反搜主域名：固定使用 yandex.com（国际版）。
+# 注意：yandex.com 对非俄区/自动化请求常返回 "The service is under construction"
+# 限制页，需配合 YANDEX_PROXY 代理方可正常返回结果。
+YANDEX_DOMAINS = ["https://yandex.com"]
 
 
 @dataclass
