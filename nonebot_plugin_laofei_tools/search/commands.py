@@ -25,7 +25,6 @@ from nonebot.permission import SUPERUSER
 from ..config import enable_group, is_group_enabled
 from ..common.utils import download_image
 from .soutubot import get_client
-from .yandex_search import YandexReverseSearch, YandexResult
 
 
 # ========== 搜图指令 ==========
@@ -97,141 +96,6 @@ async def handle_search_image(
     except Exception as e:
         logger.exception("搜图失败")
         await matcher.finish(f"搜索失败：{str(e)}")
-
-
-# ========== 网页搜图指令（Yandex 反搜） ==========
-web_search_image = on_command(
-    "lg网页搜图",
-    priority=5,
-    block=True,
-    force_whitespace=True,
-)
-
-
-@web_search_image.handle()
-async def handle_web_search_image(
-    matcher: Matcher,
-    bot: Bot,
-    event: MessageEvent,
-):
-    """处理网页搜图指令：引用图片 -> Yandex 反搜前10相似图"""
-    # 1. 私聊不可用
-    if isinstance(event, PrivateMessageEvent):
-        await matcher.finish("网页搜图功能仅在群聊可用")
-        return
-
-    # 2. 复用搜图功能开关
-    group_id = str(event.group_id)
-    if not is_group_enabled(group_id):
-        await matcher.finish("搜图功能未开启，请联系超级用户发送「开启lg搜图」")
-        return
-
-    # 3. 检查是否引用了消息且含图片
-    if not event.reply:
-        await matcher.finish("请引用一张图片后发送「lg网页搜图」")
-        return
-
-    image_url: Optional[str] = None
-    for seg in event.reply.message:
-        if seg.type == "image":
-            image_url = seg.data.get("url") or seg.data.get("file")
-            break
-
-    if not image_url:
-        await matcher.finish("引用的消息中没有图片，请引用一张图片后发送「lg网页搜图」")
-        return
-
-    await matcher.send("正在搜索中，请稍候...")
-
-    try:
-        image_data = await download_image(bot, image_url)
-        if not image_data:
-            await matcher.finish("图片下载失败，请重试")
-            return
-
-        async with YandexReverseSearch() as client:
-            results = await client.search(image_data, limit=10)
-
-        await send_yandex_forward(bot, event, results)
-
-    except Exception as e:
-        logger.exception("网页搜图失败")
-        await matcher.finish(f"网页搜图失败：{str(e)}")
-
-
-async def send_yandex_forward(
-    bot: Bot,
-    event: GroupMessageEvent,
-    results: List[YandexResult],
-) -> None:
-    """把 Yandex 反搜结果以合并转发返回（图片在前、文本在后）"""
-    logger.info("[Yandex发送] 结果数=%d", len(results))
-    for i, r in enumerate(results[:10], 1):
-        logger.info(
-            "[Yandex发送] #%d title=%r thumb=%s img=%s source=%s",
-            i, r.title, bool(r.thumb), bool(r.image_url),
-            (r.source[:50] if r.source else ""),
-        )
-    if not results:
-        await bot.send(event, "Bot酱没有找到任何结果")
-        return
-
-    # 若只是单条错误提示，直接文本返回
-    if len(results) == 1 and not results[0].thumb and not results[0].image_url:
-        await bot.send(event, results[0].title or "未找到结果")
-        return
-
-    bot_name = "蓝色大肥鱼"
-    try:
-        bot_info = await bot.get_login_info()
-        bot_name = bot_info.get("nickname", "蓝色大肥鱼")
-    except Exception:
-        pass
-
-    nodes = []
-    header = f"Yandex 反搜：找到 {len(results)} 条相似结果（显示前 {min(len(results), 10)} 条）"
-    nodes.append({
-        "type": "node",
-        "data": {
-            "name": bot_name,
-            "uin": str(bot.self_id),
-            "content": header,
-        },
-    })
-
-    for r in results[:10]:
-        text = r.title or "相似图片"
-        if r.image_url:
-            text += f"\n原图: {r.image_url}"
-        if r.source and r.source != r.image_url:
-            text += f"\n来源: {r.source}"
-        # 图片在前、文本在后
-        content = (f"[CQ:image,file=base64://{r.thumb}]\n" if r.thumb else "") + text
-        nodes.append({
-            "type": "node",
-            "data": {
-                "name": bot_name,
-                "uin": str(bot.self_id),
-                "content": content,
-            },
-        })
-
-    try:
-        await bot.call_api(
-            "send_group_forward_msg",
-            group_id=event.group_id,
-            messages=nodes,
-        )
-    except Exception as e:
-        logger.error(f"Yandex 合并转发失败，降级逐条发送: {e}")
-        for r in results[:10]:
-            text = r.title or "相似图片"
-            if r.image_url:
-                text += f"\n原图: {r.image_url}"
-            if r.source and r.source != r.image_url:
-                text += f"\n来源: {r.source}"
-            msg = (MessageSegment.image(f"base64://{r.thumb}") if r.thumb else Message()) + Message(text)
-            await bot.send(event, msg)
 
 
 # ========== 开启功能指令（超级用户） ==========
@@ -503,7 +367,6 @@ async def handle_search_help(matcher: Matcher, event: MessageEvent):
     sections = [
         ("搜图指令", [
             ("lg搜图", "引用图片进行搜索（soutubot）"),
-            ("lg网页搜图", "引用图片进行网页反搜（Yandex）"),
         ]),
         ("管理指令", [
             ("开启lg搜图", "开启搜图功能（超管）"),
