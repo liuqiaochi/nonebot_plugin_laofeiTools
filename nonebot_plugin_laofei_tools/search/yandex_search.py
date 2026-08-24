@@ -8,7 +8,9 @@ Yandex Images 反向搜图（以图搜图）
 
 注意：
   - Yandex 对 NSFW 容忍度高于 Google，且反爬强度低于 Google，适合通用以图搜图。
-  - 仍可能偶发验证码页面（返回空结果），属正常风控，重试或换图可缓解。
+  - 仍可能偶发"拦截/降级页"（返回空结果）：多为请求头不真实或会话 cookie 缺失，
+    已通过增强请求头 + 双重 cookie 预热 + 拦截页重试缓解；若仍失败多为部署机
+    数据中心 IP 被 Yandex 风控，需走代理或真实浏览器引擎（Playwright）。
   - 部署机需能直连 yandex.com；若在国内无法访问，需为 httpx 配置代理
     （本客户端 trust_env=False 以与项目一致，需要时改为 True 或注入代理）。
 """
@@ -41,7 +43,20 @@ _HEADERS = {
         "image/avif,image/webp,*/*;q=0.8"
     ),
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
     "Referer": "https://yandex.com/images/",
+    "Origin": "https://yandex.com",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "DNT": "1",
+    "Sec-CH-UA": '"Chromium";v="120", "Google Chrome";v="120", "Not?A_Brand";v="24"',
+    "Sec-CH-UA-Mobile": "?0",
+    "Sec-CH-UA-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
 }
 
 YANDEX_BASE = "https://yandex.com"
@@ -72,47 +87,53 @@ class YandexReverseSearch:
     async def __aexit__(self, *exc) -> None:
         await self._client.aclose()
 
+    async def _warmup(self) -> None:
+        """访问根域名与图片首页，建立 yandexuid 等会话 cookie。"""
+        for url in (YANDEX_BASE + "/", YANDEX_BASE + "/images/"):
+            try:
+                await self._client.get(url, timeout=10.0)
+                logger.info("[Yandex反搜] 预热 GET 完成: %s", url)
+            except Exception as e:
+                logger.warning("[Yandex反搜] 预热 GET 失败（忽略）: %s %s", url, e)
+
+    async def _upload(self, jpeg: bytes) -> str:
+        """上传图片并取回结果页 HTML（跟随 302）。返回 HTML 文本。"""
+        resp = await self._client.post(
+            YANDEX_BASE + "/images/search",
+            files={"upfile": ("image.jpg", jpeg, "image/jpeg")},
+            data={"rpt": "imageview", "srv": "yandex"},
+        )
+        logger.info(
+            "[Yandex反搜] 上传响应 status=%s, 最终URL=%s, html长度=%d, Location=%r",
+            resp.status_code, str(resp.url), len(resp.text),
+            resp.headers.get("location"),
+        )
+        resp.raise_for_status()
+        return resp.text
+
     async def search(self, image_data: bytes, limit: int = 10) -> List[YandexResult]:
         jpeg = _to_jpeg(image_data)
         logger.info("[Yandex反搜] 开始：jpeg=%d bytes", len(jpeg))
         try:
-            # 1. 先访问首页建立会话 cookie（规避部分风控）
-            try:
-                await self._client.get(YANDEX_BASE + "/images/", timeout=10.0)
-                logger.info("[Yandex反搜] 首页 GET 完成")
-            except Exception as e:
-                logger.warning("[Yandex反搜] 首页 GET 失败（忽略）: %s", e)
+            await self._warmup()
 
-            # 2. 上传图片触发反搜，服务端 302 跳转到带 cbir_id 的结果页
-            resp = await self._client.post(
-                YANDEX_BASE + "/images/search",
-                files={"upfile": ("image.jpg", jpeg, "image/jpeg")},
-                data={"rpt": "imageview", "srv": "yandex"},
-            )
-            logger.info(
-                "[Yandex反搜] 上传响应 status=%s, html长度=%d, Location=%r",
-                resp.status_code, len(resp.text), resp.headers.get("location"),
-            )
-            resp.raise_for_status()
-            results = self._parse(resp.text)
+            html = await self._upload(jpeg)
+            results = self._parse(html)
             logger.info("[Yandex反搜] 初次解析得到 %d 条", len(results))
 
-            # 3. 若仍在上传页（无结果），尝试跟随 Location 跳转
-            if not results:
-                loc = resp.headers.get("location")
-                if loc:
-                    if loc.startswith("//"):
-                        loc = "https:" + loc
-                    logger.info("[Yandex反搜] 跟随 Location 跳转: %s", loc)
-                    r2 = await self._client.get(loc, timeout=15.0)
-                    results = self._parse(r2.text)
-                    logger.info("[Yandex反搜] 跳转后解析得到 %d 条", len(results))
+            # 首次为空且疑似拦截页：重新预热 cookie 后再试一次
+            if not results and self._is_block_page(html):
+                logger.warning("[Yandex反搜] 疑似拦截页，重新预热后重试一次")
+                await self._warmup()
+                html = await self._upload(jpeg)
+                results = self._parse(html)
+                logger.info("[Yandex反搜] 重试后解析得到 %d 条", len(results))
 
-            # 4. 空结果诊断（区分验证码页 / 结构变化 / 真无结果）
+            # 空结果诊断（区分验证码页 / 结构变化 / 真无结果 / 拦截页）
             if not results:
-                self._diagnose(resp.text)
+                self._diagnose(html)
 
-            # 5. 把缩略图统一解析为内联 base64，便于直接发送
+            # 把缩略图统一解析为内联 base64，便于直接发送
             await asyncio.gather(*[self._resolve_thumb(r) for r in results])
 
             logger.info("[Yandex反搜] 最终返回 %d 条", len(results))
@@ -121,12 +142,30 @@ class YandexReverseSearch:
             logger.exception("[Yandex反搜] 搜索过程异常")
             return [YandexResult(title="搜索失败，详情见日志")]
 
+    @staticmethod
+    def _is_block_page(html: str) -> bool:
+        """判断是否为 Yandex 拦截/降级页（非验证码、非结果）。"""
+        low = html.lower()
+        markers = [
+            "we don't recognize", "do not recognize", "something went wrong",
+            "access denied", "not available in your region", "запросы",
+            "похоже, мы вас не узнали", "captcha", "robot",
+        ]
+        if any(m in low for m in markers):
+            return True
+        # 结果页必有 serp-item / data-bem；都没有则极可能是拦截页
+        if "serp-item" not in html and "data-bem" not in html:
+            return True
+        return False
+
     def _diagnose(self, html: str) -> None:
         """结果数为 0 时打印诊断信息，便于定位原因。"""
         soup = BeautifulSoup(html, "html.parser")
         serp = soup.select("div.serp-item")
         bem = soup.select("[data-bem]")
         low = html.lower()
+        h1 = soup.select_one("h1")
+        h1_text = h1.get_text(strip=True) if h1 else ""
         logger.warning(
             "[Yandex诊断] serp-item 计数=%d, data-bem 元素=%d, 含'img_href'=%d, "
             "含'captcha'=%s, 含'robot'=%s, 含'just moment'=%s, 含'are you a robot'=%s",
@@ -134,6 +173,7 @@ class YandexReverseSearch:
             "captcha" in low, "robot" in low, "just moment" in low,
             "are you a robot" in low,
         )
+        logger.warning("[Yandex诊断] 页面 h1 文案=%r", h1_text)
         snippet = " ".join(html[:1000].split())
         logger.warning("[Yandex诊断] HTML 前 1000 字符: %s", snippet)
 
