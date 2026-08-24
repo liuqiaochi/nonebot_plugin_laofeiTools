@@ -8,9 +8,11 @@ Yandex Images 反向搜图（以图搜图）
 
 注意：
   - Yandex 对 NSFW 容忍度高于 Google，且反爬强度低于 Google，适合通用以图搜图。
-  - 仍可能偶发"拦截/降级页"（返回空结果）：多为请求头不真实或会话 cookie 缺失，
-    已通过增强请求头 + 双重 cookie 预热 + 拦截页重试缓解；若仍失败多为部署机
-    数据中心 IP 被 Yandex 风控，需走代理或真实浏览器引擎（Playwright）。
+  - yandex.com 国际版对多数非俄区/自动化请求会返回 "The service is under construction"
+    限制页，因此主入口改用 yandex.ru（俄语主站，图片反搜真实可用），并保留
+    yandex.com 作为回退域名。
+  - 若两个域名都返回拦截页，多为部署机地域/数据中心 IP 被 Yandex 限制，需走
+    俄罗斯 IP 代理或真实浏览器引擎（Playwright）才能解决。
   - 部署机需能直连 yandex.com；若在国内无法访问，需为 httpx 配置代理
     （本客户端 trust_env=False 以与项目一致，需要时改为 True 或注入代理）。
 """
@@ -44,8 +46,8 @@ _HEADERS = {
     ),
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     "Accept-Encoding": "gzip, deflate, br",
-    "Referer": "https://yandex.com/images/",
-    "Origin": "https://yandex.com",
+    "Referer": "https://yandex.ru/images/",
+    "Origin": "https://yandex.ru",
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
     "DNT": "1",
@@ -59,7 +61,10 @@ _HEADERS = {
     "Upgrade-Insecure-Requests": "1",
 }
 
-YANDEX_BASE = "https://yandex.com"
+# 反搜主域名：yandex.ru 是真正可用的图片反搜入口；yandex.com 国际版对多数
+# 非俄区/自动化请求会返回 "The service is under construction" 限制页。
+# 顺序即优先级，命中拦截页时自动回退到下一个域名。
+YANDEX_DOMAINS = ["https://yandex.ru", "https://yandex.com"]
 
 
 @dataclass
@@ -87,25 +92,25 @@ class YandexReverseSearch:
     async def __aexit__(self, *exc) -> None:
         await self._client.aclose()
 
-    async def _warmup(self) -> None:
+    async def _warmup(self, base: str) -> None:
         """访问根域名与图片首页，建立 yandexuid 等会话 cookie。"""
-        for url in (YANDEX_BASE + "/", YANDEX_BASE + "/images/"):
+        for url in (base + "/", base + "/images/"):
             try:
                 await self._client.get(url, timeout=10.0)
                 logger.info("[Yandex反搜] 预热 GET 完成: %s", url)
             except Exception as e:
                 logger.warning("[Yandex反搜] 预热 GET 失败（忽略）: %s %s", url, e)
 
-    async def _upload(self, jpeg: bytes) -> str:
+    async def _upload(self, base: str, jpeg: bytes) -> str:
         """上传图片并取回结果页 HTML（跟随 302）。返回 HTML 文本。"""
         resp = await self._client.post(
-            YANDEX_BASE + "/images/search",
+            base + "/images/search",
             files={"upfile": ("image.jpg", jpeg, "image/jpeg")},
             data={"rpt": "imageview", "srv": "yandex"},
         )
         logger.info(
-            "[Yandex反搜] 上传响应 status=%s, 最终URL=%s, html长度=%d, Location=%r",
-            resp.status_code, str(resp.url), len(resp.text),
+            "[Yandex反搜] 上传响应[%s] status=%s, 最终URL=%s, html长度=%d, Location=%r",
+            base, resp.status_code, str(resp.url), len(resp.text),
             resp.headers.get("location"),
         )
         resp.raise_for_status()
@@ -115,23 +120,27 @@ class YandexReverseSearch:
         jpeg = _to_jpeg(image_data)
         logger.info("[Yandex反搜] 开始：jpeg=%d bytes", len(jpeg))
         try:
-            await self._warmup()
+            last_html = ""
+            results: List[YandexResult] = []
 
-            html = await self._upload(jpeg)
-            results = self._parse(html)
-            logger.info("[Yandex反搜] 初次解析得到 %d 条", len(results))
-
-            # 首次为空且疑似拦截页：重新预热 cookie 后再试一次
-            if not results and self._is_block_page(html):
-                logger.warning("[Yandex反搜] 疑似拦截页，重新预热后重试一次")
-                await self._warmup()
-                html = await self._upload(jpeg)
+            for base in YANDEX_DOMAINS:
+                await self._warmup(base)
+                html = await self._upload(base, jpeg)
                 results = self._parse(html)
-                logger.info("[Yandex反搜] 重试后解析得到 %d 条", len(results))
+                logger.info("[Yandex反搜][%s] 解析得到 %d 条", base, len(results))
+
+                if results:
+                    break
+                # 非拦截页的空结果 = 真没搜到，不必换域名
+                if not self._is_block_page(html):
+                    last_html = html
+                    break
+                logger.warning("[Yandex反搜] %s 返回拦截页，尝试下一域名", base)
+                last_html = html
 
             # 空结果诊断（区分验证码页 / 结构变化 / 真无结果 / 拦截页）
             if not results:
-                self._diagnose(html)
+                self._diagnose(last_html or html)
 
             # 把缩略图统一解析为内联 base64，便于直接发送
             await asyncio.gather(*[self._resolve_thumb(r) for r in results])
@@ -150,6 +159,8 @@ class YandexReverseSearch:
             "we don't recognize", "do not recognize", "something went wrong",
             "access denied", "not available in your region", "запросы",
             "похоже, мы вас не узнали", "captcha", "robot",
+            # yandex.com 国际版对多数非俄区请求返回的限制页
+            "under construction", "we will be back soon", "service is under",
         ]
         if any(m in low for m in markers):
             return True
