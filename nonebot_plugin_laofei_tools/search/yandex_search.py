@@ -12,21 +12,26 @@ Yandex Images 反向搜图（以图搜图）
     限制页，因此主入口改用 yandex.ru（俄语主站，图片反搜真实可用），并保留
     yandex.com 作为回退域名。
   - 若两个域名都返回拦截页，多为部署机地域/数据中心 IP 被 Yandex 限制，需走
-    俄罗斯 IP 代理或真实浏览器引擎（Playwright）才能解决。
-  - 部署机需能直连 yandex.com；若在国内无法访问，需为 httpx 配置代理
-    （本客户端 trust_env=False 以与项目一致，需要时改为 True 或注入代理）。
+    代理或真实浏览器引擎（Playwright）才能解决。
+  - 代理通过环境变量 YANDEX_PROXY 配置（可放根目录 .env，如
+    http://host:port 或 socks5://user:pass@host:port）；为空则直连。
+    代理仅作用于本反搜客户端，不影响插件其它网络请求（trust_env 仍保持 False）。
 """
 from __future__ import annotations
 
 import asyncio
 import base64
 import json
+import os
 from dataclasses import dataclass
 from io import BytesIO
 from typing import List, Optional
 from urllib.parse import parse_qs, urlparse
 
 import logging
+from dotenv import find_dotenv, load_dotenv
+
+load_dotenv(find_dotenv())  # 允许在 .env 配置 YANDEX_PROXY
 import httpx
 from bs4 import BeautifulSoup
 from PIL import Image
@@ -79,12 +84,17 @@ class YandexReverseSearch:
     """Yandex Images 反向搜图客户端（免费、无需 Key）"""
 
     def __init__(self, timeout: float = 30.0):
+        # 代理：环境变量 YANDEX_PROXY（如 http://host:port 或 socks5://...），
+        # 可写在项目根目录 .env；为空则直连。仅作用于本反搜客户端。
+        proxy = os.environ.get("YANDEX_PROXY", "").strip()
         self._client = httpx.AsyncClient(
             headers=_HEADERS,
             timeout=httpx.Timeout(timeout, connect=10.0),
             trust_env=False,
             follow_redirects=True,
+            proxy=proxy or None,
         )
+        logger.info("[Yandex反搜] 代理=%s", proxy or "(无，直连)")
 
     async def __aenter__(self) -> "YandexReverseSearch":
         return self
