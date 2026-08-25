@@ -82,8 +82,8 @@ def _get_effect_text(acc_info: dict) -> str:
         effects.append(f"血+{acc_info['hp']}%")
     if acc_info.get("special") == "pat_bonus_10":
         effects.append("摸+10")
-    if acc_info.get("special") == "affection_1.2x":
-        effects.append("好感1.2x")
+    if acc_info.get("special") == "affection_1.5x":
+        effects.append("好感1.5x")
     return " ".join(effects) if effects else "无"
 
 

@@ -100,7 +100,7 @@ ACCESSORIES = {
     "滑板车": {"force": 0, "luck": 0, "stamina": 30, "hp": 0, "price": 1000, "special": None, "droppable": True, "image": "accessories-scooter.png", "id": "205"},
     "彩虹戒指": {"force": 0, "luck": 50, "stamina": 0, "hp": 0, "price": 2500, "special": None, "droppable": False, "image": "accessories-ring.png", "id": "301"},
     "青龙偃月刀": {"force": 30, "luck": 0, "stamina": 0, "hp": 0, "price": 5000, "special": None, "droppable": False, "image": "accessories-dragonBlade.png", "id": "302"},
-    "超人披风": {"force": 10, "luck": 10, "stamina": 20, "hp": 0, "price": 6666, "special": "affection_1.2x", "droppable": False, "image": "accessories-cloak.png", "id": "303"},
+    "超人披风": {"force": 20, "luck": 20, "stamina": 20, "hp": 0, "price": 6666, "special": "affection_1.5x", "droppable": False, "image": "accessories-cloak.png", "id": "303"},
     "宇宙魔方": {"force": 30, "luck": 30, "stamina": 30, "hp": 5, "price": 9999, "special": None, "droppable": False, "image": "accessories-cube.png", "id": "304"},
 }
 
@@ -737,7 +737,7 @@ def do_walk(user_id: str) -> dict:
 def do_pat(user_id: str) -> dict:
     """抚摸宠物逻辑
 
-    每日限一次，增加好感度。Doro 天赋 ×1.2，草帽 +10，超人披风 ×1.2。
+    每日限一次，增加好感度。Doro 天赋 ×1.2，草帽 +10，超人披风 ×1.5。
 
     Args:
         user_id: 用户 ID
@@ -765,7 +765,7 @@ def do_pat(user_id: str) -> dict:
     if pet.accessory == "草帽":
         base_gain += 10
     if pet.accessory == "超人披风":
-        base_gain = int(base_gain * 1.2)
+        base_gain = int(base_gain * 1.5)
 
     # 5. 增加好感度
     pet.affection += base_gain

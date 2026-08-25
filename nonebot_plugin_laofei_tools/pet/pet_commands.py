@@ -668,8 +668,8 @@ async def handle_shop(matcher: Matcher, event: MessageEvent):
                     effects.append(f"体力+{acc_info['stamina']}")
                 if acc_info.get("hp", 0) > 0:
                     effects.append(f"血量+{acc_info['hp']}%")
-                if acc_info.get("special") == "affection_1.2x":
-                    effects.append("好感提升1.2倍")
+                if acc_info.get("special") == "affection_1.5x":
+                    effects.append("好感提升1.5倍")
                 effect_str = "、".join(effects) if effects else "无"
                 msg += f"  {acc_name}（{effect_str}）- {acc_info['price']} 积分\n"
 
