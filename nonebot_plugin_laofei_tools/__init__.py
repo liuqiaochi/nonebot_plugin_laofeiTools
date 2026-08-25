@@ -22,7 +22,7 @@ from nonebot.matcher import Matcher
 require("nonebot_plugin_localstore")
 require("nonebot_plugin_apscheduler")
 
-from .common import points_commands, restart, life_utils, ai_chat, rest_mode, qrcode_tool
+from .common import points_commands, restart, life_utils, ai_chat, rest_mode, qrcode_tool, glossary
 from .pet import pet_commands
 from .search import commands
 from .config import Config, init_enabled_groups
@@ -183,6 +183,9 @@ def _generate_help_image() -> str:
         ("宠物系统", [
             ("我的宠物", "查看或领养宠物"),
             ("宠物帮助", "查看宠物系统帮助"),
+        ]),
+        ("名词查询", [
+            ("名词解释 <名词>", "解释术语的用处与获取（如 名词解释 好感）"),
         ]),
         ("管理指令", [
             ("开启/关闭 lg搜图", "管理群聊搜图功能"),
