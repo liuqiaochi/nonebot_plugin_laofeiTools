@@ -1271,7 +1271,9 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     # 11. 胜利奖励（胜利方获得可掉落食物）+ 防守方经验
     droppable_foods = [name for name, info in FOODS.items() if info.get("droppable", True)]
     reward_food = random.choice(droppable_foods) if droppable_foods else "橘子"
-    reward_count = 2 if random.random() < 0.10 else 1  # PK 胜利 10% 概率双倍奖励
+    winner_pet = a_pet if attacker_won else b_pet
+    is_winner_maodie = getattr(winner_pet, "pet_type", None) == "cat"
+    reward_count = 2 if (is_winner_maodie and random.random() < 0.10) else 1  # 仅耄耋胜利者有 10% 概率双倍奖励
     if attacker_won:
         for _ in range(reward_count):
             add_item(attacker_id, "food", reward_food)
