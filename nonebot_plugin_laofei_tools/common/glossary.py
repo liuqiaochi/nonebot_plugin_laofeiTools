@@ -8,7 +8,7 @@
 """
 
 from nonebot import on_command, logger
-from nonebot.adapters.onebot.v11 import MessageEvent, MessageSegment
+from nonebot.adapters.onebot.v11 import Message, MessageEvent, MessageSegment
 from nonebot.matcher import Matcher
 from nonebot.params import CommandArg
 
