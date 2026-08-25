@@ -79,25 +79,29 @@ PET_TYPES = {
 }
 
 # ========== 食物定义 ==========
+# stamina: 喂食时恢复的体力；droppable: 是否可通过散步/打工/PK 奖励等途径随机掉落
 FOODS = {
-    "橘子": {"price": 100, "image": "food-orange.png", "id": "101"},
-    "汉堡": {"price": 100, "image": "food-hamburger.png", "id": "102"},
-    "骨头": {"price": 100, "image": "food-bone.png", "id": "103"},
-    "小鱼干": {"price": 100, "image": "food-fish.png", "id": "104"},
-    "冰淇淋": {"price": 100, "image": "food-icecream.png", "id": "105"},
-    "菠萝披萨": {"price": 100, "image": "food-pizza.png", "id": "106"},
+    "橘子": {"price": 100, "image": "food-orange.png", "id": "101", "stamina": 20, "droppable": True},
+    "汉堡": {"price": 100, "image": "food-hamburger.png", "id": "102", "stamina": 20, "droppable": True},
+    "骨头": {"price": 100, "image": "food-bone.png", "id": "103", "stamina": 20, "droppable": True},
+    "小鱼干": {"price": 100, "image": "food-fish.png", "id": "104", "stamina": 20, "droppable": True},
+    "冰淇淋": {"price": 100, "image": "food-icecream.png", "id": "105", "stamina": 20, "droppable": True},
+    "菠萝披萨": {"price": 100, "image": "food-pizza.png", "id": "106", "stamina": 20, "droppable": True},
+    "宠物口粮": {"price": 500, "image": "food-pet.png", "id": "107", "stamina": 50, "droppable": False},
 }
 
 # ========== 配饰定义 ==========
+# hp: 最大血量百分比加成（如 5 表示 +5%）
 ACCESSORIES = {
-    "小刀": {"force": 10, "luck": 0, "stamina": 0, "price": 500, "special": None, "droppable": True, "image": "accessories-knife.png", "id": "201"},
-    "短剑": {"force": 5, "luck": 5, "stamina": 0, "price": 500, "special": None, "droppable": True, "image": "accessories-stiletto.png", "id": "202"},
-    "四叶草": {"force": 0, "luck": 20, "stamina": 0, "price": 1000, "special": None, "droppable": True, "image": "accessories-four-leafclover.png", "id": "203"},
-    "草帽": {"force": 0, "luck": 0, "stamina": 0, "price": 1000, "special": "pat_bonus_10", "droppable": True, "image": "accessories-hat.png", "id": "204"},
-    "滑板车": {"force": 0, "luck": 0, "stamina": 30, "price": 1000, "special": None, "droppable": True, "image": "accessories-scooter.png", "id": "205"},
-    "彩虹戒指": {"force": 0, "luck": 50, "stamina": 0, "price": 2500, "special": None, "droppable": False, "image": "accessories-ring.png", "id": "301"},
-    "青龙偃月刀": {"force": 30, "luck": 0, "stamina": 0, "price": 5000, "special": None, "droppable": False, "image": "accessories-dragonBlade.png", "id": "302"},
-    "超人披风": {"force": 10, "luck": 10, "stamina": 20, "price": 6666, "special": "affection_1.2x", "droppable": False, "image": "accessories-cloak.png", "id": "303"},
+    "小刀": {"force": 10, "luck": 0, "stamina": 0, "hp": 0, "price": 500, "special": None, "droppable": True, "image": "accessories-knife.png", "id": "201"},
+    "短剑": {"force": 5, "luck": 5, "stamina": 0, "hp": 0, "price": 500, "special": None, "droppable": True, "image": "accessories-stiletto.png", "id": "202"},
+    "四叶草": {"force": 0, "luck": 20, "stamina": 0, "hp": 0, "price": 1000, "special": None, "droppable": True, "image": "accessories-four-leafclover.png", "id": "203"},
+    "草帽": {"force": 0, "luck": 0, "stamina": 0, "hp": 0, "price": 1000, "special": "pat_bonus_10", "droppable": True, "image": "accessories-hat.png", "id": "204"},
+    "滑板车": {"force": 0, "luck": 0, "stamina": 30, "hp": 0, "price": 1000, "special": None, "droppable": True, "image": "accessories-scooter.png", "id": "205"},
+    "彩虹戒指": {"force": 0, "luck": 50, "stamina": 0, "hp": 0, "price": 2500, "special": None, "droppable": False, "image": "accessories-ring.png", "id": "301"},
+    "青龙偃月刀": {"force": 30, "luck": 0, "stamina": 0, "hp": 0, "price": 5000, "special": None, "droppable": False, "image": "accessories-dragonBlade.png", "id": "302"},
+    "超人披风": {"force": 10, "luck": 10, "stamina": 20, "hp": 0, "price": 6666, "special": "affection_1.2x", "droppable": False, "image": "accessories-cloak.png", "id": "303"},
+    "宇宙魔方": {"force": 30, "luck": 30, "stamina": 30, "hp": 5, "price": 9999, "special": None, "droppable": False, "image": "accessories-cube.png", "id": "304"},
 }
 
 
@@ -576,9 +580,14 @@ def get_effective_luck(pet: PetData) -> int:
 
 
 def get_pet_max_hp(pet: PetData) -> int:
-    """计算宠物最大血量 = 200 + (等级 - 1) × 100"""
+    """计算宠物最大血量 = (200 + (等级 - 1) × 100) × (1 + 配饰血量加成百分比)
+
+    配饰的 hp 字段为百分比加成，如 5 表示 +5%。
+    """
     level = get_pet_level(pet.exp)
-    return 200 + (level - 1) * 100
+    base_hp = 200 + (level - 1) * 100
+    acc_hp = ACCESSORIES.get(pet.accessory, {}).get("hp", 0) if pet.accessory else 0
+    return int(base_hp * (1 + acc_hp / 100))
 
 
 def get_display_name(pet: PetData) -> str:
@@ -677,8 +686,10 @@ def do_walk(user_id: str) -> dict:
     message = None
 
     if dropped:
-        # 7. 构建掉落池：所有食物 + 可掉落配饰
-        drop_pool = list(FOODS.keys()) + [
+        # 7. 构建掉落池：可掉落食物 + 可掉落配饰
+        drop_pool = [
+            name for name, info in FOODS.items() if info.get("droppable", True)
+        ] + [
             name for name, info in ACCESSORIES.items() if info["droppable"]
         ]
         dropped_item = random.choice(drop_pool)
@@ -809,7 +820,7 @@ def do_feed(user_id: str, food_name: str) -> dict:
     remove_item(user_id, "food", food_name)
 
     # 5. 计算体力和好感度增量
-    stamina_gain = 20
+    stamina_gain = FOODS[food_name].get("stamina", 20)
     affection_gain = 5
 
     # 检查是否为宠物最爱食物
@@ -882,9 +893,10 @@ def do_work(user_id: str) -> dict:
     # 6. 掉落判定
     dropped_items = []
 
-    # 10% 概率获得随机食物
-    if random.random() < 0.10:
-        food = random.choice(list(FOODS.keys()))
+    # 10% 概率获得随机食物（仅限可掉落食物）
+    droppable_foods = [name for name, info in FOODS.items() if info.get("droppable", True)]
+    if random.random() < 0.10 and droppable_foods:
+        food = random.choice(droppable_foods)
         add_item(user_id, "food", food)
         dropped_items.append(food)
 
@@ -1252,8 +1264,9 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     if attacker_won is None:
         attacker_won = a_hp >= b_hp
 
-    # 11. 胜利奖励（胜利方获得食物）+ 防守方经验
-    reward_food = random.choice(list(FOODS.keys()))
+    # 11. 胜利奖励（胜利方获得可掉落食物）+ 防守方经验
+    droppable_foods = [name for name, info in FOODS.items() if info.get("droppable", True)]
+    reward_food = random.choice(droppable_foods) if droppable_foods else "橘子"
     if attacker_won:
         add_item(attacker_id, "food", reward_food)
         b_pet.exp += 5  # 防守方输了获得5点经验

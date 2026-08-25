@@ -635,19 +635,22 @@ async def handle_shop(matcher: Matcher, event: MessageEvent):
 
         msg += "\n【食物】\n"
         for food_name, food_info in FOODS.items():
-            msg += f"  {food_name} - {food_info['price']} 积分\n"
+            stamina = food_info.get("stamina", 20)
+            msg += f"  {food_name}（+{stamina}体力）- {food_info['price']} 积分\n"
 
         msg += "\n【普通配饰】\n"
         for acc_name, acc_info in ACCESSORIES.items():
             if acc_info["droppable"]:
                 effects = []
-                if acc_info["force"] > 0:
+                if acc_info.get("force", 0) > 0:
                     effects.append(f"武力+{acc_info['force']}")
-                if acc_info["luck"] > 0:
+                if acc_info.get("luck", 0) > 0:
                     effects.append(f"幸运+{acc_info['luck']}")
-                if acc_info["stamina"] > 0:
+                if acc_info.get("stamina", 0) > 0:
                     effects.append(f"体力+{acc_info['stamina']}")
-                if acc_info["special"] == "pat_bonus_10":
+                if acc_info.get("hp", 0) > 0:
+                    effects.append(f"血量+{acc_info['hp']}%")
+                if acc_info.get("special") == "pat_bonus_10":
                     effects.append("抚摸好感+10")
                 effect_str = "、".join(effects) if effects else "无"
                 msg += f"  {acc_name}（{effect_str}）- {acc_info['price']} 积分\n"
@@ -656,13 +659,15 @@ async def handle_shop(matcher: Matcher, event: MessageEvent):
         for acc_name, acc_info in ACCESSORIES.items():
             if not acc_info["droppable"]:
                 effects = []
-                if acc_info["force"] > 0:
+                if acc_info.get("force", 0) > 0:
                     effects.append(f"武力+{acc_info['force']}")
-                if acc_info["luck"] > 0:
+                if acc_info.get("luck", 0) > 0:
                     effects.append(f"幸运+{acc_info['luck']}")
-                if acc_info["stamina"] > 0:
+                if acc_info.get("stamina", 0) > 0:
                     effects.append(f"体力+{acc_info['stamina']}")
-                if acc_info["special"] == "affection_1.2x":
+                if acc_info.get("hp", 0) > 0:
+                    effects.append(f"血量+{acc_info['hp']}%")
+                if acc_info.get("special") == "affection_1.2x":
                     effects.append("好感提升1.2倍")
                 effect_str = "、".join(effects) if effects else "无"
                 msg += f"  {acc_name}（{effect_str}）- {acc_info['price']} 积分\n"

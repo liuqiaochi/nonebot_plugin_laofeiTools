@@ -72,17 +72,25 @@ def _load_icon(image_name: str) -> Image.Image:
 def _get_effect_text(acc_info: dict) -> str:
     """获取配饰效果文本"""
     effects = []
-    if acc_info["force"] > 0:
+    if acc_info.get("force", 0) > 0:
         effects.append(f"武+{acc_info['force']}")
-    if acc_info["luck"] > 0:
+    if acc_info.get("luck", 0) > 0:
         effects.append(f"运+{acc_info['luck']}")
-    if acc_info["stamina"] > 0:
+    if acc_info.get("stamina", 0) > 0:
         effects.append(f"体+{acc_info['stamina']}")
-    if acc_info["special"] == "pat_bonus_10":
+    if acc_info.get("hp", 0) > 0:
+        effects.append(f"血+{acc_info['hp']}%")
+    if acc_info.get("special") == "pat_bonus_10":
         effects.append("摸+10")
-    if acc_info["special"] == "affection_1.2x":
+    if acc_info.get("special") == "affection_1.2x":
         effects.append("好感1.2x")
     return " ".join(effects) if effects else "无"
+
+
+def _get_food_effect_text(food_info: dict) -> str:
+    """获取食物效果文本"""
+    stamina = food_info.get("stamina", 20)
+    return f"+{stamina}体力"
 
 
 def generate_shop_image() -> str:
@@ -124,7 +132,7 @@ def generate_shop_image() -> str:
 
     y = PADDING
 
-    def draw_section(title: str, items: list, card_color: tuple, is_accessory: bool):
+    def draw_section(title: str, items: list, card_color: tuple, get_effect=None):
         nonlocal y
         # 标题
         draw.text((PADDING, y), f"🏪 {title}", fill=TITLE_COLOR, font=font_title)
@@ -175,27 +183,28 @@ def generate_shop_image() -> str:
                 font=font_price,
             )
 
-            # 配饰效果
-            if is_accessory:
-                effect_text = _get_effect_text(info)
-                eff_bbox = draw.textbbox((0, 0), effect_text, font=font_effect)
-                eff_w = eff_bbox[2] - eff_bbox[0]
-                draw.text(
-                    (x + (CARD_WIDTH - eff_w) // 2, card_y + 10 + ICON_SIZE + 50),
-                    effect_text,
-                    fill=EFFECT_COLOR,
-                    font=font_effect,
-                )
+            # 效果文本（配饰/食物）
+            if get_effect:
+                effect_text = get_effect(info)
+                if effect_text:
+                    eff_bbox = draw.textbbox((0, 0), effect_text, font=font_effect)
+                    eff_w = eff_bbox[2] - eff_bbox[0]
+                    draw.text(
+                        (x + (CARD_WIDTH - eff_w) // 2, card_y + 10 + ICON_SIZE + 50),
+                        effect_text,
+                        fill=EFFECT_COLOR,
+                        font=font_effect,
+                    )
 
         rows = (len(items) + COLS - 1) // COLS
         y += rows * (CARD_HEIGHT + PADDING)
 
     # 绘制三个区域
-    draw_section("食物", food_items, CARD_FOOD_COLOR, False)
+    draw_section("食物", food_items, CARD_FOOD_COLOR, _get_food_effect_text)
     y += SECTION_GAP
-    draw_section("普通配饰", normal_acc, CARD_ACC_COLOR, True)
+    draw_section("普通配饰", normal_acc, CARD_ACC_COLOR, _get_effect_text)
     y += SECTION_GAP
-    draw_section("特殊配饰", special_acc, CARD_SPECIAL_COLOR, True)
+    draw_section("特殊配饰", special_acc, CARD_SPECIAL_COLOR, _get_effect_text)
 
     # 底部提示
     tip = "发送「购买 商品名」购买"
