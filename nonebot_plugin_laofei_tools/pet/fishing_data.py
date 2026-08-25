@@ -78,6 +78,15 @@ SUPER_RARE_FISH = {
         "min_price": 50,
         "max_price": 60,
     },
+    "paddlerfish": {
+        "id": "paddlerfish",
+        "name": "匙吻鲟",
+        "aliases": ["鸭嘴鱼"],
+        "rarity": "super_rare",
+        "rarity_cn": "超级稀有",
+        "min_price": 50,
+        "max_price": 60,
+    },
 }
 
 RARE_FISH = {
@@ -165,6 +174,15 @@ RARE_FISH = {
     "sunfish": {
         "id": "sunfish",
         "name": "翻车鱼",
+        "aliases": [],
+        "rarity": "rare",
+        "rarity_cn": "稀有",
+        "min_price": 20,
+        "max_price": 40,
+    },
+    "lionfish": {
+        "id": "lionfish",
+        "name": "狮子鱼",
         "aliases": [],
         "rarity": "rare",
         "rarity_cn": "稀有",
@@ -354,6 +372,24 @@ COMMON_FISH = {
         "min_price": 4,
         "max_price": 10,
     },
+    "white_bait": {
+        "id": "white_bait",
+        "name": "银鱼",
+        "aliases": ["面条鱼"],
+        "rarity": "common",
+        "rarity_cn": "普通",
+        "min_price": 4,
+        "max_price": 10,
+    },
+    "mullet": {
+        "id": "mullet",
+        "name": "鲻鱼",
+        "aliases": ["乌鱼"],
+        "rarity": "common",
+        "rarity_cn": "普通",
+        "min_price": 4,
+        "max_price": 10,
+    },
 }
 
 # ========== 杂物定义（非鱼，无法出售，不入图鉴） ==========
@@ -385,6 +421,10 @@ for fish_id, fish_data in ALL_FISH.items():
 def get_fish_image_path(fish_id: str) -> Path:
     """获取鱼的图片绝对路径"""
     return FISH_IMAGE_DIR / f"{fish_id}.png"
+
+
+# 未获得鱼的图鉴占位图
+UNKNOWN_FISH_IMAGE = FISH_IMAGE_DIR / "unknown_fish.png"
 
 
 # 稀有度 ID 到中文映射

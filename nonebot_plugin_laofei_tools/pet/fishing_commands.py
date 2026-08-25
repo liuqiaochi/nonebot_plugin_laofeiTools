@@ -29,6 +29,7 @@ from .fishing_data import (
     FISHING_STAMINA_COST,
     DAILY_FISHING_LIMIT,
     FISH_IMAGE_DIR,
+    UNKNOWN_FISH_IMAGE,
     get_fish_image_path,
     add_caught_fish,
     get_fish_info,
@@ -407,7 +408,7 @@ async def handle_fishing_guide(
             else:
                 info = f"{status} {name}（???）"
 
-            image_path = get_fish_image_path(fish["id"])
+            image_path = UNKNOWN_FISH_IMAGE if not owned else get_fish_image_path(fish["id"])
 
             if image_path.exists():
                 node_content = Message([
@@ -854,7 +855,7 @@ async def handle_fishing_help(matcher: Matcher, event: MessageEvent):
             "🐟 钓鱼     — 消耗10体力抛竿钓鱼，每日限15次\n"
             "⚡ 快速钓鱼 — 自动钓鱼至体力/次数耗尽，无延迟，合并转发结果\n"
             "   别名：连续钓鱼\n"
-            "📖 钓鱼图鉴 — 查看全部36种鱼的收集进度\n"
+            "📖 钓鱼图鉴 — 查看全部40种鱼的收集进度\n"
             "   别名：鱼图鉴\n"
             "🎒 钓鱼箱   — 查看已钓到的鱼，可进行售卖\n"
             "   别名：鱼箱\n"
