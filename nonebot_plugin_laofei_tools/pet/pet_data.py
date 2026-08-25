@@ -54,7 +54,7 @@ PET_TYPES = {
         "luck": 10,
         "force": 15,
         "talent": "哈气",
-        "talent_desc": "散步掉落道具概率加10%",
+        "talent_desc": "散步、打工掉落道具概率 +10%",
         "image": "pet-cat.gif",
         "fav_food": "小鱼干",
     },
@@ -893,16 +893,19 @@ def do_work(user_id: str) -> dict:
     
     # 6. 掉落判定
     dropped_items = []
+    is_maodie = pet.pet_type == "cat"  # 耄耋天赋：打工掉落概率加成
 
-    # 10% 概率获得随机食物（仅限可掉落食物）
+    # 10% 概率获得随机食物（仅限可掉落食物）；耄耋天赋额外 +10%
+    food_drop_rate = 0.10 + (0.10 if is_maodie else 0)
     droppable_foods = [name for name, info in FOODS.items() if info.get("droppable", True)]
-    if random.random() < 0.10 and droppable_foods:
+    if random.random() < food_drop_rate and droppable_foods:
         food = random.choice(droppable_foods)
         add_item(user_id, "food", food)
         dropped_items.append(food)
 
-    # 3% 概率掉落普通配饰
-    if random.random() < 0.03:
+    # 3% 概率掉落普通配饰；耄耋天赋额外 +10%
+    acc_drop_rate = 0.03 + (0.10 if is_maodie else 0)
+    if random.random() < acc_drop_rate:
         droppable_acc = [name for name, info in ACCESSORIES.items() if info["droppable"]]
         if droppable_acc:
             acc = random.choice(droppable_acc)
@@ -1268,11 +1271,14 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     # 11. 胜利奖励（胜利方获得可掉落食物）+ 防守方经验
     droppable_foods = [name for name, info in FOODS.items() if info.get("droppable", True)]
     reward_food = random.choice(droppable_foods) if droppable_foods else "橘子"
+    reward_count = 2 if random.random() < 0.10 else 1  # PK 胜利 10% 概率双倍奖励
     if attacker_won:
-        add_item(attacker_id, "food", reward_food)
+        for _ in range(reward_count):
+            add_item(attacker_id, "food", reward_food)
         b_pet.exp += 5  # 防守方输了获得5点经验
     else:
-        add_item(defender_id, "food", reward_food)
+        for _ in range(reward_count):
+            add_item(defender_id, "food", reward_food)
         b_pet.exp += 10  # 防守方赢了获得10点经验
     save_pet(defender_id)
 
@@ -1280,7 +1286,8 @@ def do_pk(attacker_id: str, defender_id: str) -> dict:
     loser_name = b_name if attacker_won else a_name
     battle_log.append("——————————")
     battle_log.append(f"🏆 {winner_name} 获胜！")
-    battle_log.append(f"🎁 胜者奖励: {reward_food}")
+    food_reward_text = f"{reward_food} ×{reward_count}" if reward_count > 1 else reward_food
+    battle_log.append(f"🎁 胜者奖励: {food_reward_text}")
     battle_log.append(f"💬 {winner_name}：{random.choice(PK_WIN_LINES)}")
     battle_log.append(f"💬 {loser_name}：{random.choice(PK_LOSE_LINES)}")
 
