@@ -90,7 +90,8 @@ def _get_effect_text(acc_info: dict) -> str:
 def _get_food_effect_text(food_info: dict) -> str:
     """获取食物效果文本"""
     stamina = food_info.get("stamina", 20)
-    return f"+{stamina}体力"
+    affection = food_info.get("affection", 5)
+    return f"+{stamina}体力 +{affection}好感"
 
 
 def generate_shop_image() -> str:

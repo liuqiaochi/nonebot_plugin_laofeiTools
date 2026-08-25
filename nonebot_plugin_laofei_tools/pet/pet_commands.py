@@ -636,7 +636,8 @@ async def handle_shop(matcher: Matcher, event: MessageEvent):
         msg += "\n【食物】\n"
         for food_name, food_info in FOODS.items():
             stamina = food_info.get("stamina", 20)
-            msg += f"  {food_name}（+{stamina}体力）- {food_info['price']} 积分\n"
+            affection = food_info.get("affection", 5)
+            msg += f"  {food_name}（+{stamina}体力+{affection}好感）- {food_info['price']} 积分\n"
 
         msg += "\n【普通配饰】\n"
         for acc_name, acc_info in ACCESSORIES.items():

@@ -87,7 +87,7 @@ FOODS = {
     "小鱼干": {"price": 100, "image": "food-fish.png", "id": "104", "stamina": 20, "droppable": True},
     "冰淇淋": {"price": 100, "image": "food-icecream.png", "id": "105", "stamina": 20, "droppable": True},
     "菠萝披萨": {"price": 100, "image": "food-pizza.png", "id": "106", "stamina": 20, "droppable": True},
-    "宠物口粮": {"price": 500, "image": "food-pet.png", "id": "107", "stamina": 50, "droppable": False},
+    "宠物口粮": {"price": 300, "image": "food-pet.png", "id": "107", "stamina": 50, "affection": 20, "droppable": False},
 }
 
 # ========== 配饰定义 ==========
@@ -792,7 +792,8 @@ def do_feed(user_id: str, food_name: str) -> dict:
     """喂食宠物逻辑
 
     消耗背包中 1 个食物，恢复体力和好感度。
-    普通食物 +20 体力 +5 好感；最爱食物额外 +10 体力 +10 好感。
+    各食物的体力/好感恢复量由 FOODS 中的 stamina/affection 字段决定（默认 20 体力 / 5 好感）；
+    宠物口粮为 +50 体力 +20 好感；最爱食物额外 +10 体力 +10 好感。
     香企鹅天赋：体力恢复量 ×1.4。体力不超过 max_stamina。
 
     Args:
@@ -821,7 +822,7 @@ def do_feed(user_id: str, food_name: str) -> dict:
 
     # 5. 计算体力和好感度增量
     stamina_gain = FOODS[food_name].get("stamina", 20)
-    affection_gain = 5
+    affection_gain = FOODS[food_name].get("affection", 5)
 
     # 检查是否为宠物最爱食物
     pet_info = PET_TYPES[pet.pet_type]
