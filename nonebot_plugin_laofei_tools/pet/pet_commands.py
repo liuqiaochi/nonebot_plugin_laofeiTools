@@ -968,25 +968,20 @@ async def handle_work(matcher: Matcher, event: MessageEvent):
 
 
 # ========== 快速打工指令 ==========
-pet_quick_work_cmd = on_command("快速打工", aliases={"连续打工"}, priority=5, block=True, force_whitespace=True)
+pet_quick_work_cmd = on_command("快速打工", aliases={"连续打工", "一键打工"}, priority=5, block=True, force_whitespace=True)
 
 
 @pet_quick_work_cmd.handle()
 async def handle_quick_work(bot: Bot, matcher: Matcher, event: MessageEvent):
     """快速打工：自动消耗体力打工直到体力不足，结果合并转发返回"""
-    if isinstance(event, PrivateMessageEvent):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("快速打工仅在群聊可用")
-        ]))
-        return
-
-    if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
-        return
+    # 群聊需开启积分系统；私聊不受群开关限制
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
 
     user_id = str(event.user_id)
     pet = get_pet(user_id)
@@ -1000,6 +995,7 @@ async def handle_quick_work(bot: Bot, matcher: Matcher, event: MessageEvent):
     refresh_stamina_if_needed(user_id)
 
     nodes = []
+    texts = []
     total_points = 0
     total_drops = []
     work_count = 0
@@ -1029,6 +1025,7 @@ async def handle_quick_work(bot: Bot, matcher: Matcher, event: MessageEvent):
                 "content": str(Message(MessageSegment.text(node_text))),
             },
         })
+        texts.append(node_text)
 
     if work_count == 0:
         await matcher.finish(Message([
@@ -1048,42 +1045,44 @@ async def handle_quick_work(bot: Bot, matcher: Matcher, event: MessageEvent):
     if total_drops:
         summary += f"\n🎁 额外掉落: {'、'.join(total_drops)}"
 
-    nodes.insert(0, {
-        "type": "node",
-        "data": {
-            "name": "快速打工汇总",
-            "uin": str(bot.self_id),
-            "content": str(Message(MessageSegment.text(summary))),
-        },
-    })
-
-    await bot.send_group_forward_msg(
-        group_id=event.group_id,
-        messages=nodes,
-    )
-    await matcher.finish()
+    if isinstance(event, GroupMessageEvent):
+        nodes.insert(0, {
+            "type": "node",
+            "data": {
+                "name": "快速打工汇总",
+                "uin": str(bot.self_id),
+                "content": str(Message(MessageSegment.text(summary))),
+            },
+        })
+        await bot.send_group_forward_msg(
+            group_id=event.group_id,
+            messages=nodes,
+        )
+        await matcher.finish()
+    else:
+        # 私聊：合并为单条文本返回
+        full = summary + "\n\n" + "\n\n".join(texts)
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(full)
+        ]))
 
 
 # ========== 快速散步指令 ==========
-pet_quick_walk_cmd = on_command("快速散步", aliases={"连续散步"}, priority=5, block=True, force_whitespace=True)
+pet_quick_walk_cmd = on_command("快速散步", aliases={"连续散步", "一键散步"}, priority=5, block=True, force_whitespace=True)
 
 
 @pet_quick_walk_cmd.handle()
 async def handle_quick_walk(bot: Bot, matcher: Matcher, event: MessageEvent):
     """快速散步：自动消耗体力散步直到体力不足，结果合并转发返回"""
-    if isinstance(event, PrivateMessageEvent):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("快速散步仅在群聊可用")
-        ]))
-        return
-
-    if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
-        return
+    # 群聊需开启积分系统；私聊不受群开关限制
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
 
     user_id = str(event.user_id)
     pet = get_pet(user_id)
@@ -1097,6 +1096,7 @@ async def handle_quick_walk(bot: Bot, matcher: Matcher, event: MessageEvent):
     refresh_stamina_if_needed(user_id)
 
     nodes = []
+    texts = []
     total_exp = 0
     total_drops = []
     walk_count = 0
@@ -1124,6 +1124,7 @@ async def handle_quick_walk(bot: Bot, matcher: Matcher, event: MessageEvent):
                 "content": str(Message(MessageSegment.text(node_text))),
             },
         })
+        texts.append(node_text)
 
     if walk_count == 0:
         await matcher.finish(Message([
@@ -1143,20 +1144,27 @@ async def handle_quick_walk(bot: Bot, matcher: Matcher, event: MessageEvent):
     if total_drops:
         summary += f"\n🎁 捡到道具: {'、'.join(total_drops)}"
 
-    nodes.insert(0, {
-        "type": "node",
-        "data": {
-            "name": "快速散步汇总",
-            "uin": str(bot.self_id),
-            "content": str(Message(MessageSegment.text(summary))),
-        },
-    })
-
-    await bot.send_group_forward_msg(
-        group_id=event.group_id,
-        messages=nodes,
-    )
-    await matcher.finish()
+    if isinstance(event, GroupMessageEvent):
+        nodes.insert(0, {
+            "type": "node",
+            "data": {
+                "name": "快速散步汇总",
+                "uin": str(bot.self_id),
+                "content": str(Message(MessageSegment.text(summary))),
+            },
+        })
+        await bot.send_group_forward_msg(
+            group_id=event.group_id,
+            messages=nodes,
+        )
+        await matcher.finish()
+    else:
+        # 私聊：合并为单条文本返回
+        full = summary + "\n\n" + "\n\n".join(texts)
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(full)
+        ]))
 
 
 # ========== 飞龙探云手（偷窃技能）指令 ==========
