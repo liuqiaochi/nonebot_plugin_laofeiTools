@@ -414,6 +414,7 @@ async def handle_novelai_help(matcher: Matcher, event: MessageEvent):
         ]),
         ("查询额度（仅超级用户）", [
             ("ai画图额度 / ai画图余额", "查询账户剩余 Anlas 与订阅到期时间"),
+            ("ai画图限制", "查询 Opus 免费 V5 世代额度（剩余百分比 / 透支 / 补足倒计时）"),
         ]),
         ("__text__", "默认尺寸 832×1216，默认模型 nai-diffusion-4-5-curated。"),
     ]
@@ -498,27 +499,36 @@ def _fmt_ts(ms) -> str:
         return str(ms)
 
 
-@novelai_balance_cmd.handle()
-async def handle_novelai_balance(matcher: Matcher, event: MessageEvent):
-    """超级用户查询 NovelAI 账户剩余 Anlas 额度"""
+def _fmt_duration(ms) -> str:
+    """将毫秒时长转为可读字符串"""
+    try:
+        s = float(ms) / 1000.0
+    except Exception:
+        return str(ms)
+    if s < 60:
+        return f"{s:.0f} 秒"
+    if s < 3600:
+        return f"{s / 60:.1f} 分钟"
+    if s < 86400:
+        return f"{s / 3600:.1f} 小时"
+    return f"{s / 86400:.1f} 天"
+
+
+async def _fetch_subscription() -> dict:
+    """拉取 NovelAI 订阅信息，失败抛 RuntimeError"""
     api_key = _get_api_key()
     if not api_key:
-        await matcher.finish(
-            Message([MessageSegment.text("⚠️ NovelAI API Key 未配置，无法查询额度")])
-        )
-
+        raise RuntimeError("NovelAI API Key 未配置，无法查询额度")
     headers = {
         "Authorization": f"Bearer {api_key}",
         "User-Agent": _NOVELAI_UA,
     }
-
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(NOVELAI_ACCOUNT_ENDPOINT, headers=headers)
     except httpx.HTTPError as e:
         logger.error(f"NovelAI 额度查询请求失败：{e}")
-        await matcher.finish(Message([MessageSegment.text(f"❌ 请求 NovelAI 失败：{e}")]))
-
+        raise RuntimeError(f"请求 NovelAI 失败：{e}")
     if resp.status_code != 200:
         try:
             err = resp.json()
@@ -526,14 +536,20 @@ async def handle_novelai_balance(matcher: Matcher, event: MessageEvent):
         except Exception:
             msg = resp.text[:300]
         logger.error(f"NovelAI 额度查询 HTTP {resp.status_code}: {msg}")
-        await matcher.finish(
-            Message([MessageSegment.text(f"❌ 额度查询失败（HTTP {resp.status_code}）：{msg}")])
-        )
-
+        raise RuntimeError(f"额度查询失败（HTTP {resp.status_code}）：{msg}")
     try:
-        data = resp.json()
+        return resp.json()
     except Exception:
-        await matcher.finish(Message([MessageSegment.text("❌ 无法解析 NovelAI 返回的额度数据")]))
+        raise RuntimeError("无法解析 NovelAI 返回的订阅数据")
+
+
+@novelai_balance_cmd.handle()
+async def handle_novelai_balance(matcher: Matcher, event: MessageEvent):
+    """超级用户查询 NovelAI 账户剩余 Anlas 额度"""
+    try:
+        data = await _fetch_subscription()
+    except RuntimeError as e:
+        await matcher.finish(Message([MessageSegment.text(f"❌ {e}")]))
         return
 
     tier = data.get("tier", 0)
@@ -554,5 +570,53 @@ async def handle_novelai_balance(matcher: Matcher, event: MessageEvent):
     ]
     if expires is not None:
         lines.append(f"订阅到期：{_fmt_ts(expires)}")
+
+    await matcher.finish(Message([MessageSegment.text("\n".join(lines))]))
+
+
+# ========== ai画图限制 查询指令（仅超级用户） ==========
+# 查询 Opus 订阅附带的「免费 NovelAI 扩散 V5 世代」额度（随订阅自动补足）
+# 注：API 仅返回剩余百分比，不返回具体可生成张数（张数由客户端按当前分辨率/步数估算）
+
+novelai_limit_cmd = on_command(
+    "ai画图限制",
+    aliases={"ai生图限制", "ai绘画限制", "ai绘图限制", "ai画图免费额度"},
+    permission=SUPERUSER,
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+@novelai_limit_cmd.handle()
+async def handle_novelai_limit(matcher: Matcher, event: MessageEvent):
+    """超级用户查询 Opus 免费 V5 世代生成额度"""
+    try:
+        data = await _fetch_subscription()
+    except RuntimeError as e:
+        await matcher.finish(Message([MessageSegment.text(f"❌ {e}")]))
+        return
+
+    tier = data.get("tier", 0)
+    tier_name = (data.get("tier_name") or data.get("tierName")
+                 or _TIER_NAMES.get(tier) or f"tier{tier}")
+    usage = data.get("usage") or {}
+    percent = usage.get("percent")
+    is_negative = usage.get("isNegative", False)
+    next_ms = usage.get("timeUntilNextPercent")
+
+    lines = [
+        "🎯 Opus 免费 V5 世代额度",
+        f"订阅档位：{tier_name}（tier {tier}）",
+    ]
+    if percent is not None:
+        lines.append(f"免费额度剩余：{percent}%")
+    else:
+        lines.append("免费额度：暂无数据")
+    if is_negative:
+        lines.append("⚠️ 已透支，超出部分将消耗 Anlas 生成")
+    if next_ms is not None:
+        lines.append(f"距离下次自动补足：{_fmt_duration(next_ms)}后")
+    lines.append("（具体可生成张数由客户端按当前分辨率/步数估算，API 仅提供剩余百分比）")
 
     await matcher.finish(Message([MessageSegment.text("\n".join(lines))]))
