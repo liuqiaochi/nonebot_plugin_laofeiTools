@@ -397,18 +397,18 @@ async def handle_novelai_help(matcher: Matcher, event: MessageEvent):
         "开启ai画图 / 关闭ai画图\n"
         "别名：开启ai生图…、关闭ai生图…\n\n"
         "【切换模型（仅超级用户）】\n"
-        "ai模型 / ai模型 v4.5 / ai模型 v3 …\n"
-        "发送「ai模型」可查看当前模型与全部可用列表\n\n"
+        "ai画图模型 / ai画图模型 v4.5 / ai画图模型 v3 …\n"
+        "发送「ai画图模型」可查看当前模型与全部可用列表\n\n"
         "默认尺寸 832×1216，默认模型 nai-diffusion-4-5-curated。"
     )
     await matcher.finish(Message([MessageSegment.text(text)]))
 
 
-# ========== ai模型 切换指令（仅超级用户） ==========
+# ========== ai画图模型 切换指令（仅超级用户） ==========
 
 novelai_model_cmd = on_command(
-    "ai模型",
-    aliases={"ai切换模型", "切换ai模型", "nai模型"},
+    "ai画图模型",
+    aliases={"ai绘画模型", "ai绘图模型", "切换ai画图模型"},
     permission=SUPERUSER,
     priority=5,
     block=True,
@@ -437,18 +437,18 @@ async def handle_set_model(matcher: Matcher, event: MessageEvent, args: Message 
         lines = [
             f"当前本群 ai画图 模型：{cur}（别名 {_model_alias(cur)}）",
             "",
-            "可用模型（发送「ai模型 <别名>」切换）：",
+            "可用模型（发送「ai画图模型 <别名>」切换）：",
         ]
         for alias, raw in NOVELAI_MODEL_ALIASES.items():
             lines.append(f"  {alias}  ->  {raw}")
         lines.append("")
-        lines.append("也可直接发送原始模型名，如：ai模型 nai-diffusion-3")
+        lines.append("也可直接发送原始模型名，如：ai画图模型 nai-diffusion-3")
         await matcher.finish(Message([MessageSegment.text("\n".join(lines))]))
 
     resolved = _resolve_model(key)
     if not resolved:
         await matcher.finish(
-            Message([MessageSegment.text(f"❌ 未知模型「{key}」，发送「ai模型」查看可用列表")])
+            Message([MessageSegment.text(f"❌ 未知模型「{key}」，发送「ai画图模型」查看可用列表")])
         )
 
     set_novelai_model(group_id, resolved)
