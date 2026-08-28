@@ -32,6 +32,7 @@ from ..config import (
     get_novelai_model,
     set_novelai_model,
 )
+from .help_image import render_help_image
 
 # ========== 配置 ==========
 
@@ -384,24 +385,26 @@ novelai_help_cmd = on_command(
 
 @novelai_help_cmd.handle()
 async def handle_novelai_help(matcher: Matcher, event: MessageEvent):
-    """返回 ai画图 完整使用帮助"""
-    text = (
-        "🎨 AI 画图帮助（基于 NovelAI）\n"
-        "仅群聊可用，默认关闭，需超级管理员开启。\n\n"
-        "【使用】\n"
-        "ai画图 <提示词>\n"
-        "别名：ai生图 / ai绘画 / ai绘图\n"
-        "支持用 | 分隔负面提示词：\n"
-        "  ai画图 1girl, cat ears | bad hands, blurry\n\n"
-        "【开启 / 关闭（仅超级用户）】\n"
-        "开启ai画图 / 关闭ai画图\n"
-        "别名：开启ai生图…、关闭ai生图…\n\n"
-        "【切换模型（仅超级用户）】\n"
-        "ai画图模型 / ai画图模型 v4.5 / ai画图模型 v3 …\n"
-        "发送「ai画图模型」可查看当前模型与全部可用列表\n\n"
-        "默认尺寸 832×1216，默认模型 nai-diffusion-4-5-curated。"
-    )
-    await matcher.finish(Message([MessageSegment.text(text)]))
+    """返回 ai画图 完整使用帮助（图片形式，与 lg帮助 风格一致）"""
+    sections = [
+        ("__text__", "仅群聊可用，默认关闭，需超级管理员开启。"),
+        ("使用", [
+            ("ai画图 <提示词>", "根据提示词生成图片"),
+            ("ai生图 / ai绘画 / ai绘图", "ai画图 的别名"),
+            ("ai画图 提示词 | 负面词", "用 | 分隔负面提示词"),
+        ]),
+        ("开启 / 关闭（仅超级用户）", [
+            ("开启ai画图 / 关闭ai画图", "别名：开启ai生图…、关闭ai生图…"),
+        ]),
+        ("切换模型（仅超级用户）", [
+            ("ai画图模型", "查看当前模型与全部可用列表"),
+            ("ai画图模型 v4.5 / v4 / v5", "切换模型（v4.5 / v4 / v5 等）"),
+            ("ai画图模型 v3 / v2 / furry", "切换至旧版 / 福瑞模型"),
+        ]),
+        ("__text__", "默认尺寸 832×1216，默认模型 nai-diffusion-4-5-curated。"),
+    ]
+    img_b64 = render_help_image("AI 画图帮助", sections, footer="AI 画图 · NovelAI")
+    await matcher.finish(MessageSegment.image(f"base64://{img_b64}"))
 
 
 # ========== ai画图模型 切换指令（仅超级用户） ==========
