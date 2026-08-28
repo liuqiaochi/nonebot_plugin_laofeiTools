@@ -26,6 +26,10 @@ class Config(BaseModel):
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-v4-flash"
 
+    # NovelAI 画图配置
+    novelai_api_key: str = ""
+    novelai_model: str = "nai-diffusion-4-5-curated"
+
 
 # 数据文件路径（锚定项目根目录，不依赖运行时 CWD，避免覆盖文件后数据丢失）
 DATA_DIR = Path("data/laofei_tools")
