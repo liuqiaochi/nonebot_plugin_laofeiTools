@@ -13,10 +13,23 @@ import zipfile
 
 import httpx
 from nonebot import on_command, get_driver
-from nonebot.adapters.onebot.v11 import Message, MessageEvent, MessageSegment
+from nonebot.adapters.onebot.v11 import (
+    GroupMessageEvent,
+    Message,
+    MessageEvent,
+    MessageSegment,
+    PrivateMessageEvent,
+)
 from nonebot.log import logger
 from nonebot.matcher import Matcher
 from nonebot.params import CommandArg
+from nonebot.permission import SUPERUSER
+
+from ..config import (
+    is_novelai_group_enabled,
+    enable_novelai_group,
+    disable_novelai_group,
+)
 
 # ========== 配置 ==========
 
@@ -154,7 +167,25 @@ novelai_cmd = on_command(
 
 @novelai_cmd.handle()
 async def handle_novelai(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()):
-    """处理 novelai 画图指令"""
+    """处理 novelai 画图指令（仅群聊可用，需超管开启）"""
+    # 仅群聊可用
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish(
+            Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("⚠️ novelai 画图仅支持在群聊中使用"),
+            ])
+        )
+
+    group_id = str(event.group_id)
+    if not is_novelai_group_enabled(group_id):
+        await matcher.finish(
+            Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("⚠️ 本群未开启 NovelAI 画图功能（需超级管理员发送「开启novelai」开启）"),
+            ])
+        )
+
     raw = args.extract_plain_text().strip()
     if not raw:
         await matcher.finish(
@@ -244,3 +275,49 @@ async def handle_novelai(matcher: Matcher, event: MessageEvent, args: Message = 
     b64 = base64.b64encode(img_bytes).decode()
     logger.info(f"NovelAI 图片生成成功，大小 {len(img_bytes)} 字节")
     await matcher.finish(Message([MessageSegment.image(f"base64://{b64}")]))
+
+
+# ========== 开启 / 关闭 群聊 NovelAI 画图（仅超级用户） ==========
+
+novelai_on_cmd = on_command(
+    "开启novelai",
+    aliases={"开启NovelAI", "开启na画图", "开启NAI画图"},
+    permission=SUPERUSER,
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+@novelai_on_cmd.handle()
+async def handle_enable_novelai(matcher: Matcher, event: MessageEvent):
+    """超级用户开启本群 NovelAI 画图功能"""
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish("请在群聊中发送此指令。")
+    group_id = str(event.group_id)
+    if is_novelai_group_enabled(group_id):
+        await matcher.finish("NovelAI 画图功能已经开启。")
+    enable_novelai_group(group_id)
+    await matcher.finish("✅ 已开启本群 NovelAI 画图功能，发送 novelai <提示词> 即可使用！")
+
+
+novelai_off_cmd = on_command(
+    "关闭novelai",
+    aliases={"关闭NovelAI", "关闭na画图", "关闭NAI画图"},
+    permission=SUPERUSER,
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+@novelai_off_cmd.handle()
+async def handle_disable_novelai(matcher: Matcher, event: MessageEvent):
+    """超级用户关闭本群 NovelAI 画图功能"""
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish("请在群聊中发送此指令。")
+    group_id = str(event.group_id)
+    if not is_novelai_group_enabled(group_id):
+        await matcher.finish("NovelAI 画图功能已经关闭。")
+    disable_novelai_group(group_id)
+    await matcher.finish("❌ 已关闭本群 NovelAI 画图功能。")

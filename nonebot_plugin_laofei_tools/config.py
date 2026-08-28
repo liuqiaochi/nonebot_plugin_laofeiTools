@@ -207,3 +207,46 @@ def remove_ai_blacklist(user_id: str) -> None:
     """将用户移出 AI 黑名单"""
     _ai_blacklist.discard(user_id)
     _save_ai_blacklist(_ai_blacklist)
+
+
+# ========== NovelAI 画图群聊开关（默认关闭） ==========
+
+NOVELAI_ENABLED_FILE = DATA_DIR / "novelai_enabled_groups.json"
+
+_novelai_enabled_groups: Set[str] = set()
+
+
+def _load_novelai_enabled_groups() -> Set[str]:
+    _ensure_data_dir()
+    if NOVELAI_ENABLED_FILE.exists():
+        try:
+            with open(NOVELAI_ENABLED_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return set(data.get("enabled_groups", []))
+        except Exception:
+            return set()
+    return set()
+
+
+def _save_novelai_enabled_groups(groups: Set[str]):
+    safe_json_save(NOVELAI_ENABLED_FILE, {"enabled_groups": list(groups)})
+
+
+_novelai_enabled_groups = _load_novelai_enabled_groups()
+
+
+def is_novelai_group_enabled(group_id: str) -> bool:
+    """检查群聊是否开启了 NovelAI 画图功能（默认关闭）"""
+    return group_id in _novelai_enabled_groups
+
+
+def enable_novelai_group(group_id: str) -> None:
+    """开启群聊 NovelAI 画图功能"""
+    _novelai_enabled_groups.add(group_id)
+    _save_novelai_enabled_groups(_novelai_enabled_groups)
+
+
+def disable_novelai_group(group_id: str) -> None:
+    """关闭群聊 NovelAI 画图功能"""
+    _novelai_enabled_groups.discard(group_id)
+    _save_novelai_enabled_groups(_novelai_enabled_groups)
