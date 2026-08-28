@@ -52,6 +52,8 @@ NOVELAI_MODEL_ALIASES = {
     "v4.5-full": "nai-diffusion-4-5",
     "v4": "nai-diffusion-4-curated-preview",
     "v4-full": "nai-diffusion-4-full",
+    "v5": "nai-diffusion-5-full",
+    "v5-full": "nai-diffusion-5-full",
     "v3": "nai-diffusion-3",
     "v2": "nai-diffusion-2",
     "furry": "nai-diffusion-furry-3",
@@ -106,8 +108,8 @@ def _resolve_model(key: str):
 
 
 def _is_v4_model(model: str) -> bool:
-    """v4 / v4.5 系列使用 v4_prompt 结构，其余（v3/v2/furry）使用旧 prompt/uc 结构"""
-    return model.startswith("nai-diffusion-4")
+    """v4 / v4.5 / v5 系列使用 v4_prompt 结构，其余（v3/v2/furry）使用旧 prompt/uc 结构"""
+    return model.startswith("nai-diffusion-4") or model.startswith("nai-diffusion-5")
 
 
 def _build_payload(prompt: str, negative: str, model: str) -> dict:
