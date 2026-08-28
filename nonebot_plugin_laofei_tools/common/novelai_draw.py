@@ -321,3 +321,33 @@ async def handle_disable_novelai(matcher: Matcher, event: MessageEvent):
         await matcher.finish("ai画图 功能已经关闭。")
     disable_novelai_group(group_id)
     await matcher.finish("❌ 已关闭本群 ai画图 功能。")
+
+
+# ========== ai画图 独立帮助指令 ==========
+
+novelai_help_cmd = on_command(
+    "ai画图帮助",
+    aliases={"ai生图帮助", "ai绘画帮助", "ai绘图帮助"},
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+@novelai_help_cmd.handle()
+async def handle_novelai_help(matcher: Matcher, event: MessageEvent):
+    """返回 ai画图 完整使用帮助"""
+    text = (
+        "🎨 AI 画图帮助（基于 NovelAI）\n"
+        "仅群聊可用，默认关闭，需超级管理员开启。\n\n"
+        "【使用】\n"
+        "ai画图 <提示词>\n"
+        "别名：ai生图 / ai绘画 / ai绘图\n"
+        "支持用 | 分隔负面提示词：\n"
+        "  ai画图 1girl, cat ears | bad hands, blurry\n\n"
+        "【开启 / 关闭（仅超级用户）】\n"
+        "开启ai画图 / 关闭ai画图\n"
+        "别名：开启ai生图…、关闭ai生图…\n\n"
+        "默认尺寸 832×1216，模型 nai-diffusion-4-5-curated。"
+    )
+    await matcher.finish(Message([MessageSegment.text(text)]))
