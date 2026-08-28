@@ -29,6 +29,8 @@ from ..config import (
     is_novelai_group_enabled,
     enable_novelai_group,
     disable_novelai_group,
+    get_novelai_model,
+    set_novelai_model,
 )
 
 # ========== 配置 ==========
@@ -43,6 +45,18 @@ DEFAULT_STEPS = 28
 DEFAULT_SCALE = 5.0
 DEFAULT_SAMPLER = "k_euler_ancestral"
 DEFAULT_NOISE_SCHEDULE = "karras"
+
+# 模型别名 -> 原始模型名
+NOVELAI_MODEL_ALIASES = {
+    "v4.5": "nai-diffusion-4-5-curated",
+    "v4.5-full": "nai-diffusion-4-5",
+    "v4": "nai-diffusion-4-curated-preview",
+    "v4-full": "nai-diffusion-4-full",
+    "v3": "nai-diffusion-3",
+    "v2": "nai-diffusion-2",
+    "furry": "nai-diffusion-furry-3",
+}
+_VALID_MODELS = set(NOVELAI_MODEL_ALIASES.values())
 
 # 默认负面提示词（质量过滤）
 DEFAULT_NEGATIVE = (
@@ -73,12 +87,31 @@ def _get_api_key() -> str:
     return getattr(get_driver().config, "novelai_api_key", "") or ""
 
 
-def _get_model() -> str:
+def _get_model(group_id: str) -> str:
+    """解析本群当前模型（群级设置优先，否则 config 默认）"""
+    raw = get_novelai_model(group_id)
+    if raw:
+        return raw
     return getattr(get_driver().config, "novelai_model", "") or DEFAULT_MODEL
 
 
-def _build_payload(prompt: str, negative: str) -> dict:
-    """构造 NovelAI v4.5 文生图请求体"""
+def _resolve_model(key: str):
+    """将用户输入的别名/原始名解析为原始模型名，无法识别返回 None"""
+    key = (key or "").strip().lower()
+    if key in NOVELAI_MODEL_ALIASES:
+        return NOVELAI_MODEL_ALIASES[key]
+    if key in _VALID_MODELS:
+        return key
+    return None
+
+
+def _is_v4_model(model: str) -> bool:
+    """v4 / v4.5 系列使用 v4_prompt 结构，其余（v3/v2/furry）使用旧 prompt/uc 结构"""
+    return model.startswith("nai-diffusion-4")
+
+
+def _build_payload(prompt: str, negative: str, model: str) -> dict:
+    """构造 NovelAI 文生图请求体（按模型版本自动切换 payload 结构）"""
     # 自动追加质量标签（避免重复）
     base_caption = prompt.strip()
     low = base_caption.lower()
@@ -87,38 +120,48 @@ def _build_payload(prompt: str, negative: str) -> dict:
 
     neg_caption = negative.strip() if negative.strip() else DEFAULT_NEGATIVE
 
+    params = {
+        "characterPrompts": [],
+        "width": DEFAULT_WIDTH,
+        "height": DEFAULT_HEIGHT,
+        "steps": DEFAULT_STEPS,
+        "scale": DEFAULT_SCALE,
+        "sampler": DEFAULT_SAMPLER,
+        "noise_schedule": DEFAULT_NOISE_SCHEDULE,
+        "seed": random.randint(0, 2**31 - 1),
+        "n_samples": 1,
+        "qualityToggle": True,
+    }
+
+    if _is_v4_model(model):
+        # v4 / v4.5：结构化 v4_prompt
+        params["params_version"] = 3
+        params["v4_prompt"] = {
+            "caption": {
+                "base_caption": base_caption,
+                "char_captions": [],
+            },
+            "use_coords": False,
+            "use_order": True,
+        }
+        params["v4_negative_prompt"] = {
+            "caption": {
+                "base_caption": neg_caption,
+                "char_captions": [],
+            },
+            "legacy_uc": False,
+        }
+    else:
+        # v3 / v2 / furry：旧式 prompt / uc
+        params["params_version"] = 1
+        params["prompt"] = base_caption
+        params["uc"] = neg_caption
+
     return {
         "action": "generate",
         "input": base_caption,
-        "model": _get_model(),
-        "parameters": {
-            "v4_prompt": {
-                "caption": {
-                    "base_caption": base_caption,
-                    "char_captions": [],
-                },
-                "use_coords": False,
-                "use_order": True,
-            },
-            "v4_negative_prompt": {
-                "caption": {
-                    "base_caption": neg_caption,
-                    "char_captions": [],
-                },
-                "legacy_uc": False,
-            },
-            "characterPrompts": [],
-            "width": DEFAULT_WIDTH,
-            "height": DEFAULT_HEIGHT,
-            "steps": DEFAULT_STEPS,
-            "scale": DEFAULT_SCALE,
-            "sampler": DEFAULT_SAMPLER,
-            "noise_schedule": DEFAULT_NOISE_SCHEDULE,
-            "seed": random.randint(0, 2**31 - 1),
-            "n_samples": 1,
-            "params_version": 3,
-            "qualityToggle": True,
-        },
+        "model": model,
+        "parameters": params,
     }
 
 
@@ -216,7 +259,7 @@ async def handle_novelai(matcher: Matcher, event: MessageEvent, args: Message = 
 
     await matcher.send(Message([MessageSegment.text("🎨 正在调用 NovelAI 生成图片，请稍候…")]))
 
-    payload = _build_payload(positive, negative)
+    payload = _build_payload(positive, negative, _get_model(group_id))
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -274,7 +317,10 @@ async def handle_novelai(matcher: Matcher, event: MessageEvent, args: Message = 
 
     b64 = base64.b64encode(img_bytes).decode()
     logger.info(f"NovelAI 图片生成成功，大小 {len(img_bytes)} 字节")
-    await matcher.finish(Message([MessageSegment.image(f"base64://{b64}")]))
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.image(f"base64://{b64}"),
+    ]))
 
 
 # ========== 开启 / 关闭 群聊 NovelAI 画图（仅超级用户） ==========
@@ -348,6 +394,62 @@ async def handle_novelai_help(matcher: Matcher, event: MessageEvent):
         "【开启 / 关闭（仅超级用户）】\n"
         "开启ai画图 / 关闭ai画图\n"
         "别名：开启ai生图…、关闭ai生图…\n\n"
-        "默认尺寸 832×1216，模型 nai-diffusion-4-5-curated。"
+        "【切换模型（仅超级用户）】\n"
+        "ai模型 / ai模型 v4.5 / ai模型 v3 …\n"
+        "发送「ai模型」可查看当前模型与全部可用列表\n\n"
+        "默认尺寸 832×1216，默认模型 nai-diffusion-4-5-curated。"
     )
     await matcher.finish(Message([MessageSegment.text(text)]))
+
+
+# ========== ai模型 切换指令（仅超级用户） ==========
+
+novelai_model_cmd = on_command(
+    "ai模型",
+    aliases={"ai切换模型", "切换ai模型", "nai模型"},
+    permission=SUPERUSER,
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+def _model_alias(model: str) -> str:
+    """返回模型名对应的别名（找不到则原样返回）"""
+    for alias, raw in NOVELAI_MODEL_ALIASES.items():
+        if raw == model:
+            return alias
+    return model
+
+
+@novelai_model_cmd.handle()
+async def handle_set_model(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()):
+    """超级用户切换本群 ai画图 模型；不带参数时列出当前模型与可用列表"""
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish("请在群聊中发送此指令。")
+    group_id = str(event.group_id)
+
+    key = args.extract_plain_text().strip()
+    if not key:
+        cur = _get_model(group_id)
+        lines = [
+            f"当前本群 ai画图 模型：{cur}（别名 {_model_alias(cur)}）",
+            "",
+            "可用模型（发送「ai模型 <别名>」切换）：",
+        ]
+        for alias, raw in NOVELAI_MODEL_ALIASES.items():
+            lines.append(f"  {alias}  ->  {raw}")
+        lines.append("")
+        lines.append("也可直接发送原始模型名，如：ai模型 nai-diffusion-3")
+        await matcher.finish(Message([MessageSegment.text("\n".join(lines))]))
+
+    resolved = _resolve_model(key)
+    if not resolved:
+        await matcher.finish(
+            Message([MessageSegment.text(f"❌ 未知模型「{key}」，发送「ai模型」查看可用列表")])
+        )
+
+    set_novelai_model(group_id, resolved)
+    await matcher.finish(
+        Message([MessageSegment.text(f"✅ 已切换本群 ai画图 模型为 {resolved}（别名 {_model_alias(resolved)}）")])
+    )

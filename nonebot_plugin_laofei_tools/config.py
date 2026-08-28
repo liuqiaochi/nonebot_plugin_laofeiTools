@@ -250,3 +250,39 @@ def disable_novelai_group(group_id: str) -> None:
     """关闭群聊 NovelAI 画图功能"""
     _novelai_enabled_groups.discard(group_id)
     _save_novelai_enabled_groups(_novelai_enabled_groups)
+
+
+# ========== NovelAI 画图模型（群级，默认回退到 config.novelai_model） ==========
+
+NOVELAI_MODEL_FILE = DATA_DIR / "novelai_model_groups.json"
+
+_novelai_model_groups: dict = {}
+
+
+def _load_novelai_model_groups() -> dict:
+    _ensure_data_dir()
+    if NOVELAI_MODEL_FILE.exists():
+        try:
+            with open(NOVELAI_MODEL_FILE, "r", encoding="utf-8") as f:
+                return json.load(f).get("model_groups", {})
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_novelai_model_groups(data: dict):
+    safe_json_save(NOVELAI_MODEL_FILE, {"model_groups": data})
+
+
+_novelai_model_groups = _load_novelai_model_groups()
+
+
+def get_novelai_model(group_id: str) -> str:
+    """返回本群当前模型（空字符串表示使用 config 默认）"""
+    return _novelai_model_groups.get(group_id, "")
+
+
+def set_novelai_model(group_id: str, model: str) -> None:
+    """设置本群当前模型（传入原始模型名）"""
+    _novelai_model_groups[group_id] = model
+    _save_novelai_model_groups(_novelai_model_groups)
