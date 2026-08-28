@@ -42,6 +42,8 @@ NOVELAI_ACCOUNT_ENDPOINT = "https://image.novelai.net/user/subscription"
 
 # tier 数字 -> 订阅档位名称（/user/subscription 仅返回 tier 数字）
 _TIER_NAMES = {0: "Paper", 1: "Tablet", 2: "Scroll", 3: "Opus"}
+# Opus 免费 V5 世代满额估算张数（标准 V5 正常分辨率 832×1216、28 步下的经验值，用于把剩余百分比折算为张数）
+_FREE_V5_FULL_IMAGES = 1730
 
 # 浏览器 UA，规避 NovelAI 反爬拦截（Cloudflare 403）
 _NOVELAI_UA = (
@@ -610,13 +612,14 @@ async def handle_novelai_limit(matcher: Matcher, event: MessageEvent):
         f"订阅档位：{tier_name}（tier {tier}）",
     ]
     if percent is not None:
-        lines.append(f"免费额度剩余：{percent}%")
+        remaining = round(percent / 100.0 * _FREE_V5_FULL_IMAGES)
+        lines.append(f"免费额度剩余：{percent}%（约 {remaining} 张图片）")
     else:
         lines.append("免费额度：暂无数据")
     if is_negative:
         lines.append("⚠️ 已透支，超出部分将消耗 Anlas 生成")
     if next_ms is not None:
         lines.append(f"距离下次自动补足：{_fmt_duration(next_ms)}后")
-    lines.append("（具体可生成张数由客户端按当前分辨率/步数估算，API 仅提供剩余百分比）")
+    lines.append(f"（张数按标准 V5 正常分辨率 28 步估算，满额约 {_FREE_V5_FULL_IMAGES} 张；实际随分辨率/步数变化）")
 
     await matcher.finish(Message([MessageSegment.text("\n".join(lines))]))
