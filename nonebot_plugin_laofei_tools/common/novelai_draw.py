@@ -37,6 +37,17 @@ from .help_image import render_help_image
 # ========== 配置 ==========
 
 NOVELAI_ENDPOINT = "https://image.novelai.net/ai/generate-image"
+# 账户 / 额度查询端点（注意：同为 image.novelai.net，api.novelai.net 已废弃）
+NOVELAI_ACCOUNT_ENDPOINT = "https://image.novelai.net/user/subscription"
+
+# tier 数字 -> 订阅档位名称（/user/subscription 仅返回 tier 数字）
+_TIER_NAMES = {0: "Paper", 1: "Tablet", 2: "Scroll", 3: "Opus"}
+
+# 浏览器 UA，规避 NovelAI 反爬拦截（Cloudflare 403）
+_NOVELAI_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
 
 # 默认生成参数
 DEFAULT_MODEL = "nai-diffusion-4-5-curated"
@@ -401,6 +412,9 @@ async def handle_novelai_help(matcher: Matcher, event: MessageEvent):
             ("ai画图模型 v4.5 / v4 / v5", "切换模型（v4.5 / v4 / v5 等）"),
             ("ai画图模型 v3 / v2 / furry", "切换至旧版 / 福瑞模型"),
         ]),
+        ("查询额度（仅超级用户）", [
+            ("ai画图额度 / ai画图余额", "查询账户剩余 Anlas 与订阅到期时间"),
+        ]),
         ("__text__", "默认尺寸 832×1216，默认模型 nai-diffusion-4-5-curated。"),
     ]
     img_b64 = render_help_image("AI 画图帮助", sections, footer="AI 画图 · NovelAI")
@@ -458,3 +472,87 @@ async def handle_set_model(matcher: Matcher, event: MessageEvent, args: Message 
     await matcher.finish(
         Message([MessageSegment.text(f"✅ 已切换本群 ai画图 模型为 {resolved}（别名 {_model_alias(resolved)}）")])
     )
+
+
+# ========== ai画图额度 查询指令（仅超级用户） ==========
+
+novelai_balance_cmd = on_command(
+    "ai画图额度",
+    aliases={"ai生图额度", "ai绘画额度", "ai绘图额度", "ai画图余额"},
+    permission=SUPERUSER,
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+def _fmt_ts(ms) -> str:
+    """将毫秒时间戳转为可读日期，无法解析则返回原值字符串"""
+    try:
+        ts = float(ms)
+        if ts > 1e12:  # 毫秒级
+            ts /= 1000
+        import datetime
+        return datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return str(ms)
+
+
+@novelai_balance_cmd.handle()
+async def handle_novelai_balance(matcher: Matcher, event: MessageEvent):
+    """超级用户查询 NovelAI 账户剩余 Anlas 额度"""
+    api_key = _get_api_key()
+    if not api_key:
+        await matcher.finish(
+            Message([MessageSegment.text("⚠️ NovelAI API Key 未配置，无法查询额度")])
+        )
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "User-Agent": _NOVELAI_UA,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(NOVELAI_ACCOUNT_ENDPOINT, headers=headers)
+    except httpx.HTTPError as e:
+        logger.error(f"NovelAI 额度查询请求失败：{e}")
+        await matcher.finish(Message([MessageSegment.text(f"❌ 请求 NovelAI 失败：{e}")]))
+
+    if resp.status_code != 200:
+        try:
+            err = resp.json()
+            msg = err.get("message") or err.get("error") or str(err)
+        except Exception:
+            msg = resp.text[:300]
+        logger.error(f"NovelAI 额度查询 HTTP {resp.status_code}: {msg}")
+        await matcher.finish(
+            Message([MessageSegment.text(f"❌ 额度查询失败（HTTP {resp.status_code}）：{msg}")])
+        )
+
+    try:
+        data = resp.json()
+    except Exception:
+        await matcher.finish(Message([MessageSegment.text("❌ 无法解析 NovelAI 返回的额度数据")]))
+        return
+
+    tier = data.get("tier", 0)
+    tier_name = (data.get("tier_name") or data.get("tierName")
+                 or _TIER_NAMES.get(tier) or f"tier{tier}")
+    training = data.get("trainingStepsLeft") or data.get("training_steps_left") or {}
+    fixed = int(training.get("fixedTrainingStepsLeft") or training.get("fixed_training_steps_left") or 0)
+    purchased = int(training.get("purchasedTrainingSteps") or training.get("purchased_training_steps") or 0)
+    total = fixed + purchased
+    expires = data.get("expiresAt") or data.get("expires_at")
+
+    lines = [
+        "💰 NovelAI 账户额度",
+        f"订阅档位：{tier_name}（tier {tier}）",
+        f"剩余 Anlas：{total}",
+        f"  ├ 包月固定：{fixed}",
+        f"  └ 额外购买：{purchased}",
+    ]
+    if expires is not None:
+        lines.append(f"订阅到期：{_fmt_ts(expires)}")
+
+    await matcher.finish(Message([MessageSegment.text("\n".join(lines))]))
