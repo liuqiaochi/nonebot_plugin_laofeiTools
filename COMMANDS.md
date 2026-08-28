@@ -142,9 +142,9 @@
 
 | 指令 | 别名 | 权限 | 说明 |
 |------|------|------|------|
-| `novelai <提示词>` | na画图、na生图、ai画图、novelai画图 | 👥 | 根据提示词生成图片；支持用 `\|` 分隔负面提示词，如 `novelai 1girl, cat ears \| bad hands, blurry` |
-| `开启novelai` | 开启NovelAI、开启na画图 | 🔑 | 超级用户开启本群 NovelAI 画图功能 |
-| `关闭novelai` | 关闭NovelAI、关闭na画图 | 🔑 | 超级用户关闭本群 NovelAI 画图功能 |
+| `ai画图 <提示词>` | ai生图、ai绘画、ai绘图 | 👥(需超管开启) | 根据提示词生成图片；支持用 `\|` 分隔负面提示词，如 `ai画图 1girl, cat ears \| bad hands, blurry` |
+| `开启ai画图` | 开启ai生图、开启ai绘画、开启ai绘图 | 🔑 超管 | 超级用户开启本群 ai画图 功能 |
+| `关闭ai画图` | 关闭ai生图、关闭ai绘画、关闭ai绘图 | 🔑 超管 | 超级用户关闭本群 ai画图 功能 |
 
 ---
 

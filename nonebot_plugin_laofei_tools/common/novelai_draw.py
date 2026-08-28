@@ -1,9 +1,9 @@
 """
 NovelAI 画图模块 — 调用 NovelAI 文生图 API
 
-触发方式：novelai <提示词>   （别名：na画图 / na生图 / ai画图 / novelai画图）
-提示词支持用竖线 `|` 分隔负面提示词，例如：novelai 1girl, cat ears | bad hands, blurry
-权限：群聊与私聊均可使用
+触发方式：ai画图 <提示词>   （别名：ai生图 / ai绘画 / ai绘图）
+提示词支持用竖线 `|` 分隔负面提示词，例如：ai画图 1girl, cat ears | bad hands, blurry
+权限：仅群聊可用，需超级管理员开启
 """
 
 import base64
@@ -157,8 +157,8 @@ def _extract_image(resp: httpx.Response) -> bytes:
 # ========== 指令注册 ==========
 
 novelai_cmd = on_command(
-    "novelai",
-    aliases={"na画图", "na生图", "ai画图", "novelai画图"},
+    "ai画图",
+    aliases={"ai生图", "ai绘画", "ai绘图"},
     priority=5,
     block=True,
     force_whitespace=True,
@@ -173,7 +173,7 @@ async def handle_novelai(matcher: Matcher, event: MessageEvent, args: Message = 
         await matcher.finish(
             Message([
                 MessageSegment.reply(event.message_id),
-                MessageSegment.text("⚠️ novelai 画图仅支持在群聊中使用"),
+                MessageSegment.text("⚠️ ai画图 仅支持在群聊中使用"),
             ])
         )
 
@@ -182,7 +182,7 @@ async def handle_novelai(matcher: Matcher, event: MessageEvent, args: Message = 
         await matcher.finish(
             Message([
                 MessageSegment.reply(event.message_id),
-                MessageSegment.text("⚠️ 本群未开启 NovelAI 画图功能（需超级管理员发送「开启novelai」开启）"),
+                MessageSegment.text("⚠️ 本群未开启 ai画图 功能（需超级管理员发送「开启ai画图」开启）"),
             ])
         )
 
@@ -192,9 +192,9 @@ async def handle_novelai(matcher: Matcher, event: MessageEvent, args: Message = 
             Message([
                 MessageSegment.reply(event.message_id),
                 MessageSegment.text(
-                    "用法：novelai <提示词>\n"
-                    "示例：novelai 1girl, cat ears, masterpiece\n"
-                    "支持用 | 分隔负面提示词：novelai 1girl | bad hands, blurry"
+                    "用法：ai画图 <提示词>\n"
+                    "示例：ai画图 1girl, cat ears, masterpiece\n"
+                    "支持用 | 分隔负面提示词：ai画图 1girl | bad hands, blurry"
                 ),
             ])
         )
@@ -280,8 +280,8 @@ async def handle_novelai(matcher: Matcher, event: MessageEvent, args: Message = 
 # ========== 开启 / 关闭 群聊 NovelAI 画图（仅超级用户） ==========
 
 novelai_on_cmd = on_command(
-    "开启novelai",
-    aliases={"开启NovelAI", "开启na画图", "开启NAI画图"},
+    "开启ai画图",
+    aliases={"开启ai生图", "开启ai绘画", "开启ai绘图"},
     permission=SUPERUSER,
     priority=5,
     block=True,
@@ -291,19 +291,19 @@ novelai_on_cmd = on_command(
 
 @novelai_on_cmd.handle()
 async def handle_enable_novelai(matcher: Matcher, event: MessageEvent):
-    """超级用户开启本群 NovelAI 画图功能"""
+    """超级用户开启本群 ai画图 功能"""
     if isinstance(event, PrivateMessageEvent):
         await matcher.finish("请在群聊中发送此指令。")
     group_id = str(event.group_id)
     if is_novelai_group_enabled(group_id):
-        await matcher.finish("NovelAI 画图功能已经开启。")
+        await matcher.finish("ai画图 功能已经开启。")
     enable_novelai_group(group_id)
-    await matcher.finish("✅ 已开启本群 NovelAI 画图功能，发送 novelai <提示词> 即可使用！")
+    await matcher.finish("✅ 已开启本群 ai画图 功能，发送 ai画图 <提示词> 即可使用！")
 
 
 novelai_off_cmd = on_command(
-    "关闭novelai",
-    aliases={"关闭NovelAI", "关闭na画图", "关闭NAI画图"},
+    "关闭ai画图",
+    aliases={"关闭ai生图", "关闭ai绘画", "关闭ai绘图"},
     permission=SUPERUSER,
     priority=5,
     block=True,
@@ -313,11 +313,11 @@ novelai_off_cmd = on_command(
 
 @novelai_off_cmd.handle()
 async def handle_disable_novelai(matcher: Matcher, event: MessageEvent):
-    """超级用户关闭本群 NovelAI 画图功能"""
+    """超级用户关闭本群 ai画图 功能"""
     if isinstance(event, PrivateMessageEvent):
         await matcher.finish("请在群聊中发送此指令。")
     group_id = str(event.group_id)
     if not is_novelai_group_enabled(group_id):
-        await matcher.finish("NovelAI 画图功能已经关闭。")
+        await matcher.finish("ai画图 功能已经关闭。")
     disable_novelai_group(group_id)
-    await matcher.finish("❌ 已关闭本群 NovelAI 画图功能。")
+    await matcher.finish("❌ 已关闭本群 ai画图 功能。")
