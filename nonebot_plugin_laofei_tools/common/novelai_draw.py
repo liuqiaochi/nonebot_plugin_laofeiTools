@@ -621,27 +621,40 @@ async def handle_novelai_balance(matcher: Matcher, event: MessageEvent):
     is_negative = usage.get("isNegative", False)
     next_ms = usage.get("timeUntilNextPercent")
 
-    lines = [
-        "💰 NovelAI 账户额度",
-        f"订阅档位：{tier_name}（tier {tier}）",
-        f"剩余 Anlas：{total}",
-        f"  ├ 包月固定：{fixed}",
-        f"  └ 额外购买：{purchased}",
-    ]
+    # 组装为图片返回（与 ai画图帮助 风格一致）
+    remaining = round(percent / 100.0 * _FREE_V5_FULL_IMAGES) if percent is not None else None
+
+    account_block = (
+        "💰 NovelAI 账户额度\n"
+        f"订阅档位：{tier_name}（tier {tier}）\n"
+        f"剩余 Anlas：{total}\n"
+        f"  · 包月固定：{fixed}\n"
+        f"  · 额外购买：{purchased}"
+    )
     if expires is not None:
-        lines.append(f"订阅到期：{_fmt_ts(expires)}")
+        account_block += f"\n订阅到期：{_fmt_ts(expires)}"
 
-    lines.append("")
-    lines.append("🎯 Opus 免费 V5 世代额度")
-    if percent is not None:
-        remaining = round(percent / 100.0 * _FREE_V5_FULL_IMAGES)
-        lines.append(f"免费额度剩余：{percent}%（约 {remaining} 张图片）")
+    free_lines = ["🎯 Opus 免费 V5 世代额度"]
+    if remaining is not None:
+        free_lines.append(f"免费额度剩余：{percent}%（约 {remaining} 张图片）")
     else:
-        lines.append("免费额度：暂无数据")
+        free_lines.append("免费额度：暂无数据")
     if is_negative:
-        lines.append("⚠️ 已透支，超出部分将消耗 Anlas 生成")
+        free_lines.append("⚠️ 已透支，超出部分将消耗 Anlas 生成")
     if next_ms is not None:
-        lines.append(f"距离下次自动补足：{_fmt_duration(next_ms)}后")
-    lines.append(f"（张数按标准 V5 正常分辨率 28 步估算，满额约 {_FREE_V5_FULL_IMAGES} 张；实际随分辨率/步数变化）")
+        free_lines.append(f"距离下次自动补足：{_fmt_duration(next_ms)}后")
+    free_lines.append(
+        f"（张数按标准 V5 正常分辨率 28 步估算，满额约 {_FREE_V5_FULL_IMAGES} 张；实际随分辨率/步数变化）"
+    )
+    free_block = "\n".join(free_lines)
 
-    await matcher.finish(Message([MessageSegment.text("\n".join(lines))]))
+    sections = [
+        ("__text__", account_block),
+        ("__text__", free_block),
+    ]
+    try:
+        img_b64 = render_help_image("AI 画图额度", sections, footer="AI 画图 · NovelAI")
+        await matcher.finish(MessageSegment.image(f"base64://{img_b64}"))
+    except Exception as e:
+        logger.error(f"ai画图额度 图片渲染失败，降级为文本：{e}")
+        await matcher.finish(Message([MessageSegment.text(f"{account_block}\n\n{free_block}")]))
