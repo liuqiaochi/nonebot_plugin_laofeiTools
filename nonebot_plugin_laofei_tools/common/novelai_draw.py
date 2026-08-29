@@ -348,21 +348,47 @@ async def handle_novelai(matcher: Matcher, event: MessageEvent, args: Message = 
         b64 = base64.b64encode(img_bytes).decode()
         logger.info(f"NovelAI 图片生成成功，大小 {len(img_bytes)} 字节")
 
-        # === 发送图片：先 send 并捕获异常，失败则给出提醒，避免静默无返回 ===
-        img_msg = Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.image(f"base64://{b64}"),
-        ])
+        # === 发送图片：以合并转发方式发出，失败则降级为普通回复 ===
+        img_seg = MessageSegment.image(f"base64://{b64}")
         try:
-            await matcher.send(img_msg)
-        except Exception as e:
-            logger.error(f"ai画图 图片发送失败：{e}")
-            await matcher.send(
-                Message([
-                    MessageSegment.reply(event.message_id),
-                    MessageSegment.text("❌ 图片发送失败，可能是图片过大或网络异常，请稍后重试。"),
-                ])
+            bot = matcher.bot
+            bot_name = "蓝色大肥鱼"
+            try:
+                bot_info = await bot.get_login_info()
+                bot_name = bot_info.get("nickname", "蓝色大肥鱼")
+            except Exception:
+                pass
+            group_id = getattr(event, "group_id", None)
+            forward_msgs = [{
+                "type": "node",
+                "data": {
+                    "name": bot_name,
+                    "uin": bot.self_id,
+                    "content": str(img_seg),
+                },
+            }]
+            await bot.call_api(
+                "send_group_forward_msg",
+                group_id=group_id,
+                messages=forward_msgs,
             )
+        except Exception as e:
+            logger.error(f"ai画图 合并转发发送失败，降级为普通回复：{e}")
+            try:
+                await matcher.send(
+                    Message([
+                        MessageSegment.reply(event.message_id),
+                        img_seg,
+                    ])
+                )
+            except Exception as e2:
+                logger.error(f"ai画图 图片发送失败：{e2}")
+                await matcher.send(
+                    Message([
+                        MessageSegment.reply(event.message_id),
+                        MessageSegment.text("❌ 图片发送失败，可能是图片过大或网络异常，请稍后重试。"),
+                    ])
+                )
         await matcher.finish()
 
 
