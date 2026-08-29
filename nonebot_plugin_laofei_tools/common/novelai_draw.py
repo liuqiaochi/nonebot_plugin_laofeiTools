@@ -468,8 +468,7 @@ async def handle_novelai_help(matcher: Matcher, event: MessageEvent):
             ("ai画图模型 v3 / v2 / furry", "切换至旧版 / 福瑞模型"),
         ]),
         ("查询额度（仅超级用户）", [
-            ("ai画图额度 / ai画图余额", "查询账户剩余 Anlas 与订阅到期时间"),
-            ("ai画图限制", "查询 Opus 免费 V5 世代额度（剩余百分比 / 透支 / 补足倒计时）"),
+            ("ai画图额度 / ai画图余额", "查询账户剩余 Anlas 与 Opus 免费 V5 额度"),
         ]),
         ("__text__", "默认尺寸 832×1216，默认模型 nai-diffusion-4-5-curated。"),
     ]
@@ -534,7 +533,8 @@ async def handle_set_model(matcher: Matcher, event: MessageEvent, args: Message 
 
 novelai_balance_cmd = on_command(
     "ai画图额度",
-    aliases={"ai生图额度", "ai绘画额度", "ai绘图额度", "ai画图余额"},
+    aliases={"ai生图额度", "ai绘画额度", "ai绘图额度", "ai画图余额",
+             "ai生图限制", "ai绘画限制", "ai绘图限制", "ai画图免费额度"},
     permission=SUPERUSER,
     priority=5,
     block=True,
@@ -600,7 +600,7 @@ async def _fetch_subscription() -> dict:
 
 @novelai_balance_cmd.handle()
 async def handle_novelai_balance(matcher: Matcher, event: MessageEvent):
-    """超级用户查询 NovelAI 账户剩余 Anlas 额度"""
+    """超级用户查询 NovelAI 账户剩余 Anlas 额度与 Opus 免费 V5 世代额度"""
     try:
         data = await _fetch_subscription()
     except RuntimeError as e:
@@ -616,6 +616,11 @@ async def handle_novelai_balance(matcher: Matcher, event: MessageEvent):
     total = fixed + purchased
     expires = data.get("expiresAt") or data.get("expires_at")
 
+    usage = data.get("usage") or {}
+    percent = usage.get("percent")
+    is_negative = usage.get("isNegative", False)
+    next_ms = usage.get("timeUntilNextPercent")
+
     lines = [
         "💰 NovelAI 账户额度",
         f"订阅档位：{tier_name}（tier {tier}）",
@@ -626,44 +631,8 @@ async def handle_novelai_balance(matcher: Matcher, event: MessageEvent):
     if expires is not None:
         lines.append(f"订阅到期：{_fmt_ts(expires)}")
 
-    await matcher.finish(Message([MessageSegment.text("\n".join(lines))]))
-
-
-# ========== ai画图限制 查询指令（仅超级用户） ==========
-# 查询 Opus 订阅附带的「免费 NovelAI 扩散 V5 世代」额度（随订阅自动补足）
-# 注：API 仅返回剩余百分比，不返回具体可生成张数（张数由客户端按当前分辨率/步数估算）
-
-novelai_limit_cmd = on_command(
-    "ai画图限制",
-    aliases={"ai生图限制", "ai绘画限制", "ai绘图限制", "ai画图免费额度"},
-    permission=SUPERUSER,
-    priority=5,
-    block=True,
-    force_whitespace=True,
-)
-
-
-@novelai_limit_cmd.handle()
-async def handle_novelai_limit(matcher: Matcher, event: MessageEvent):
-    """超级用户查询 Opus 免费 V5 世代生成额度"""
-    try:
-        data = await _fetch_subscription()
-    except RuntimeError as e:
-        await matcher.finish(Message([MessageSegment.text(f"❌ {e}")]))
-        return
-
-    tier = data.get("tier", 0)
-    tier_name = (data.get("tier_name") or data.get("tierName")
-                 or _TIER_NAMES.get(tier) or f"tier{tier}")
-    usage = data.get("usage") or {}
-    percent = usage.get("percent")
-    is_negative = usage.get("isNegative", False)
-    next_ms = usage.get("timeUntilNextPercent")
-
-    lines = [
-        "🎯 Opus 免费 V5 世代额度",
-        f"订阅档位：{tier_name}（tier {tier}）",
-    ]
+    lines.append("")
+    lines.append("🎯 Opus 免费 V5 世代额度")
     if percent is not None:
         remaining = round(percent / 100.0 * _FREE_V5_FULL_IMAGES)
         lines.append(f"免费额度剩余：{percent}%（约 {remaining} 张图片）")
