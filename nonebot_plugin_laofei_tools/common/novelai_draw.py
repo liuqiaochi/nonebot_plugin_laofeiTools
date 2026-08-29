@@ -9,7 +9,9 @@ NovelAI 画图模块 — 调用 NovelAI 文生图 API
 import asyncio
 import base64
 import io
+import os
 import random
+import tempfile
 import zipfile
 
 import httpx
@@ -645,7 +647,12 @@ async def handle_novelai_balance(matcher: Matcher, event: MessageEvent):
     ]
     try:
         img_b64 = render_help_image("AI 画图额度", sections, footer="AI 画图 · NovelAI")
-        await matcher.finish(MessageSegment.image(f"base64://{img_b64}"))
+        # 写入临时文件后用本地路径发送，避免超长 base64 在部分 OneBot 实现下
+        # 被拆分为「图片 + 一段 base64 文本」两条消息
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png", prefix="ai_quota_")
+        tmp.write(base64.b64decode(img_b64))
+        tmp.close()
+        await matcher.finish(MessageSegment.image(tmp.name))
     except Exception as e:
-        logger.error(f"ai画图额度 图片渲染失败，降级为文本：{e}")
+        logger.error(f"ai画图额度 图片渲染/发送失败，降级为文本：{e}")
         await matcher.finish(Message([MessageSegment.text(f"{account_block}\n\n{free_block}")]))
