@@ -6,6 +6,7 @@ NovelAI 画图模块 — 调用 NovelAI 文生图 API
 权限：仅群聊可用，需超级管理员开启
 """
 
+import asyncio
 import base64
 import io
 import random
@@ -50,6 +51,9 @@ _NOVELAI_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
+
+# 全局单任务锁：NovelAI 同账号仅允许一个生成任务，避免并发请求导致失败
+ai_draw_lock = asyncio.Lock()
 
 # 默认生成参数
 DEFAULT_MODEL = "nai-diffusion-4-5-curated"
@@ -273,70 +277,93 @@ async def handle_novelai(matcher: Matcher, event: MessageEvent, args: Message = 
             ])
         )
 
-    await matcher.send(Message([MessageSegment.text("🎨 正在调用 NovelAI 生成图片，请稍候…")]))
-
-    payload = _build_payload(positive, negative, _get_model(group_id))
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            resp = await client.post(NOVELAI_ENDPOINT, json=payload, headers=headers)
-    except httpx.HTTPError as e:
-        logger.error(f"NovelAI 请求失败：{e}")
+    # === 并发互斥：当前已有 ai画图 任务在进行，直接提示等待 ===
+    if ai_draw_lock.locked():
         await matcher.finish(
             Message([
                 MessageSegment.reply(event.message_id),
-                MessageSegment.text(f"❌ 请求 NovelAI 失败：{e}"),
+                MessageSegment.text("⚠️ 当前有 ai画图 任务正在进行，请等待其完成后再试～"),
             ])
         )
-        return
 
-    if resp.status_code != 200:
-        # 尝试以 JSON 读取错误信息
+    async with ai_draw_lock:
+        await matcher.send(Message([MessageSegment.text("🎨 正在调用 NovelAI 生成图片，请稍候…")]))
+
+        payload = _build_payload(positive, negative, _get_model(group_id))
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
         try:
-            err = resp.json()
-            msg = err.get("message") or err.get("error") or str(err)
-        except Exception:
-            msg = resp.text[:300]
-        logger.error(f"NovelAI HTTP {resp.status_code}: {msg}")
-        await matcher.finish(
-            Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text(f"❌ NovelAI 返回错误（HTTP {resp.status_code}）：{msg}"),
-            ])
-        )
-        return
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                resp = await client.post(NOVELAI_ENDPOINT, json=payload, headers=headers)
+        except httpx.HTTPError as e:
+            logger.error(f"NovelAI 请求失败：{e}")
+            await matcher.finish(
+                Message([
+                    MessageSegment.reply(event.message_id),
+                    MessageSegment.text(f"❌ 请求 NovelAI 失败：{e}"),
+                ])
+            )
+            return
 
-    try:
-        img_bytes = _extract_image(resp)
-    except RuntimeError as e:
-        logger.error(f"NovelAI 响应解析失败：{e}")
-        await matcher.finish(
-            Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text(f"❌ {e}"),
-            ])
-        )
-        return
+        if resp.status_code != 200:
+            # 尝试以 JSON 读取错误信息
+            try:
+                err = resp.json()
+                msg = err.get("message") or err.get("error") or str(err)
+            except Exception:
+                msg = resp.text[:300]
+            logger.error(f"NovelAI HTTP {resp.status_code}: {msg}")
+            await matcher.finish(
+                Message([
+                    MessageSegment.reply(event.message_id),
+                    MessageSegment.text(f"❌ NovelAI 返回错误（HTTP {resp.status_code}）：{msg}"),
+                ])
+            )
+            return
 
-    if not img_bytes or img_bytes[:4] != b"\x89PNG":
-        await matcher.finish(
-            Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("❌ NovelAI 返回内容不是有效的 PNG 图片"),
-            ])
-        )
-        return
+        try:
+            img_bytes = _extract_image(resp)
+        except RuntimeError as e:
+            logger.error(f"NovelAI 响应解析失败：{e}")
+            await matcher.finish(
+                Message([
+                    MessageSegment.reply(event.message_id),
+                    MessageSegment.text(f"❌ {e}"),
+                ])
+            )
+            return
 
-    b64 = base64.b64encode(img_bytes).decode()
-    logger.info(f"NovelAI 图片生成成功，大小 {len(img_bytes)} 字节")
-    await matcher.finish(Message([
-        MessageSegment.reply(event.message_id),
-        MessageSegment.image(f"base64://{b64}"),
-    ]))
+        if not img_bytes or img_bytes[:4] != b"\x89PNG":
+            await matcher.finish(
+                Message([
+                    MessageSegment.reply(event.message_id),
+                    MessageSegment.text("❌ NovelAI 返回内容不是有效的 PNG 图片"),
+                ])
+            )
+            return
+
+        b64 = base64.b64encode(img_bytes).decode()
+        logger.info(f"NovelAI 图片生成成功，大小 {len(img_bytes)} 字节")
+
+        # === 发送图片：先 send 并捕获异常，失败则给出提醒，避免静默无返回 ===
+        img_msg = Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.image(f"base64://{b64}"),
+        ])
+        try:
+            await matcher.send(img_msg)
+        except Exception as e:
+            logger.error(f"ai画图 图片发送失败：{e}")
+            await matcher.send(
+                Message([
+                    MessageSegment.reply(event.message_id),
+                    MessageSegment.text("❌ 图片发送失败，可能是图片过大或网络异常，请稍后重试。"),
+                ])
+            )
+        await matcher.finish()
 
 
 # ========== 开启 / 关闭 群聊 NovelAI 画图（仅超级用户） ==========
@@ -400,7 +427,7 @@ novelai_help_cmd = on_command(
 async def handle_novelai_help(matcher: Matcher, event: MessageEvent):
     """返回 ai画图 完整使用帮助（图片形式，与 lg帮助 风格一致）"""
     sections = [
-        ("__text__", "仅群聊可用，默认关闭，需超级管理员开启。"),
+        ("__text__", "仅群聊可用，默认关闭，需超级管理员开启。同一时间仅支持一个生成任务，进行中发送会提示等待。"),
         ("使用", [
             ("ai画图 <提示词>", "根据提示词生成图片"),
             ("ai生图 / ai绘画 / ai绘图", "ai画图 的别名"),
