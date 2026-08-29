@@ -15,6 +15,7 @@ import zipfile
 import httpx
 from nonebot import on_command, get_driver
 from nonebot.adapters.onebot.v11 import (
+    Bot,
     GroupMessageEvent,
     Message,
     MessageEvent,
@@ -229,7 +230,7 @@ novelai_cmd = on_command(
 
 
 @novelai_cmd.handle()
-async def handle_novelai(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()):
+async def handle_novelai(matcher: Matcher, bot: Bot, event: MessageEvent, args: Message = CommandArg()):
     """处理 novelai 画图指令（仅群聊可用，需超管开启）"""
     # 仅群聊可用
     if isinstance(event, PrivateMessageEvent):
@@ -351,7 +352,6 @@ async def handle_novelai(matcher: Matcher, event: MessageEvent, args: Message = 
         # === 发送图片：以合并转发方式发出，失败则直接提示 ===
         img_seg = MessageSegment.image(f"base64://{b64}")
         try:
-            bot = matcher.bot
             bot_name = "蓝色大肥鱼"
             try:
                 bot_info = await bot.get_login_info()
