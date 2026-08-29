@@ -348,7 +348,7 @@ async def handle_novelai(matcher: Matcher, event: MessageEvent, args: Message = 
         b64 = base64.b64encode(img_bytes).decode()
         logger.info(f"NovelAI 图片生成成功，大小 {len(img_bytes)} 字节")
 
-        # === 发送图片：以合并转发方式发出，失败则降级为普通回复 ===
+        # === 发送图片：以合并转发方式发出，失败则直接提示 ===
         img_seg = MessageSegment.image(f"base64://{b64}")
         try:
             bot = matcher.bot
@@ -373,22 +373,13 @@ async def handle_novelai(matcher: Matcher, event: MessageEvent, args: Message = 
                 messages=forward_msgs,
             )
         except Exception as e:
-            logger.error(f"ai画图 合并转发发送失败，降级为普通回复：{e}")
-            try:
-                await matcher.send(
-                    Message([
-                        MessageSegment.reply(event.message_id),
-                        img_seg,
-                    ])
-                )
-            except Exception as e2:
-                logger.error(f"ai画图 图片发送失败：{e2}")
-                await matcher.send(
-                    Message([
-                        MessageSegment.reply(event.message_id),
-                        MessageSegment.text("❌ 图片发送失败，可能是图片过大或网络异常，请稍后重试。"),
-                    ])
-                )
+            logger.error(f"ai画图 合并转发发送失败：{e}")
+            await matcher.send(
+                Message([
+                    MessageSegment.reply(event.message_id),
+                    MessageSegment.text("❌ 图片发送失败，可能是图片过大或网络异常，请稍后重试。"),
+                ])
+            )
         await matcher.finish()
 
 
