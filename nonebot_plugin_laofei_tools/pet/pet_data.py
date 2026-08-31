@@ -866,13 +866,14 @@ def do_feed(user_id: str, food_name: str) -> dict:
 
 def do_work(user_id: str) -> dict:
     """宠物打工逻辑
-    
+
     消耗30体力，获得120积分。
-    10%概率获得随机食物，3%概率掉落普通配饰。
-    
+    单次打工最多掉落 1 个道具：以 10% 概率（耄耋天赋额外 +10%）掉落随机食物，
+    或以 3% 概率（耄耋天赋额外 +10%）掉落普通配饰，二者至多其一。
+
     Args:
         user_id: 用户 ID
-    
+
     Returns:
         dict: 打工结果
     """
@@ -891,26 +892,25 @@ def do_work(user_id: str) -> dict:
     # 5. 扣除体力
     pet.stamina -= 30
     
-    # 6. 掉落判定
+    # 6. 掉落判定：单次打工最多掉落 1 个道具（食物 / 配饰二选一）
     dropped_items = []
     is_maodie = pet.pet_type == "cat"  # 耄耋天赋：打工掉落概率加成
 
-    # 10% 概率获得随机食物（仅限可掉落食物）；耄耋天赋额外 +10%
-    food_drop_rate = 0.10 + (0.10 if is_maodie else 0)
+    food_drop_rate = 0.10 + (0.10 if is_maodie else 0)   # 食物掉落概率
+    acc_drop_rate = 0.03 + (0.10 if is_maodie else 0)    # 配饰掉落概率
     droppable_foods = [name for name, info in FOODS.items() if info.get("droppable", True)]
-    if random.random() < food_drop_rate and droppable_foods:
-        food = random.choice(droppable_foods)
-        add_item(user_id, "food", food)
-        dropped_items.append(food)
+    droppable_acc = [name for name, info in ACCESSORIES.items() if info["droppable"]]
 
-    # 3% 概率掉落普通配饰；耄耋天赋额外 +10%
-    acc_drop_rate = 0.03 + (0.10 if is_maodie else 0)
-    if random.random() < acc_drop_rate:
-        droppable_acc = [name for name, info in ACCESSORIES.items() if info["droppable"]]
-        if droppable_acc:
-            acc = random.choice(droppable_acc)
-            add_item(user_id, "accessory", acc)
-            dropped_items.append(acc)
+    # 用同一个随机数判定：落入食物区间则掉食物，落入配饰区间则掉配饰，二者至多其一
+    r = random.random()
+    if r < food_drop_rate and droppable_foods:
+        item = random.choice(droppable_foods)
+        add_item(user_id, "food", item)
+        dropped_items.append(item)
+    elif r < food_drop_rate + acc_drop_rate and droppable_acc:
+        item = random.choice(droppable_acc)
+        add_item(user_id, "accessory", item)
+        dropped_items.append(item)
 
     # 7. 保存宠物数据
     save_pet(user_id)
