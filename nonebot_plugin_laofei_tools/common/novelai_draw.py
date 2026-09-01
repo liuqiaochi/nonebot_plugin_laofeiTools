@@ -645,6 +645,7 @@ async def handle_novelai_balance(matcher: Matcher, event: MessageEvent):
         ("__text__", account_block),
         ("__text__", free_block),
     ]
+    # 图片 + 文本都返回：先发图片，再发文本；图片渲染/发送失败则只发文本兜底
     try:
         img_b64 = render_help_image("AI 画图额度", sections, footer="AI 画图 · NovelAI")
         # 写入临时文件后用本地路径发送，避免超长 base64 在部分 OneBot 实现下
@@ -652,7 +653,7 @@ async def handle_novelai_balance(matcher: Matcher, event: MessageEvent):
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png", prefix="ai_quota_")
         tmp.write(base64.b64decode(img_b64))
         tmp.close()
-        await matcher.finish(MessageSegment.image(tmp.name))
+        await matcher.send(MessageSegment.image(tmp.name))
     except Exception as e:
-        logger.error(f"ai画图额度 图片渲染/发送失败，降级为文本：{e}")
-        await matcher.finish(Message([MessageSegment.text(f"{account_block}\n\n{free_block}")]))
+        logger.error(f"ai画图额度 图片渲染/发送失败，仅返回文本：{e}")
+    await matcher.finish(Message([MessageSegment.text(f"{account_block}\n\n{free_block}")]))
