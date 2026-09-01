@@ -75,6 +75,7 @@ NOVELAI_MODEL_ALIASES = {
     "v4-full": "nai-diffusion-4-full",
     "v5": "nai-diffusion-5-full",
     "v5-full": "nai-diffusion-5-full",
+    "v5-curated": "nai-diffusion-5-curated",
     "v3": "nai-diffusion-3",
     "v2": "nai-diffusion-2",
     "furry": "nai-diffusion-furry-3",
@@ -457,7 +458,7 @@ async def handle_novelai_help(matcher: Matcher, event: MessageEvent):
         ]),
         ("切换模型（仅超级用户）", [
             ("ai画图模型", "查看当前模型与全部可用列表"),
-            ("ai画图模型 v4.5 / v4 / v5", "切换模型（v4.5 / v4 / v5 等）"),
+            ("ai画图模型 v4.5 / v4 / v5 / v5-curated", "切换模型（v4.5 / v4 / v5 / v5-curated 等）"),
             ("ai画图模型 v3 / v2 / furry", "切换至旧版 / 福瑞模型"),
         ]),
         ("查询额度（仅超级用户）", [
