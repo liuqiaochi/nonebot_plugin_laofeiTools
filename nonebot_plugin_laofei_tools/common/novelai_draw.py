@@ -380,38 +380,25 @@ async def handle_novelai(matcher: Matcher, bot: Bot, event: MessageEvent, args: 
             )
             return
 
-        # 压缩图片，控制体积便于发送（原图 2MB+ 会因 base64 过大导致合并转发失败）
+        # 压缩图片，控制体积便于上传（原图可能 2MB+，缩小后上传更快更稳）
         send_data = _compress_image(img_bytes)
         logger.info(f"NovelAI 图片生成成功，原始 {len(img_bytes)} 字节，压缩后 {len(send_data)} 字节")
 
-        # === 发送图片：以合并转发方式发出，失败则直接提示 ===
+        # === 发送图片：直接发送单张图（不再走合并转发，避免其内联上传通道超时）===
         try:
             # 写入临时文件后用本地路径发送，消息体极短，规避超长 base64 被 OneBot 拒绝
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg", prefix="ai_draw_")
             tmp.write(send_data)
             tmp.close()
-            bot_name = "蓝色大肥鱼"
-            try:
-                bot_info = await bot.get_login_info()
-                bot_name = bot_info.get("nickname", "蓝色大肥鱼")
-            except Exception:
-                pass
-            group_id = getattr(event, "group_id", None)
-            forward_msgs = [{
-                "type": "node",
-                "data": {
-                    "name": bot_name,
-                    "uin": bot.self_id,
-                    "content": str(MessageSegment.image(tmp.name)),
-                },
-            }]
-            await bot.call_api(
-                "send_group_forward_msg",
-                group_id=group_id,
-                messages=forward_msgs,
+            await bot.send(
+                event,
+                Message([
+                    MessageSegment.reply(event.message_id),
+                    MessageSegment.image(tmp.name),
+                ]),
             )
         except Exception as e:
-            logger.error(f"ai画图 合并转发发送失败：{e}")
+            logger.error(f"ai画图 图片发送失败：{e}")
             await matcher.send(
                 Message([
                     MessageSegment.reply(event.message_id),
