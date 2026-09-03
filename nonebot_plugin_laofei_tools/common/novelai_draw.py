@@ -633,7 +633,9 @@ async def handle_novelai_balance(matcher: Matcher, event: MessageEvent):
     try:
         data = await _fetch_subscription()
     except RuntimeError as e:
-        await matcher.finish(Message([MessageSegment.text(f"❌ {e}")]))
+        # 仅记录日志，不发送任何文本（按「只发图片、不要失败保底」的约定）
+        logger.error(f"ai画图额度 查询失败：{e}")
+        await matcher.finish()
         return
 
     tier = data.get("tier", 0)
@@ -689,7 +691,8 @@ async def handle_novelai_balance(matcher: Matcher, event: MessageEvent):
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png", prefix="ai_quota_")
         tmp.write(base64.b64decode(img_b64))
         tmp.close()
-        await matcher.finish(MessageSegment.image(tmp.name))
+        # 用 send 而非 finish：finish 会主动抛 FinishedException 终止 matcher，
+        # 放进 try 会被当成「渲染/发送失败」误记一条假错误日志
+        await matcher.send(MessageSegment.image(tmp.name))
     except Exception as e:
         logger.error(f"ai画图额度 图片渲染/发送失败：{e}")
-        await matcher.finish()
