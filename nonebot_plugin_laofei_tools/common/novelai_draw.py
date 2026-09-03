@@ -222,13 +222,11 @@ def _extract_image(resp: httpx.Response) -> bytes:
         raise RuntimeError(f"无法解析 NovelAI 响应（content-type={content_type}）")
 
 
-def _compress_image(data: bytes, max_side: int = 1024, quality: int = 82,
-                    max_bytes: int = 150_000) -> bytes:
-    """压缩 NovelAI 生成图以便发送：限制最长边 + 体积上限，避免内联 base64 过大导致合并转发超时
+def _compress_image(data: bytes, max_side: int = 1280, quality: int = 90) -> bytes:
+    """压缩 NovelAI 生成图以便发送：限制最长边并转 JPEG，避免原图过大导致 base64 / 转发失败
 
     - 最长边超过 max_side 则等比缩放
     - 转 JPEG（透明通道合成白底）以显著减小体积
-    - 若压缩后仍超过 max_bytes，逐步降低质量直到达标或触底（保证内联上传体积小、转发不超时）
     - 压缩失败则回退原始数据
     """
     try:
@@ -246,15 +244,8 @@ def _compress_image(data: bytes, max_side: int = 1024, quality: int = 82,
         if max(w, h) > max_side:
             scale = max_side / max(w, h)
             img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
-        q = quality
         out = io.BytesIO()
-        img.save(out, format="JPEG", quality=q)
-        # 体积仍超限则逐步降质（合并转发的图片以 base64 内联进 WebSocket 调用，
-        # 必须足够小才能在 api_timeout 内完成上传，否则会触发 send_group_forward_msg timeout）
-        while len(out.getvalue()) > max_bytes and q > 35:
-            q -= 8
-            out = io.BytesIO()
-            img.save(out, format="JPEG", quality=q)
+        img.save(out, format="JPEG", quality=quality)
         return out.getvalue()
     except Exception as e:
         logger.warning(f"ai画图 图片压缩失败，回退原始数据：{e}")
@@ -389,8 +380,8 @@ async def handle_novelai(matcher: Matcher, bot: Bot, event: MessageEvent, args: 
             )
             return
 
-        # 压缩图片：限定最长边 1024、体积上限 150KB，确保合并转发内联 base64 上传不超时
-        send_data = _compress_image(img_bytes, max_side=1024, quality=82, max_bytes=150_000)
+        # 压缩图片，控制体积便于发送（原图 2MB+ 会因 base64 过大导致合并转发失败）
+        send_data = _compress_image(img_bytes)
         logger.info(f"NovelAI 图片生成成功，原始 {len(img_bytes)} 字节，压缩后 {len(send_data)} 字节")
 
         # === 发送图片：以合并转发方式发出，失败则直接提示 ===
