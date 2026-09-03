@@ -28,6 +28,7 @@ from nonebot.log import logger
 from nonebot.matcher import Matcher
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
+from PIL import Image
 
 from ..config import (
     is_novelai_group_enabled,
@@ -221,6 +222,36 @@ def _extract_image(resp: httpx.Response) -> bytes:
         raise RuntimeError(f"无法解析 NovelAI 响应（content-type={content_type}）")
 
 
+def _compress_image(data: bytes, max_side: int = 1280, quality: int = 90) -> bytes:
+    """压缩 NovelAI 生成图以便发送：限制最长边并转 JPEG，避免原图过大导致 base64 / 转发失败
+
+    - 最长边超过 max_side 则等比缩放
+    - 转 JPEG（透明通道合成白底）以显著减小体积
+    - 压缩失败则回退原始数据
+    """
+    try:
+        img = Image.open(io.BytesIO(data))
+        has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
+        if has_alpha:
+            bg = Image.new("RGB", img.size, (255, 255, 255))
+            if img.mode == "P":
+                img = img.convert("RGBA")
+            bg.paste(img, mask=img.split()[-1])
+            img = bg
+        else:
+            img = img.convert("RGB")
+        w, h = img.size
+        if max(w, h) > max_side:
+            scale = max_side / max(w, h)
+            img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+        out = io.BytesIO()
+        img.save(out, format="JPEG", quality=quality)
+        return out.getvalue()
+    except Exception as e:
+        logger.warning(f"ai画图 图片压缩失败，回退原始数据：{e}")
+        return data
+
+
 # ========== 指令注册 ==========
 
 novelai_cmd = on_command(
@@ -349,12 +380,16 @@ async def handle_novelai(matcher: Matcher, bot: Bot, event: MessageEvent, args: 
             )
             return
 
-        b64 = base64.b64encode(img_bytes).decode()
-        logger.info(f"NovelAI 图片生成成功，大小 {len(img_bytes)} 字节")
+        # 压缩图片，控制体积便于发送（原图 2MB+ 会因 base64 过大导致合并转发失败）
+        send_data = _compress_image(img_bytes)
+        logger.info(f"NovelAI 图片生成成功，原始 {len(img_bytes)} 字节，压缩后 {len(send_data)} 字节")
 
         # === 发送图片：以合并转发方式发出，失败则直接提示 ===
-        img_seg = MessageSegment.image(f"base64://{b64}")
         try:
+            # 写入临时文件后用本地路径发送，消息体极短，规避超长 base64 被 OneBot 拒绝
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg", prefix="ai_draw_")
+            tmp.write(send_data)
+            tmp.close()
             bot_name = "蓝色大肥鱼"
             try:
                 bot_info = await bot.get_login_info()
@@ -367,7 +402,7 @@ async def handle_novelai(matcher: Matcher, bot: Bot, event: MessageEvent, args: 
                 "data": {
                     "name": bot_name,
                     "uin": bot.self_id,
-                    "content": str(img_seg),
+                    "content": str(MessageSegment.image(tmp.name)),
                 },
             }]
             await bot.call_api(
