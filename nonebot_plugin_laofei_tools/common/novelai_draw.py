@@ -28,7 +28,6 @@ from nonebot.log import logger
 from nonebot.matcher import Matcher
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
-from PIL import Image
 
 from ..config import (
     is_novelai_group_enabled,
@@ -222,36 +221,6 @@ def _extract_image(resp: httpx.Response) -> bytes:
         raise RuntimeError(f"无法解析 NovelAI 响应（content-type={content_type}）")
 
 
-def _compress_image(data: bytes, max_side: int = 1280, quality: int = 90) -> bytes:
-    """压缩 NovelAI 生成图以便发送：限制最长边并转 JPEG，避免原图过大导致 base64 / 转发失败
-
-    - 最长边超过 max_side 则等比缩放
-    - 转 JPEG（透明通道合成白底）以显著减小体积
-    - 压缩失败则回退原始数据
-    """
-    try:
-        img = Image.open(io.BytesIO(data))
-        has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
-        if has_alpha:
-            bg = Image.new("RGB", img.size, (255, 255, 255))
-            if img.mode == "P":
-                img = img.convert("RGBA")
-            bg.paste(img, mask=img.split()[-1])
-            img = bg
-        else:
-            img = img.convert("RGB")
-        w, h = img.size
-        if max(w, h) > max_side:
-            scale = max_side / max(w, h)
-            img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
-        out = io.BytesIO()
-        img.save(out, format="JPEG", quality=quality)
-        return out.getvalue()
-    except Exception as e:
-        logger.warning(f"ai画图 图片压缩失败，回退原始数据：{e}")
-        return data
-
-
 # ========== 指令注册 ==========
 
 novelai_cmd = on_command(
@@ -380,25 +349,34 @@ async def handle_novelai(matcher: Matcher, bot: Bot, event: MessageEvent, args: 
             )
             return
 
-        # 压缩图片，控制体积便于上传（原图可能 2MB+，缩小后上传更快更稳）
-        send_data = _compress_image(img_bytes)
-        logger.info(f"NovelAI 图片生成成功，原始 {len(img_bytes)} 字节，压缩后 {len(send_data)} 字节")
-
-        # === 发送图片：直接发送单张图（不再走合并转发，避免其内联上传通道超时）===
+        # === 发送图片：以合并转发方式发出，规避直发可能触发的风控风险 ===
+        # 写入临时文件后用本地路径发送，消息体极短，规避超长 base64 被 OneBot 拒绝
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png", prefix="ai_draw_")
+        tmp.write(img_bytes)
+        tmp.close()
         try:
-            # 写入临时文件后用本地路径发送，消息体极短，规避超长 base64 被 OneBot 拒绝
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg", prefix="ai_draw_")
-            tmp.write(send_data)
-            tmp.close()
-            await bot.send(
-                event,
-                Message([
-                    MessageSegment.reply(event.message_id),
-                    MessageSegment.image(tmp.name),
-                ]),
+            bot_name = "蓝色大肥鱼"
+            try:
+                bot_info = await bot.get_login_info()
+                bot_name = bot_info.get("nickname", "蓝色大肥鱼")
+            except Exception:
+                pass
+            group_id = getattr(event, "group_id", None)
+            forward_msgs = [{
+                "type": "node",
+                "data": {
+                    "name": bot_name,
+                    "uin": bot.self_id,
+                    "content": str(MessageSegment.image(tmp.name)),
+                },
+            }]
+            await bot.call_api(
+                "send_group_forward_msg",
+                group_id=group_id,
+                messages=forward_msgs,
             )
         except Exception as e:
-            logger.error(f"ai画图 图片发送失败：{e}")
+            logger.error(f"ai画图 合并转发发送失败：{e}")
             await matcher.send(
                 Message([
                     MessageSegment.reply(event.message_id),
