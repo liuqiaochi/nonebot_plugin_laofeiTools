@@ -11,6 +11,7 @@ import base64
 import io
 import os
 import random
+import re
 import tempfile
 import zipfile
 
@@ -134,7 +135,52 @@ def _is_v4_model(model: str) -> bool:
     return model.startswith("nai-diffusion-4") or model.startswith("nai-diffusion-5")
 
 
-def _build_payload(prompt: str, negative: str, model: str) -> dict:
+# ========== 尺寸参数 ==========
+
+# 尺寸预设：关键字 -> (宽, 高)，均为 64 的倍数，适配 NovelAI v4/v5 潜在空间
+SIZE_PRESETS = {
+    "竖": (832, 1216), "竖图": (832, 1216), "竖屏": (832, 1216), "portrait": (832, 1216),
+    "横": (1216, 832), "横图": (1216, 832), "横屏": (1216, 832), "landscape": (1216, 832),
+    "方": (1024, 1024), "方图": (1024, 1024), "正方形": (1024, 1024), "square": (1024, 1024),
+}
+_SIZE_MIN, _SIZE_MAX, _SIZE_STEP = 256, 2048, 64
+
+# ai画图 指令用法说明（空参数 / 尺寸非法时复用）
+AI_DRAW_USAGE = (
+    "用法：ai画图 [尺寸] <提示词>\n"
+    "尺寸（可选，放在最前）：竖 / 横 / 方（或 竖图 / 横图 / 方图），\n"
+    "  或自定义 WxH（宽高均为 64 的倍数、范围 256~2048），如 1024x1024\n"
+    "示例：\n"
+    "  ai画图 1girl, cat ears, masterpiece\n"
+    "  ai画图 横 风景, 日落\n"
+    "  ai画图 1024x1024 一只猫\n"
+    "支持用 | 分隔负面提示词：ai画图 1girl | bad hands, blurry"
+)
+
+
+def _resolve_size_arg(token: str):
+    """解析指令首 token 作为尺寸参数。
+
+    返回：
+      - None         : 不是尺寸参数（整句应作为提示词）
+      - (w, h) tuple : 已解析的尺寸（宽, 高）
+      - "INVALID"    : 形如尺寸但不合法（调用方应提示并返回）
+    """
+    t = (token or "").strip().lower()
+    if t in SIZE_PRESETS:
+        return SIZE_PRESETS[t]
+    m = re.match(r"^(\d{2,4})[xX×](\d{2,4})$", t)
+    if m:
+        w, h = int(m.group(1)), int(m.group(2))
+        if not (_SIZE_MIN <= w <= _SIZE_MAX and _SIZE_MIN <= h <= _SIZE_MAX):
+            return "INVALID"
+        if w % _SIZE_STEP != 0 or h % _SIZE_STEP != 0:
+            return "INVALID"
+        return (w, h)
+    return None
+
+
+def _build_payload(prompt: str, negative: str, model: str, width: int = DEFAULT_WIDTH, height: int = DEFAULT_HEIGHT) -> dict:
     """构造 NovelAI 文生图请求体（按模型版本自动切换 payload 结构）"""
     # 自动追加质量标签（避免重复）
     base_caption = prompt.strip()
@@ -146,8 +192,8 @@ def _build_payload(prompt: str, negative: str, model: str) -> dict:
 
     params = {
         "characterPrompts": [],
-        "width": DEFAULT_WIDTH,
-        "height": DEFAULT_HEIGHT,
+        "width": width,
+        "height": height,
         "steps": DEFAULT_STEPS,
         "scale": DEFAULT_SCALE,
         "sampler": DEFAULT_SAMPLER,
@@ -258,19 +304,47 @@ async def handle_novelai(matcher: Matcher, bot: Bot, event: MessageEvent, args: 
         await matcher.finish(
             Message([
                 MessageSegment.reply(event.message_id),
-                MessageSegment.text(
-                    "用法：ai画图 <提示词>\n"
-                    "示例：ai画图 1girl, cat ears, masterpiece\n"
-                    "支持用 | 分隔负面提示词：ai画图 1girl | bad hands, blurry"
-                ),
+                MessageSegment.text(AI_DRAW_USAGE),
+            ])
+        )
+
+    # 解析可选尺寸参数（指令最前面的一个 token）
+    parts = raw.split(None, 1)
+    size = None
+    if parts:
+        r = _resolve_size_arg(parts[0])
+        if r == "INVALID":
+            await matcher.finish(
+                Message([
+                    MessageSegment.reply(event.message_id),
+                    MessageSegment.text(
+                        "⚠️ 尺寸参数不合法。可用：竖 / 横 / 方（或 竖图 / 横图 / 方图），"
+                        "或自定义 WxH（宽高均为 64 的倍数、范围 256~2048），如 1024x1024。"
+                    ),
+                ])
+            )
+            return
+        if r is not None:
+            size = r
+
+    if size is not None:
+        prompt_part = parts[1] if len(parts) > 1 else ""
+    else:
+        prompt_part = raw
+
+    if not prompt_part.strip():
+        await matcher.finish(
+            Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text(AI_DRAW_USAGE),
             ])
         )
 
     # 解析正面 / 负面提示词
-    if "|" in raw:
-        positive, negative = raw.split("|", 1)
+    if "|" in prompt_part:
+        positive, negative = prompt_part.split("|", 1)
     else:
-        positive, negative = raw, ""
+        positive, negative = prompt_part, ""
 
     api_key = _get_api_key()
     if not api_key:
@@ -291,9 +365,11 @@ async def handle_novelai(matcher: Matcher, bot: Bot, event: MessageEvent, args: 
         )
 
     async with ai_draw_lock:
-        await matcher.send(Message([MessageSegment.text("🎨 正在调用 NovelAI 生成图片，请稍候…")]))
+        w = size[0] if size else DEFAULT_WIDTH
+        h = size[1] if size else DEFAULT_HEIGHT
+        await matcher.send(Message([MessageSegment.text(f"🎨 正在调用 NovelAI 生成图片（{w}×{h}），请稍候…")]))
 
-        payload = _build_payload(positive, negative, _get_model(group_id))
+        payload = _build_payload(positive, negative, _get_model(group_id), w, h)
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -449,7 +525,7 @@ async def handle_novelai_help(matcher: Matcher, event: MessageEvent):
     sections = [
         ("__text__", "仅群聊可用，默认关闭，需超级管理员开启。同一时间仅支持一个生成任务，进行中发送会提示等待。"),
         ("使用", [
-            ("ai画图 <提示词>", "根据提示词生成图片"),
+            ("ai画图 [尺寸] <提示词>", "尺寸放最前：竖/横/方，或自定义 WxH（64 倍数）"),
             ("ai生图 / ai绘画 / ai绘图", "ai画图 的别名"),
             ("ai画图 提示词 | 负面词", "用 | 分隔负面提示词"),
         ]),
@@ -464,7 +540,7 @@ async def handle_novelai_help(matcher: Matcher, event: MessageEvent):
         ("查询额度（仅超级用户）", [
             ("ai画图额度 / ai画图余额", "查询账户剩余 Anlas 与 Opus 免费 V5 额度"),
         ]),
-        ("__text__", "默认尺寸 832×1216，默认模型 nai-diffusion-4-5-curated。"),
+        ("__text__", "默认尺寸 832×1216（竖屏），默认模型 nai-diffusion-4-5-curated。尺寸参数放最前：竖/横/方 或 自定义 WxH（宽高须为 64 的倍数）。"),
     ]
     img_b64 = render_help_image("AI 画图帮助", sections, footer="AI 画图 · NovelAI")
     await matcher.finish(MessageSegment.image(f"base64://{img_b64}"))
