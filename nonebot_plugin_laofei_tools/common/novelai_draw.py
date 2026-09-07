@@ -11,7 +11,6 @@ import base64
 import io
 import os
 import random
-import re
 import tempfile
 import zipfile
 
@@ -143,17 +142,16 @@ SIZE_PRESETS = {
     "横": (1216, 832), "横图": (1216, 832), "横屏": (1216, 832), "landscape": (1216, 832),
     "方": (1024, 1024), "方图": (1024, 1024), "正方形": (1024, 1024), "square": (1024, 1024),
 }
-_SIZE_MIN, _SIZE_MAX, _SIZE_STEP = 256, 2048, 64
 
-# ai画图 指令用法说明（空参数 / 尺寸非法时复用）
+# ai画图 指令用法说明（空参数时复用）
 AI_DRAW_USAGE = (
     "用法：ai画图 [尺寸] <提示词>\n"
-    "尺寸（可选，放在最前）：竖 / 横 / 方（或 竖图 / 横图 / 方图），\n"
-    "  或自定义 WxH（宽高均为 64 的倍数、范围 256~2048），如 1024x1024\n"
+    "尺寸（可选，放在最前）：竖 / 横 / 方（或 竖图 / 横图 / 方图）\n"
+    "  不写尺寸默认竖屏 832×1216\n"
     "示例：\n"
     "  ai画图 1girl, cat ears, masterpiece\n"
     "  ai画图 横 风景, 日落\n"
-    "  ai画图 1024x1024 一只猫\n"
+    "  ai画图 方 一只猫\n"
     "支持用 | 分隔负面提示词：ai画图 1girl | bad hands, blurry"
 )
 
@@ -164,19 +162,10 @@ def _resolve_size_arg(token: str):
     返回：
       - None         : 不是尺寸参数（整句应作为提示词）
       - (w, h) tuple : 已解析的尺寸（宽, 高）
-      - "INVALID"    : 形如尺寸但不合法（调用方应提示并返回）
     """
     t = (token or "").strip().lower()
     if t in SIZE_PRESETS:
         return SIZE_PRESETS[t]
-    m = re.match(r"^(\d{2,4})[xX×](\d{2,4})$", t)
-    if m:
-        w, h = int(m.group(1)), int(m.group(2))
-        if not (_SIZE_MIN <= w <= _SIZE_MAX and _SIZE_MIN <= h <= _SIZE_MAX):
-            return "INVALID"
-        if w % _SIZE_STEP != 0 or h % _SIZE_STEP != 0:
-            return "INVALID"
-        return (w, h)
     return None
 
 
@@ -308,22 +297,11 @@ async def handle_novelai(matcher: Matcher, bot: Bot, event: MessageEvent, args: 
             ])
         )
 
-    # 解析可选尺寸参数（指令最前面的一个 token）
+    # 解析可选尺寸参数（指令最前面的一个 token）；不写尺寸则默认竖屏
     parts = raw.split(None, 1)
     size = None
     if parts:
         r = _resolve_size_arg(parts[0])
-        if r == "INVALID":
-            await matcher.finish(
-                Message([
-                    MessageSegment.reply(event.message_id),
-                    MessageSegment.text(
-                        "⚠️ 尺寸参数不合法。可用：竖 / 横 / 方（或 竖图 / 横图 / 方图），"
-                        "或自定义 WxH（宽高均为 64 的倍数、范围 256~2048），如 1024x1024。"
-                    ),
-                ])
-            )
-            return
         if r is not None:
             size = r
 
@@ -540,7 +518,7 @@ async def handle_novelai_help(matcher: Matcher, event: MessageEvent):
         ("查询额度（仅超级用户）", [
             ("ai画图额度 / ai画图余额", "查询账户剩余 Anlas 与 Opus 免费 V5 额度"),
         ]),
-        ("__text__", "默认尺寸 832×1216（竖屏），默认模型 nai-diffusion-4-5-curated。尺寸参数放最前：竖/横/方 或 自定义 WxH（宽高须为 64 的倍数）。"),
+        ("__text__", "默认尺寸 832×1216（竖屏），默认模型 nai-diffusion-4-5-curated。尺寸参数放最前：竖/横/方，不写则用竖屏。"),
     ]
     img_b64 = render_help_image("AI 画图帮助", sections, footer="AI 画图 · NovelAI")
     await matcher.finish(MessageSegment.image(f"base64://{img_b64}"))
