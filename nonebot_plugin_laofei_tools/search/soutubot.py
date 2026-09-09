@@ -19,15 +19,15 @@ soutubot.moe API 封装（适配 2026-09 站点改版）
     path_segments[0].source_url/page_url   -> url（已是绝对 URL，无需再拼域名）
     timing.total_ms                        -> executionTime
 
-关于「相似度百分比」的重要说明（2026-09-09 实测确认）：
-- 旧版 API 直接返回 similarity 百分比（如 95.78%），新版**不再返回**该字段。
-  新版只有内部评分 score（实测区间约 15~50，非百分比）。
-- segment.similarity_groups[].best_similarity 虽是百分比，但仅在命中已知
-  「持久相似组」时才存在（实测 50 条中仅 6 条有，且恒在 98% 以上），
-  其语义是「组内最佳相似度」，与逐条相似度不同，**不可混用**否则排序错乱。
-- 因此 similarity 百分比由 score 经 _score_to_percent() 线性映射得出，
-  属**显示用估算值**，非 API 原始百分比。调整 SCORE_MIN/MAX 与
-  SIMILARITY_PCT_MIN/MAX 即可改变观感。排序仍以原始 score 为准（两者单调等价）。
+关于「相似度百分比」的说明（2026-09-09 二次修正，以此为准）：
+- **score 本身就是百分比相似度**，直接原值展示即可，不要做任何换算。
+  证据：线上 bot 实际输出「相似度: 95.8%」，彼时代码即 `f"{score:.1f}%"`。
+- 【曾犯的错误，勿重蹈】一度用四叶草图标自测，得到 score 仅 15~45，便误判
+  score 非百分比、还加了一层线性映射。实为该测试图与库内匹配度本就低；
+  换成真实图片后 score 可达 95+。**score 区间随查询图而异，低分是真实低匹配度。**
+- segment.similarity_groups[].best_similarity 是另一回事：仅在命中已知
+  「持久相似组」时存在（实测 50 条仅 6 条有，恒 98%+），语义是「组内最佳」，
+  **不可当逐条相似度用**，否则排序错乱。
 
 metadata 结构（display_kind 决定可用字段）：
 - "doujinshi"（nhentai / ehentai / jmcomic / panda）：
@@ -54,14 +54,6 @@ DEFAULT_UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/122.0.0.0 Safari/537.36"
 )
-
-# ---- score（内部评分） -> 显示用百分比 的映射区间 ----
-# 新版 API 不返回百分比相似度，此处按实测经验区间线性映射。
-# 这是显示用估算值，非 API 原始百分比；调整这四个常量即可改变观感。
-SCORE_MIN = 15.0            # 实测最低分区间下界
-SCORE_MAX = 48.0            # 实测最高分区间上界（略高于实测峰值 45.5，避免高分被截断并列）
-SIMILARITY_PCT_MIN = 60.0   # 映射到百分比的下界
-SIMILARITY_PCT_MAX = 99.0   # 映射到百分比的上界
 
 # 仅本子/漫画类具备完整元数据（标题 / 页数 / 语言），图库类可据此过滤
 KIND_DOUJINSHI = "doujinshi"
@@ -105,20 +97,6 @@ LANGUAGE_CN = {
     "original": "原作",
     "unknown": "未知",
 }
-
-
-def _score_to_percent(score) -> float:
-    """将内部评分 score 线性映射为显示用百分比（估算值，见模块文档说明）"""
-    try:
-        s = float(score)
-    except (TypeError, ValueError):
-        return 0.0
-    if s <= SCORE_MIN:
-        s = SCORE_MIN
-    elif s >= SCORE_MAX:
-        s = SCORE_MAX
-    ratio = (s - SCORE_MIN) / (SCORE_MAX - SCORE_MIN)
-    return SIMILARITY_PCT_MIN + ratio * (SIMILARITY_PCT_MAX - SIMILARITY_PCT_MIN)
 
 
 def _display_source(source_key: str) -> str:
@@ -199,11 +177,12 @@ def _extract_metadata(segment: dict, item: dict) -> dict:
     # 作品 ID：本子类用 source.id，图库类用 post.post_id，最后兜底 external_id
     work_id = str(src.get("id") or post.get("post_id") or segment.get("external_id") or "")
 
-    # 标题：本子类用 primary，缺失时退回日文/别名；再无则退回路径兜底
-    title = primary or alias or _build_title(item, segment)
+    # 标题优先展示「原名」（日文/原始语言标题），更符合阅读习惯；
+    # 原名缺失时退回译名(primary)，再无则退回路径兜底。
+    title = alias or primary or _build_title(item, segment)
 
-    # 别名仅在与其与正标题不同时保留（用于展示日文原名）
-    alt_title = alias if (alias and alias != primary) else ""
+    # primary 与标题不同时保留为「译名」备用（当前不展示，保留字段便于日后启用）
+    alt_title = primary if (primary and primary != title) else ""
 
     return {
         "kind": kind,
@@ -225,14 +204,14 @@ def _normalize_result(raw: dict) -> dict:
     统一结构：
     {
         "data": [{
-            "score": float,             # 原始内部评分（排序依据）
-            "similarity": float,        # 显示用百分比（由 score 映射，估算值）
+            "score": float,             # 相似度百分比（API 原值，排序依据）
+            "similarity": float,        # 同 score，直接原值展示，不做换算
             "source": str,              # 来源标识，如 nhentai / gelbooru
             "sourceName": str,          # 来源展示名，如 NHentai
             "kind": str,                # doujinshi / booru / ""
             "workId": str,              # 作品 ID
-            "title": str,               # 完整标题（不截断）
-            "altTitle": str,            # 日文/别名标题（无则空）
+            "title": str,               # 完整标题（原名优先，不截断）
+            "altTitle": str,            # 译名 primary（与原名不同时才有，当前不展示）
             "pageCount": int | None,    # 页数
             "chapter": str | None,      # 章节（部分来源用章节而非页数）
             "language": str,            # 语言码原文，如 chinese
@@ -252,9 +231,10 @@ def _normalize_result(raw: dict) -> dict:
         segment = _first_segment(item)
         source_key = segment.get("source_key") or "unknown"
         score = item.get("score", 0)
+        # score 本身即百分比相似度，原值展示（不做任何换算）
         data.append({
             "score": score,
-            "similarity": _score_to_percent(score),
+            "similarity": score,
             "source": source_key,
             "sourceName": _display_source(source_key),
             "title": "",

@@ -223,7 +223,6 @@ async def send_forward_message(
         similarity = item.get("similarity", 0)
         source = item.get("sourceName") or item.get("source", "unknown")
         title = item.get("title", "")
-        alt_title = item.get("altTitle", "")
         work_id = item.get("workId", "")
         page_count = item.get("pageCount")
         chapter = item.get("chapter")
@@ -236,8 +235,7 @@ async def send_forward_message(
         # 构建文字信息，格式：
         #   【来源】相似度：xx.xx%
         #   #作品ID - 页数 N
-        #   完整标题
-        #   原名：日文/别名标题（可选）
+        #   完整标题（原名）
         #   语言：chinese（中文）（可选）
         #   详情地址
         lines = [f"【{source}】相似度：{similarity:.2f}%"]
@@ -252,8 +250,6 @@ async def send_forward_message(
 
         if title:
             lines.append(title)
-        if alt_title:
-            lines.append(f"原名：{alt_title}")
         if language:
             lines.append(
                 f"语言：{language}（{language_cn}）" if language_cn else f"语言：{language}"
