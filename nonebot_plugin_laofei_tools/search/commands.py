@@ -210,20 +210,13 @@ async def send_forward_message(
         source = item.get("source", "unknown")
         title = item.get("title", "未知标题")
         preview_url = item.get("previewImageUrl", "")
-        subject_path = item.get("subjectPath", "")
-        
-        # 根据 source 拼接链接
-        source_base_urls = {
-            "nhentai": "https://nhentai.net",
-            "ehentai": "https://e-hentai.org",
-        }
-        base_url = source_base_urls.get(source, "https://soutubot.moe")
-        subject_url = f"{base_url}{subject_path}" if subject_path else ""
-        
+        # 新版 API 直接返回绝对 URL，无需再按 source 拼接站点域名
+        result_url = item.get("url", "")
+
         # 构建文字信息
-        info_text = f"【{source}】相似度: {similarity}%\n{title[:100]}"
-        if subject_url:
-            info_text += f"\n链接: {subject_url}"
+        info_text = f"【{source}】相似度: {similarity:.1f}%\n{title[:100]}"
+        if result_url:
+            info_text += f"\n链接: {result_url}"
         
         # 下载并处理预览图
         image_base64 = ""
@@ -243,7 +236,7 @@ async def send_forward_message(
         nodes.append({
             "type": "node",
             "data": {
-                "name": f"{source} - {similarity}%",
+                "name": f"{source} - {similarity:.1f}%",
                 "uin": str(bot.self_id),
                 "content": content,
             }
@@ -266,7 +259,7 @@ async def send_forward_message(
             similarity = item.get("similarity", 0)
             source = item.get("source", "unknown")
             title = item.get("title", "未知标题")
-            text_results.append(f"{i}. 【{source}】相似度: {similarity}%\n{title[:50]}\n")
+            text_results.append(f"{i}. 【{source}】相似度: {similarity:.1f}%\n{title[:50]}\n")
         await bot.send(event, "\n".join(text_results))
 
 
@@ -286,7 +279,17 @@ async def download_and_blur_image(image_url: str, blur_radius: int = 10) -> str:
     import base64
     from io import BytesIO
     
-    async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
+    headers = {
+        # 新版缩略图托管在独立图床（img.76888268.xyz），带 Referer 可避免防盗链拦截
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/122.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://soutubot.moe/",
+    }
+
+    async with httpx.AsyncClient(timeout=30.0, trust_env=False, headers=headers) as client:
         resp = await client.get(image_url)
         resp.raise_for_status()
         image_data = resp.content
