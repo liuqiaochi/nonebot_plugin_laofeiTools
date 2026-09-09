@@ -25,6 +25,8 @@ class Config(BaseModel):
     # DeepSeek AI 配置
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-v4-flash"
+    # 多模态（视觉理解）模型：仅 lg识图 使用，官方标记为实验版
+    deepseek_vision_model: str = "deepseek-v4-flash-vision-exp"
 
     # NovelAI 画图配置
     novelai_api_key: str = ""
