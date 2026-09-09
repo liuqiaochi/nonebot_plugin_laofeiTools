@@ -13,11 +13,29 @@ soutubot.moe API 封装（适配 2026-09 站点改版）
 
 新版响应 -> 统一结构的字段映射（见 _normalize_result）：
     results[]                              -> data[]
-    score                                  -> similarity
+    score（内部评分）                       -> similarity（百分比，见下方说明）
     path_segments[0].source_key            -> source
     path_segments[0].thumbnail_url         -> previewImageUrl（已是绝对 URL）
     path_segments[0].source_url/page_url   -> url（已是绝对 URL，无需再拼域名）
     timing.total_ms                        -> executionTime
+
+关于「相似度百分比」的重要说明（2026-09-09 实测确认）：
+- 旧版 API 直接返回 similarity 百分比（如 95.78%），新版**不再返回**该字段。
+  新版只有内部评分 score（实测区间约 15~50，非百分比）。
+- segment.similarity_groups[].best_similarity 虽是百分比，但仅在命中已知
+  「持久相似组」时才存在（实测 50 条中仅 6 条有，且恒在 98% 以上），
+  其语义是「组内最佳相似度」，与逐条相似度不同，**不可混用**否则排序错乱。
+- 因此 similarity 百分比由 score 经 _score_to_percent() 线性映射得出，
+  属**显示用估算值**，非 API 原始百分比。调整 SCORE_MIN/MAX 与
+  SIMILARITY_PCT_MIN/MAX 即可改变观感。排序仍以原始 score 为准（两者单调等价）。
+
+metadata 结构（display_kind 决定可用字段）：
+- "doujinshi"（nhentai / ehentai / jmcomic / panda）：
+    metadata.source.id/url、metadata.title.primary/japanese_or_alias、
+    metadata.facts.page_count/language/category/chapter
+- "booru"（gelbooru / danbooru / zerochan …）：
+    仅 metadata.post.post_id/post_url 与 metadata.asset/tags，无标题·页数·语言
+- pixiv：metadata 整体为 null，仅有 external_id
 """
 
 from io import BytesIO
@@ -36,6 +54,87 @@ DEFAULT_UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/122.0.0.0 Safari/537.36"
 )
+
+# ---- score（内部评分） -> 显示用百分比 的映射区间 ----
+# 新版 API 不返回百分比相似度，此处按实测经验区间线性映射。
+# 这是显示用估算值，非 API 原始百分比；调整这四个常量即可改变观感。
+SCORE_MIN = 15.0            # 实测最低分区间下界
+SCORE_MAX = 48.0            # 实测最高分区间上界（略高于实测峰值 45.5，避免高分被截断并列）
+SIMILARITY_PCT_MIN = 60.0   # 映射到百分比的下界
+SIMILARITY_PCT_MAX = 99.0   # 映射到百分比的上界
+
+# 仅本子/漫画类具备完整元数据（标题 / 页数 / 语言），图库类可据此过滤
+KIND_DOUJINSHI = "doujinshi"
+
+# source_key -> 展示名
+SOURCE_DISPLAY = {
+    "nhentai": "NHentai",
+    "ehentai": "E-Hentai",
+    "jmcomic": "JMComic",
+    "panda": "Panda Chaika",
+    "gelbooru": "Gelbooru",
+    "danbooru": "Danbooru",
+    "zerochan": "Zerochan",
+    "konachan": "Konachan",
+    "yande": "Yande.re",
+    "rule34": "Rule34",
+    "sankaku": "Sankaku",
+    "pixiv": "Pixiv",
+    "twitter": "Twitter/X",
+    "kemono": "Kemono",
+    "nijie": "Nijie",
+}
+
+# 语言码 -> 中文名（nhentai / ehentai 的 facts.language 为英文小写）
+LANGUAGE_CN = {
+    "chinese": "中文",
+    "japanese": "日文",
+    "english": "英文",
+    "korean": "韩文",
+    "french": "法文",
+    "german": "德文",
+    "spanish": "西班牙文",
+    "italian": "意大利文",
+    "russian": "俄文",
+    "portuguese": "葡萄牙文",
+    "thai": "泰文",
+    "vietnamese": "越南文",
+    "indonesian": "印尼文",
+    "translated": "翻译",
+    "rewrite": "改写",
+    "original": "原作",
+    "unknown": "未知",
+}
+
+
+def _score_to_percent(score) -> float:
+    """将内部评分 score 线性映射为显示用百分比（估算值，见模块文档说明）"""
+    try:
+        s = float(score)
+    except (TypeError, ValueError):
+        return 0.0
+    if s <= SCORE_MIN:
+        s = SCORE_MIN
+    elif s >= SCORE_MAX:
+        s = SCORE_MAX
+    ratio = (s - SCORE_MIN) / (SCORE_MAX - SCORE_MIN)
+    return SIMILARITY_PCT_MIN + ratio * (SIMILARITY_PCT_MAX - SIMILARITY_PCT_MIN)
+
+
+def _display_source(source_key: str) -> str:
+    """来源标识 -> 展示名，未知来源则首字母大写兜底"""
+    if not source_key:
+        return "未知来源"
+    if source_key in SOURCE_DISPLAY:
+        return SOURCE_DISPLAY[source_key]
+    return source_key.capitalize()
+
+
+def _language_cn(language: str) -> str:
+    """语言码 -> 中文名，未收录则返回原值"""
+    if not language:
+        return ""
+    return LANGUAGE_CN.get(language.strip().lower(), language)
 
 
 def _first_segment(result_item: dict) -> dict:
@@ -62,15 +161,61 @@ def _pick_url(segment: dict) -> str:
     """
     挑选最合适的跳转链接（新版返回的均为绝对 URL）。
 
-    优先级：页级链接 > 作品主页 > 元数据内的 post_url
+    优先级：页级链接（可直达匹配页，如 nhentai.net/g/366466/18/）
+            > 本子作品主页（metadata.source.url）
+            > 图库帖子页（metadata.post.post_url）
+            > 来源页（source_url）
     """
-    meta_post = (segment.get("metadata") or {}).get("post") or {}
+    metadata = segment.get("metadata") or {}
+    src = metadata.get("source") or {}
+    post = metadata.get("post") or {}
     return (
         segment.get("page_url")
+        or src.get("url")
+        or post.get("post_url")
         or segment.get("source_url")
-        or meta_post.get("post_url")
         or ""
     )
+
+
+def _extract_metadata(segment: dict, item: dict) -> dict:
+    """
+    从 segment 中提取展示所需的完整元数据。
+
+    按 display_kind 分别处理：
+    - doujinshi：可拿到作品 ID、完整标题（含日文/别名）、页数/章节、语言
+    - booru 等：只有帖子 ID 与链接，无标题/页数/语言
+    """
+    metadata = segment.get("metadata") or {}
+    kind = metadata.get("display_kind") or ""
+    src = metadata.get("source") or {}
+    post = metadata.get("post") or {}
+    title_obj = metadata.get("title") or {}
+    facts = metadata.get("facts") or {}
+
+    primary = title_obj.get("primary") or ""
+    alias = title_obj.get("japanese_or_alias") or ""
+
+    # 作品 ID：本子类用 source.id，图库类用 post.post_id，最后兜底 external_id
+    work_id = str(src.get("id") or post.get("post_id") or segment.get("external_id") or "")
+
+    # 标题：本子类用 primary，缺失时退回日文/别名；再无则退回路径兜底
+    title = primary or alias or _build_title(item, segment)
+
+    # 别名仅在与其与正标题不同时保留（用于展示日文原名）
+    alt_title = alias if (alias and alias != primary) else ""
+
+    return {
+        "kind": kind,
+        "workId": work_id,
+        "title": title,
+        "altTitle": alt_title,
+        "pageCount": facts.get("page_count"),
+        "chapter": facts.get("chapter"),
+        "language": facts.get("language") or "",
+        "languageCn": _language_cn(facts.get("language") or ""),
+        "category": facts.get("category") or "",
+    }
 
 
 def _normalize_result(raw: dict) -> dict:
@@ -80,11 +225,21 @@ def _normalize_result(raw: dict) -> dict:
     统一结构：
     {
         "data": [{
-            "similarity": float,        # 新版 score（非百分比点数，保留原值）
-            "source": str,              # 来源标识，如 gelbooru / nhentai
-            "title": str,
+            "score": float,             # 原始内部评分（排序依据）
+            "similarity": float,        # 显示用百分比（由 score 映射，估算值）
+            "source": str,              # 来源标识，如 nhentai / gelbooru
+            "sourceName": str,          # 来源展示名，如 NHentai
+            "kind": str,                # doujinshi / booru / ""
+            "workId": str,              # 作品 ID
+            "title": str,               # 完整标题（不截断）
+            "altTitle": str,            # 日文/别名标题（无则空）
+            "pageCount": int | None,    # 页数
+            "chapter": str | None,      # 章节（部分来源用章节而非页数）
+            "language": str,            # 语言码原文，如 chinese
+            "languageCn": str,          # 语言中文名，如 中文
+            "category": str,            # 分类，如 Doujinshi / Non-H
             "previewImageUrl": str,     # 绝对 URL
-            "url": str,                 # 绝对 URL
+            "url": str,                 # 详情地址（绝对 URL，优先页级）
         }],
         "executionTime": int,
         "resultId": str,
@@ -95,16 +250,29 @@ def _normalize_result(raw: dict) -> dict:
     data = []
     for item in results:
         segment = _first_segment(item)
+        source_key = segment.get("source_key") or "unknown"
+        score = item.get("score", 0)
         data.append({
-            "similarity": item.get("score", 0),
-            "source": segment.get("source_key") or "unknown",
-            "title": _build_title(item, segment),
+            "score": score,
+            "similarity": _score_to_percent(score),
+            "source": source_key,
+            "sourceName": _display_source(source_key),
+            "title": "",
+            "altTitle": "",
+            "pageCount": None,
+            "chapter": None,
+            "language": "",
+            "languageCn": "",
+            "category": "",
+            "workId": "",
+            "kind": "",
+            **_extract_metadata(segment, item),
             "previewImageUrl": segment.get("thumbnail_url") or "",
             "url": _pick_url(segment),
         })
 
-    # 按相似度降序（实测已有序，此处兜底）
-    data.sort(key=lambda x: x.get("similarity", 0), reverse=True)
+    # 按原始 score 降序（实测已有序，此处兜底；与 similarity 单调等价）
+    data.sort(key=lambda x: x.get("score", 0), reverse=True)
 
     return {
         "data": data,

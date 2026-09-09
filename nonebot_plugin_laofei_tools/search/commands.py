@@ -24,7 +24,7 @@ from nonebot.permission import SUPERUSER
 
 from ..config import enable_group, is_group_enabled
 from ..common.utils import download_image
-from .soutubot import get_client
+from .soutubot import KIND_DOUJINSHI, get_client
 
 
 # ========== 搜图指令 ==========
@@ -180,21 +180,35 @@ async def send_forward_message(
         event: 群聊消息事件
         result: API 返回的搜索结果
     """
-    data = result.get("data", [])
+    all_data = result.get("data", [])
     execution_time = result.get("executionTime", 0)
-    
-    if not data:
+
+    if not all_data:
         await bot.send(event, "Bot酱没有找到任何结果")
         return
-    
-    # 按相似度排序，取前5条
-    sorted_results = sorted(data, key=lambda x: x.get("similarity", 0), reverse=True)[:5]
-    
+
+    # 仅保留本子/漫画类结果：图库类(gelbooru/danbooru/zerochan/pixiv 等)无标题·页数·语言，
+    # 展示出来只有一串 ID，信息量低，按需求过滤掉。
+    data = [x for x in all_data if x.get("kind") == KIND_DOUJINSHI]
+
+    if not data:
+        await bot.send(
+            event,
+            f"Bot酱只找到 {len(all_data)} 条图库类结果（无标题/页数/语言），已过滤。"
+        )
+        return
+
+    # 按原始评分排序（与显示百分比单调等价），取前5条
+    sorted_results = sorted(data, key=lambda x: x.get("score", 0), reverse=True)[:5]
+
     # 构建转发消息节点
     nodes = []
-    
+
     # 添加标题节点
-    header_msg = f"找到 {len(data)} 条结果（显示最相似的 {len(sorted_results)} 条）\n耗时: {execution_time}ms"
+    header_msg = (
+        f"找到 {len(data)} 条结果（显示最相似的 {len(sorted_results)} 条）\n"
+        f"耗时: {execution_time}ms"
+    )
     nodes.append({
         "type": "node",
         "data": {
@@ -207,17 +221,48 @@ async def send_forward_message(
     # 添加每条结果
     for item in sorted_results:
         similarity = item.get("similarity", 0)
-        source = item.get("source", "unknown")
-        title = item.get("title", "未知标题")
+        source = item.get("sourceName") or item.get("source", "unknown")
+        title = item.get("title", "")
+        alt_title = item.get("altTitle", "")
+        work_id = item.get("workId", "")
+        page_count = item.get("pageCount")
+        chapter = item.get("chapter")
+        language = item.get("language", "")
+        language_cn = item.get("languageCn", "")
         preview_url = item.get("previewImageUrl", "")
         # 新版 API 直接返回绝对 URL，无需再按 source 拼接站点域名
         result_url = item.get("url", "")
 
-        # 构建文字信息
-        info_text = f"【{source}】相似度: {similarity:.1f}%\n{title[:100]}"
+        # 构建文字信息，格式：
+        #   【来源】相似度：xx.xx%
+        #   #作品ID - 页数 N
+        #   完整标题
+        #   原名：日文/别名标题（可选）
+        #   语言：chinese（中文）（可选）
+        #   详情地址
+        lines = [f"【{source}】相似度：{similarity:.2f}%"]
+
+        meta_line = f"#{work_id}" if work_id else ""
+        if page_count:
+            meta_line += f" - 页数 {page_count}"
+        elif chapter:
+            meta_line += f" - 章节 {chapter}"
+        if meta_line:
+            lines.append(meta_line)
+
+        if title:
+            lines.append(title)
+        if alt_title:
+            lines.append(f"原名：{alt_title}")
+        if language:
+            lines.append(
+                f"语言：{language}（{language_cn}）" if language_cn else f"语言：{language}"
+            )
         if result_url:
-            info_text += f"\n链接: {result_url}"
-        
+            lines.append(result_url)
+
+        info_text = "\n".join(lines)
+
         # 下载并处理预览图
         image_base64 = ""
         if preview_url:
@@ -236,7 +281,7 @@ async def send_forward_message(
         nodes.append({
             "type": "node",
             "data": {
-                "name": f"{source} - {similarity:.1f}%",
+                "name": f"{source} - {similarity:.2f}%",
                 "uin": str(bot.self_id),
                 "content": content,
             }
@@ -257,9 +302,18 @@ async def send_forward_message(
         text_results.append(f"找到 {len(data)} 条结果（显示前 {min(len(sorted_results), 5)} 条）\n耗时: {execution_time}ms\n")
         for i, item in enumerate(sorted_results[:5], 1):
             similarity = item.get("similarity", 0)
-            source = item.get("source", "unknown")
+            source = item.get("sourceName") or item.get("source", "unknown")
             title = item.get("title", "未知标题")
-            text_results.append(f"{i}. 【{source}】相似度: {similarity:.1f}%\n{title[:50]}\n")
+            work_id = item.get("workId", "")
+            page_count = item.get("pageCount")
+            url = item.get("url", "")
+            block = f"{i}. 【{source}】相似度: {similarity:.2f}%"
+            if work_id:
+                block += f"\n#{work_id}" + (f" - 页数 {page_count}" if page_count else "")
+            block += f"\n{title[:80]}"
+            if url:
+                block += f"\n{url}"
+            text_results.append(block + "\n")
         await bot.send(event, "\n".join(text_results))
 
 
