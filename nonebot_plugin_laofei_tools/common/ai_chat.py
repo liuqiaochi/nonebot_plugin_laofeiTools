@@ -44,7 +44,6 @@ from ..config import (
     remove_ai_blacklist,
     DATA_DIR,
 )
-from .utils import download_image
 
 # ========== 启动时检查 API Key ==========
 
@@ -392,212 +391,6 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
             await matcher.send(img_seg + MessageSegment.text(reply), reply_message=True)
         else:
             await matcher.send(reply, reply_message=True)
-
-
-# ========== lg识图（DeepSeek 多模态视觉理解） ==========
-#
-# 与 @bot 文本对话的关键差异：
-#   1. 走独立指令，不受 _at_bot_rule「排除 reply」限制，因此可引用他人发的图片
-#   2. 仅在本次请求检测到图片时才使用视觉模型，纯文本对话仍用 deepseek-v4-flash
-#   3. 不写入 _chat_histories —— 该结构 content 为字符串，无法承载多模态内容
-#
-# DeepSeek 视觉模型约束（官方）：
-#   - 支持 JPEG / PNG / GIF / WebP；图片只能出现在 user 消息中
-#   - 单图上限 32 MiB（按 base64 / URL 计），此处按原始字节留出余量
-#   - 单图最多折算 384 tokens，超大图会被自动缩放，故本地无需压缩
-
-DEFAULT_VISION_MODEL = "deepseek-v4-flash-vision-exp"
-
-# 单图体积上限：API 限制 32 MiB，按原始字节留余量（base64 后约为 4/3 倍）
-_VISION_IMAGE_MAX_BYTES = 24 * 1024 * 1024
-
-_VISION_SYSTEM_PROMPT = (
-    "你是一个名叫「蓝色大肥鱼」的QQ群机器人助手，正在帮用户分析图片。"
-    "回答使用中文，简洁清晰。"
-    "当用户没有指定问题时，按以下维度描述：画面主体元素、场景与环境、构图与视角、"
-    "色彩与光线、画面中可辨识的文字（请原文列出）、可能的来源或用途。"
-    "不要编造画面中不存在的细节；无法判断的地方要明确说明。"
-)
-
-_DEFAULT_VISION_QUESTION = "请详细分析这张图片的内容和元素。"
-
-
-def _get_vision_model() -> str:
-    """获取视觉模型名（可由 .env 的 DEEPSEEK_VISION_MODEL 覆盖）"""
-    try:
-        name = getattr(get_driver().config, "deepseek_vision_model", "")
-    except Exception:
-        name = ""
-    return name or DEFAULT_VISION_MODEL
-
-
-def _pick_image_url(message) -> str:
-    """从消息中取出第一张图片的 URL / file id"""
-    for seg in message:
-        if seg.type == "image":
-            return seg.data.get("url") or seg.data.get("file") or ""
-    return ""
-
-
-def _sniff_image_mime(data: bytes) -> str:
-    """按文件头嗅探图片类型（扩展名不可靠，API 实际按内容识别）"""
-    if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
-    if data.startswith(b"\xff\xd8\xff"):
-        return "image/jpeg"
-    if data[:6] in (b"GIF87a", b"GIF89a"):
-        return "image/gif"
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "image/webp"
-    return "image/jpeg"
-
-
-vision_cmd = on_command(
-    "lg识图",
-    aliases={"lg看图", "lg读图", "lg分析图", "lg图片分析"},
-    priority=5,
-    block=True,
-    # 注意：此处必须关闭 force_whitespace，否则「lg识图 + 直接附带图片」无法触发。
-    # nonebot 判定逻辑（rule.py CommandRule）：命令后紧跟图片段时 cmd_arg 非空、
-    # 但无空白符，CMD_WHITESPACE_KEY 不设置，force_whitespace=True 会判定为 False。
-    # 副作用：命令名后紧跟文字也会匹配（如 lg识图推荐），考虑到误触发仅回一句用法
-    # 提示、且不含歧义性高的「识图」裸别名，风险可接受。
-)
-
-
-@vision_cmd.handle()
-async def handle_vision_image(
-    matcher: Matcher,
-    bot: Bot,
-    event: MessageEvent,
-    args: Message = CommandArg(),
-):
-    """分析图片内容（引用图片，或与指令同时发送图片均可）"""
-    if isinstance(event, PrivateMessageEvent):
-        await matcher.finish("识图功能仅在群聊可用")
-        return
-
-    group_id = str(event.group_id)
-    user_id = str(event.user_id)
-
-    if not is_ai_group_enabled(group_id):
-        await matcher.finish("本群 AI 功能未开启，请联系超级用户发送「开启AI」")
-        return
-
-    if is_ai_blacklisted(user_id):
-        await matcher.finish("你已被 AI 拉黑，无法使用识图功能。")
-        return
-
-    # 图片来源：优先引用消息，其次本次消息直接附图
-    image_url = ""
-    if event.reply is not None:
-        image_url = _pick_image_url(event.reply.message)
-    if not image_url:
-        image_url = _pick_image_url(event.message)
-
-    if not image_url:
-        await matcher.finish(
-            "请引用一张图片后发送「lg识图」，或直接在「lg识图」后面附上图片。\n"
-            "支持 JPEG / PNG / GIF / WebP。"
-        )
-        return
-
-    # 提问文本：指令参数优先，其次取被引用消息的文字，最后用默认问题
-    question = args.extract_plain_text().strip()
-    if not question and event.reply is not None:
-        question = event.reply.message.extract_plain_text().strip()
-    if not question:
-        question = _DEFAULT_VISION_QUESTION
-
-    await matcher.send("🔍 正在分析图片，请稍候…")
-
-    try:
-        image_data = await download_image(bot, image_url)
-    except Exception as e:
-        logger.error(f"lg识图 图片下载异常: {e}")
-        image_data = None
-
-    if not image_data:
-        await matcher.finish("图片下载失败，请稍后重试。")
-        return
-
-    if len(image_data) > _VISION_IMAGE_MAX_BYTES:
-        await matcher.finish(
-            f"图片过大（{len(image_data) / 1024 / 1024:.1f} MiB），"
-            f"超出 DeepSeek 视觉模型 24 MiB 上限。"
-        )
-        return
-
-    try:
-        client = _get_client()
-    except ValueError as e:
-        logger.error(f"lg识图 API Key 未配置: {e}")
-        await matcher.finish("AI 功能未配置 API Key，请联系管理员。")
-        return
-
-    mime = _sniff_image_mime(image_data)
-    b64 = base64.b64encode(image_data).decode()
-    model = _get_vision_model()
-
-    messages = [
-        {"role": "system", "content": _VISION_SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": question},
-                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
-            ],
-        },
-    ]
-
-    try:
-        logger.info(
-            f"lg识图: user={user_id} group={group_id} "
-            f"bytes={len(image_data)} mime={mime} model={model} q={question[:30]}..."
-        )
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=0.7,
-            max_tokens=2000,
-        )
-        reply = (response.choices[0].message.content or "").strip()
-    except Exception as e:
-        logger.error(f"lg识图 调用失败: {e}")
-        await matcher.finish(f"识图失败，请稍后再试。（{e}）")
-        return
-
-    if not reply:
-        await matcher.finish("识图没有返回结果，请稍后重试。")
-        return
-
-    # 长结果合并转发，短结果直接引用回复（与 AI 对话保持一致）
-    if len(reply) > 150:
-        bot_name = "蓝色大肥鱼"
-        try:
-            bot_info = await bot.get_login_info()
-            bot_name = bot_info.get("nickname", bot_name)
-        except Exception:
-            pass
-
-        forward_msgs = [
-            {
-                "type": "node",
-                "data": {"name": bot_name, "uin": bot.self_id, "content": chunk},
-            }
-            for chunk in _split_long_message(reply)
-        ]
-        try:
-            await bot.call_api(
-                "send_group_forward_msg",
-                group_id=event.group_id,
-                messages=forward_msgs,
-            )
-            return
-        except Exception as e:
-            logger.warning(f"lg识图 合并转发失败，降级为普通回复: {e}")
-
-    await matcher.finish(reply, reply_message=True)
 
 
 # ========== lg清记忆 指令 ==========
@@ -996,10 +789,6 @@ def _generate_ai_help_image() -> str:
             ("@机器人 + 问题", "群聊需先开启，私聊直接用"),
             ("lg清记忆 / lg清空记忆", "清除当前对话历史"),
         ]),
-        ("识图（视觉）", [
-            ("lg识图 + 问题", "引用图片或附图，让 AI 分析内容"),
-            ("lg识图（不写问题）", "默认详细分析图片元素"),
-        ]),
         ("管理（超管）", [
             ("开启AI / 关闭AI", "开启 / 关闭本群 AI 功能"),
             ("AI拉黑 @用户/QQ", "将用户加入 AI 黑名单"),
@@ -1071,7 +860,6 @@ async def handle_ai_help(matcher: Matcher) -> None:
             "🤖 蓝色大肥鱼 · AI 指令\n"
             "· @机器人 + 问题（群聊需开启，私聊直用）\n"
             "· lg清记忆（清除对话历史）\n"
-            "· 识图：lg识图 + 问题（引用图片，让 AI 分析内容）\n"
             "· 管理（超管）：开启AI / 关闭AI / AI拉黑 / AI解除\n"
             "· 配图：ai图添加 / ai图列表 / ai图删除 <序号> / ai图重置"
         )
