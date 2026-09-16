@@ -25,7 +25,6 @@ from .search import commands
 from .config import Config, init_enabled_groups
 from .common.points_data import init_data
 from .pet.pet_data import init_pet_data, refresh_all_stamina
-from .common.lottery_pool import draw_lottery, get_pool_status
 
 __version__ = "0.3.0"
 
@@ -121,8 +120,10 @@ sections = [
     ("积分系统", [
         ("签到 / 打卡", "每日签到获取积分"),
         ("积分 / 查积分", "查看积分信息"),
-        ("抽签 / 今日运气", "每日抽签（撞大运概率2%）"),
         ("新手大礼包", "领取新手大礼包"),
+    ]),
+    ("每日抽签", [
+        ("抽签 / 今日运气", "每日抽签（撞大运概率2%）"),
     ]),
     ("搜图功能", [
         ("搜图帮助", "查看搜图功能帮助"),
