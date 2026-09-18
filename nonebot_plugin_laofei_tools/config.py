@@ -286,3 +286,39 @@ def set_novelai_model(group_id: str, model: str) -> None:
     """设置本群当前模型（传入原始模型名）"""
     _novelai_model_groups[group_id] = model
     _save_novelai_model_groups(_novelai_model_groups)
+
+
+# ========== DeepSeek 对话模型（群级，默认回退到 config.deepseek_model） ==========
+
+DEEPSEEK_MODEL_FILE = DATA_DIR / "deepseek_model_groups.json"
+
+_deepseek_model_groups: dict = {}
+
+
+def _load_deepseek_model_groups() -> dict:
+    _ensure_data_dir()
+    if DEEPSEEK_MODEL_FILE.exists():
+        try:
+            with open(DEEPSEEK_MODEL_FILE, "r", encoding="utf-8") as f:
+                return json.load(f).get("model_groups", {})
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_deepseek_model_groups(data: dict):
+    safe_json_save(DEEPSEEK_MODEL_FILE, {"model_groups": data})
+
+
+_deepseek_model_groups = _load_deepseek_model_groups()
+
+
+def get_deepseek_model(group_id: str) -> str:
+    """返回本群当前模型（空字符串表示使用 config 默认）"""
+    return _deepseek_model_groups.get(group_id, "")
+
+
+def set_deepseek_model(group_id: str, model: str) -> None:
+    """设置本群当前模型（传入原始模型名）"""
+    _deepseek_model_groups[group_id] = model
+    _save_deepseek_model_groups(_deepseek_model_groups)

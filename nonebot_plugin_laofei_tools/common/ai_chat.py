@@ -42,6 +42,8 @@ from ..config import (
     is_ai_blacklisted,
     add_ai_blacklist,
     remove_ai_blacklist,
+    get_deepseek_model,
+    set_deepseek_model,
     DATA_DIR,
 )
 
@@ -148,8 +150,43 @@ def _get_client() -> OpenAI:
     return OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
 
 
-def _get_model() -> str:
+# 模型别名 -> 原始模型名
+DEEPSEEK_MODEL_ALIASES = {
+    "v4-flash": "deepseek-v4-flash",
+    "chat": "deepseek-chat",
+    "reasoner": "deepseek-reasoner",
+    "r1": "deepseek-reasoner",
+    "v3": "deepseek-v3",
+}
+
+
+def _deepseek_model_alias(model: str) -> str:
+    """返回模型名对应的别名（找不到则原样返回）"""
+    for alias, raw in DEEPSEEK_MODEL_ALIASES.items():
+        if raw == model:
+            return alias
+    return model
+
+
+def _resolve_deepseek_model(key: str):
+    """将用户输入的别名/原始名解析为原始模型名，空输入返回 None。
+    允许任意原始模型名（如代理/中转自定义的模型），便于适配不同端点。"""
+    key = (key or "").strip()
+    if not key:
+        return None
+    kl = key.lower()
+    if kl in DEEPSEEK_MODEL_ALIASES:
+        return DEEPSEEK_MODEL_ALIASES[kl]
+    return key
+
+
+def _get_model(group_id: str = "") -> str:
+    """解析本群当前模型（群级设置优先，否则 config 默认）"""
     try:
+        if group_id:
+            grp = get_deepseek_model(group_id)
+            if grp:
+                return grp
         return getattr(get_driver().config, "deepseek_model", "deepseek-v4-flash")
     except Exception:
         return "deepseek-v4-flash"
@@ -312,7 +349,7 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
         await matcher.send(f"AI 功能未配置 API Key，请联系管理员。\n请在 .env 中设置 DEEPSEEK_API_KEY", reply_message=True)
         return
 
-    model = _get_model()
+    model = _get_model(group_id)
 
     # 5. 保存 + 构建消息
     _add_history(user_id, "user", prompt)
@@ -800,6 +837,10 @@ def _generate_ai_help_image() -> str:
             ("ai图删除 <序号>", "超管：删除配图（支持 1 3 5 或 1-3）"),
             ("ai图重置", "超管：恢复内置基础图"),
         ], True),
+        ("切换模型（超管）", [
+            ("ai模型", "查看当前模型与可用列表"),
+            ("ai模型 <别名/模型名>", "切换本群 AI 对话模型"),
+        ], True),
     ]
 
     total_height = padding + header_height
@@ -861,6 +902,53 @@ async def handle_ai_help(matcher: Matcher) -> None:
             "· @机器人 + 问题（群聊需开启，私聊直用）\n"
             "· lg清记忆（清除对话历史）\n"
             "· 管理（超管）：开启AI / 关闭AI / AI拉黑 / AI解除\n"
+            "· 切换模型（超管）：ai模型（查看 / 切换本群对话模型）\n"
             "· 配图：ai图添加 / ai图列表 / ai图删除 <序号> / ai图重置"
         )
     await matcher.finish(MessageSegment.image(f"base64://{img_b64}"))
+
+
+# ========== ai模型 切换指令（仅超级用户） ==========
+
+deepseek_model_cmd = on_command(
+    "ai模型",
+    aliases={"AI模型", "切换ai模型", "切换模型", "ai模型切换"},
+    permission=SUPERUSER,
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+@deepseek_model_cmd.handle()
+async def handle_set_deepseek_model(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()):
+    """超级用户切换本群 AI 对话模型；不带参数时列出当前模型与可用列表"""
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish("请在群聊中发送此指令。")
+    group_id = str(event.group_id)
+
+    key = args.extract_plain_text().strip()
+    if not key:
+        cur = _get_model(group_id)
+        lines = [
+            f"当前本群 AI 对话模型：{cur}（别名 {_deepseek_model_alias(cur)}）",
+            "",
+            "可用模型（发送「ai模型 <别名>」切换）：",
+        ]
+        for alias, raw in DEEPSEEK_MODEL_ALIASES.items():
+            lines.append(f"  {alias}  ->  {raw}")
+        lines.append("")
+        lines.append("也可直接发送原始模型名，如：ai模型 deepseek-chat")
+        lines.append("（模型名随你的 API 端点而定，本指令不限制原始名）")
+        await matcher.finish(Message([MessageSegment.text("\n".join(lines))]))
+
+    resolved = _resolve_deepseek_model(key)
+    if not resolved:
+        await matcher.finish(
+            Message([MessageSegment.text(f"❌ 无效模型名「{key}」")])
+        )
+
+    set_deepseek_model(group_id, resolved)
+    await matcher.finish(
+        Message([MessageSegment.text(f"✅ 已切换本群 AI 对话模型为 {resolved}（别名 {_deepseek_model_alias(resolved)}）")])
+    )
