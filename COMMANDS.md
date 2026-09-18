@@ -134,7 +134,7 @@
 | `关闭AI` | 关闭ai、关闭lgai、禁用AI、禁用ai | 🔑 | 关闭本群 AI 功能 |
 | `AI拉黑 @用户` | ai拉黑、lgai拉黑 | 🔑 | 将用户加入 AI 黑名单（支持 @ 或 QQ 号） |
 | `AI解除 @用户` | ai解除、lgai解除、AI取消拉黑、ai取消拉黑 | 🔑 | 将用户移出 AI 黑名单 |
-| `ai模型` | AI模型、切换ai模型、切换模型、ai模型切换 | 🔑 | 查看/切换本群对话模型（别名 v4-flash/chat/reasoner…；也可直填原始模型名） |
+| `ai模型` | AI模型、切换ai模型、切换模型、ai模型切换 | 🔑 | 查看/切换本群对话模型（别名 v4-flash/chat/reasoner…；也可直填原始模型名）；`ai模型 <模型> <base_url>` 一并切 API 端点，`ai模型 base <base_url>` 仅改端点（reset 恢复全局） |
 
 ---
 

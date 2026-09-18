@@ -25,6 +25,7 @@ class Config(BaseModel):
     # DeepSeek AI 配置
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-v4-flash"
+    deepseek_base_url: str = "https://api.deepseek.com"
 
     # NovelAI 画图配置
     novelai_api_key: str = ""
@@ -315,10 +316,21 @@ _deepseek_model_groups = _load_deepseek_model_groups()
 
 def get_deepseek_model(group_id: str) -> str:
     """返回本群当前模型（空字符串表示使用 config 默认）"""
-    return _deepseek_model_groups.get(group_id, "")
+    entry = _deepseek_model_groups.get(group_id)
+    if isinstance(entry, dict):
+        return entry.get("model", "")
+    return entry or ""  # 兼容旧版字符串格式
 
 
-def set_deepseek_model(group_id: str, model: str) -> None:
-    """设置本群当前模型（传入原始模型名）"""
-    _deepseek_model_groups[group_id] = model
+def get_deepseek_base_url(group_id: str) -> str:
+    """返回本群当前 base_url（空字符串表示使用全局 config.deepseek_base_url）"""
+    entry = _deepseek_model_groups.get(group_id)
+    if isinstance(entry, dict):
+        return entry.get("base_url", "")
+    return ""  # 兼容旧版字符串格式（无 base_url 概念）
+
+
+def set_deepseek_config(group_id: str, model: str, base_url: str = "") -> None:
+    """设置本群当前模型与可选 base_url（base_url 为空字符串表示回退全局配置）"""
+    _deepseek_model_groups[group_id] = {"model": model, "base_url": base_url}
     _save_deepseek_model_groups(_deepseek_model_groups)
