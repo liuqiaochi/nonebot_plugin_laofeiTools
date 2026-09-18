@@ -145,6 +145,7 @@ PET_EXP_PER_LEVEL = 50
 DEFAULT_STAMINA = 120
 DRAGON_STAMINA = 150
 MAX_STAMINA = 200
+FEED_STAMINA_CAP = 9999   # 喂食可突破 max_stamina，体力硬上限
 
 
 # ========== 宠物数据类 ==========
@@ -794,7 +795,7 @@ def do_feed(user_id: str, food_name: str) -> dict:
     消耗背包中 1 个食物，恢复体力和好感度。
     各食物的体力/好感恢复量由 FOODS 中的 stamina/affection 字段决定（默认 20 体力 / 5 好感）；
     宠物口粮为 +50 体力 +20 好感；最爱食物额外 +10 体力 +10 好感。
-    香企鹅天赋：体力恢复量 ×1.4。体力不超过 max_stamina。
+    香企鹅天赋：体力恢复量 ×1.4。喂食可突破 max_stamina，最多累加到 FEED_STAMINA_CAP(9999)。
 
     Args:
         user_id: 用户 ID
@@ -837,7 +838,7 @@ def do_feed(user_id: str, food_name: str) -> dict:
 
     # 6. 应用体力增量，不超过 max_stamina
     old_stamina = pet.stamina
-    pet.stamina = min(pet.stamina + stamina_gain, pet.max_stamina)
+    pet.stamina = min(pet.stamina + stamina_gain, FEED_STAMINA_CAP)
     actual_stamina_gain = pet.stamina - old_stamina
 
     # 7. 应用好感度增量

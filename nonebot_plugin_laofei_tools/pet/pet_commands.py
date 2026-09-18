@@ -34,6 +34,7 @@ from .pet_data import (
     refresh_stamina_if_needed,
     do_work, do_steal, get_item_by_id,
     get_all_pet_owners,
+    FEED_STAMINA_CAP,
 )
 from .fishing_data import roll_fish, add_caught_fish
 
@@ -238,7 +239,7 @@ async def handle_pet_help(matcher: Matcher, event: MessageEvent):
 快速打工 - 自动打工至体力耗尽，合并转发结果
 快速散步 - 自动散步至体力耗尽，合并转发结果
 宠物抚摸 - 每日抚摸提升好感度
-宠物喂食 食物名1 食物名2 ... - 多食物空格分隔喂食（或 食物名 数量）
+宠物喂食 食物名1 食物名2 ... - 多食物空格分隔喂食（或 食物名 数量），体力可突破上限累加至 9999
 宠物pk @某人 - 与他人宠物PK对战
 宠物商店 - 查看商店商品
 购买 商品名 [数量] - 使用积分购买商品
@@ -463,13 +464,13 @@ async def handle_feed(matcher: Matcher, event: MessageEvent, args: Message = Com
 
     for food_name in food_list:
         for _ in range(per_count):
-            # 体力已满则停止后续喂食
+            # 体力达到硬上限（喂食上限 9999）则停止后续喂食
             current_pet = get_pet(user_id)
-            if current_pet and current_pet.stamina >= current_pet.max_stamina:
+            if current_pet and current_pet.stamina >= FEED_STAMINA_CAP:
                 if not fed_details:
                     await matcher.finish(Message([
                         MessageSegment.reply(event.message_id),
-                        MessageSegment.text("宠物体力已满，不需要喂食")
+                        MessageSegment.text(f"宠物体力已达上限（{FEED_STAMINA_CAP}），不需要喂食")
                     ]))
                     return
                 break
