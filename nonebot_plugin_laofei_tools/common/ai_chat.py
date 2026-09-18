@@ -63,7 +63,7 @@ async def _check_api_key():
         logger.error("请在 .env 文件中添加：DEEPSEEK_API_KEY=sk-xxx")
         logger.error("=" * 50)
     else:
-        logger.info(f"DeepSeek API Key 已配置 (模型: {getattr(driver.config, 'deepseek_model', 'deepseek-v4-flash')})")
+        logger.info(f"DeepSeek API Key 已配置 (模型: {getattr(driver.config, 'deepseek_model', 'deepseek-flash')})")
 
 # ========== 聊天记忆 ==========
 
@@ -156,8 +156,9 @@ def _get_client(base_url: str = "") -> OpenAI:
 
 # 模型别名 -> 原始模型名
 DEEPSEEK_MODEL_ALIASES = {
-    "v4-flash": "deepseek-v4-flash",
-    "v4.1": "deepseek-v4.1",
+    "flash": "deepseek-flash",
+    "v4-flash": "deepseek-flash",
+    "v4.1": "deepseek-flash",
     "chat": "deepseek-chat",
     "reasoner": "deepseek-reasoner",
     "r1": "deepseek-reasoner",
@@ -192,9 +193,9 @@ def _get_model(group_id: str = "") -> str:
             grp = get_deepseek_model(group_id)
             if grp:
                 return grp
-        return getattr(get_driver().config, "deepseek_model", "deepseek-v4-flash")
+        return getattr(get_driver().config, "deepseek_model", "deepseek-flash")
     except Exception:
-        return "deepseek-v4-flash"
+        return "deepseek-flash"
 
 
 def _extract_at_users(message) -> list[str]:

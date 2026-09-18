@@ -24,7 +24,7 @@ class Config(BaseModel):
 
     # DeepSeek AI 配置
     deepseek_api_key: str = ""
-    deepseek_model: str = "deepseek-v4-flash"
+    deepseek_model: str = "deepseek-flash"
     deepseek_base_url: str = "https://api.deepseek.com"
 
     # NovelAI 画图配置
