@@ -42,9 +42,6 @@ from ..config import (
     is_ai_blacklisted,
     add_ai_blacklist,
     remove_ai_blacklist,
-    get_deepseek_model,
-    set_deepseek_config,
-    get_deepseek_base_url,
     DATA_DIR,
 )
 
@@ -136,9 +133,8 @@ def _split_long_message(text: str, max_len: int = 4000) -> list[str]:
     return chunks
 
 
-def _get_client(base_url: str = "") -> OpenAI:
-    """获取 OpenAI 客户端（指向 DeepSeek），如未配置 API Key 则直接报错。
-    base_url 为空时回退到全局 config.deepseek_base_url（默认 https://api.deepseek.com）。"""
+def _get_client() -> OpenAI:
+    """获取 OpenAI 客户端（指向 DeepSeek），如未配置 API Key 则直接报错"""
     try:
         driver = get_driver()
         config = driver.config
@@ -149,50 +145,12 @@ def _get_client(base_url: str = "") -> OpenAI:
         raise ValueError(
             "DeepSeek API Key 未配置！请在 .env 中设置 DEEPSEEK_API_KEY=sk-xxx"
         )
-    if not base_url:
-        base_url = getattr(get_driver().config, "deepseek_base_url", "https://api.deepseek.com") or "https://api.deepseek.com"
-    return OpenAI(api_key=api_key, base_url=base_url)
+    return OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
 
 
-# 模型别名 -> 原始模型名
-DEEPSEEK_MODEL_ALIASES = {
-    "flash": "deepseek-flash",
-    "v4-flash": "deepseek-flash",
-    "v4.1": "deepseek-flash",
-    "chat": "deepseek-chat",
-    "reasoner": "deepseek-reasoner",
-    "r1": "deepseek-reasoner",
-    "v3": "deepseek-v3",
-}
-
-
-def _deepseek_model_alias(model: str) -> str:
-    """返回模型名对应的别名（找不到则原样返回）"""
-    for alias, raw in DEEPSEEK_MODEL_ALIASES.items():
-        if raw == model:
-            return alias
-    return model
-
-
-def _resolve_deepseek_model(key: str):
-    """将用户输入的别名/原始名解析为原始模型名，空输入返回 None。
-    允许任意原始模型名（如代理/中转自定义的模型），便于适配不同端点。"""
-    key = (key or "").strip()
-    if not key:
-        return None
-    kl = key.lower()
-    if kl in DEEPSEEK_MODEL_ALIASES:
-        return DEEPSEEK_MODEL_ALIASES[kl]
-    return key
-
-
-def _get_model(group_id: str = "") -> str:
-    """解析本群当前模型（群级设置优先，否则 config 默认）"""
+def _get_model() -> str:
+    """返回当前配置的 DeepSeek 对话模型（config.deepseek_model，默认 deepseek-flash）"""
     try:
-        if group_id:
-            grp = get_deepseek_model(group_id)
-            if grp:
-                return grp
         return getattr(get_driver().config, "deepseek_model", "deepseek-flash")
     except Exception:
         return "deepseek-flash"
@@ -349,13 +307,13 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
 
     # 4. 检查 API 是否可用
     try:
-        client = _get_client(get_deepseek_base_url(group_id))
+        client = _get_client()
     except ValueError as e:
         logger.error(f"AI API Key 未配置: {e}")
         await matcher.send(f"AI 功能未配置 API Key，请联系管理员。\n请在 .env 中设置 DEEPSEEK_API_KEY", reply_message=True)
         return
 
-    model = _get_model(group_id)
+    model = _get_model()
 
     # 5. 保存 + 构建消息
     _add_history(user_id, "user", prompt)
@@ -843,12 +801,6 @@ def _generate_ai_help_image() -> str:
             ("ai图删除 <序号>", "超管：删除配图（支持 1 3 5 或 1-3）"),
             ("ai图重置", "超管：恢复内置基础图"),
         ], True),
-        ("切换模型（超管）", [
-            ("ai模型", "查看当前模型与端点"),
-            ("ai模型 <模型>", "切换本群对话模型"),
-            ("ai模型 <模型> <端点>", "一并切换 API 端点(base_url)"),
-            ("ai模型 base <端点>", "仅改端点（reset 恢复全局）"),
-        ], True),
     ]
 
     total_height = padding + header_height
@@ -910,93 +862,8 @@ async def handle_ai_help(matcher: Matcher) -> None:
             "· @机器人 + 问题（群聊需开启，私聊直用）\n"
             "· lg清记忆（清除对话历史）\n"
             "· 管理（超管）：开启AI / 关闭AI / AI拉黑 / AI解除\n"
-            "· 切换模型（超管）：ai模型（查看 / 切换模型，可带 base_url 端点）\n"
             "· 配图：ai图添加 / ai图列表 / ai图删除 <序号> / ai图重置"
         )
     await matcher.finish(MessageSegment.image(f"base64://{img_b64}"))
 
 
-# ========== ai模型 切换指令（仅超级用户） ==========
-
-deepseek_model_cmd = on_command(
-    "ai模型",
-    aliases={"AI模型", "切换ai模型", "切换模型", "ai模型切换"},
-    permission=SUPERUSER,
-    priority=5,
-    block=True,
-    force_whitespace=True,
-)
-
-
-@deepseek_model_cmd.handle()
-async def handle_set_deepseek_model(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()):
-    """超级用户切换本群 AI 对话模型与 base_url；不带参数时列出当前配置与可用列表"""
-    if isinstance(event, PrivateMessageEvent):
-        await matcher.finish("请在群聊中发送此指令。")
-    group_id = str(event.group_id)
-
-    key = args.extract_plain_text().strip()
-    tokens = key.split()
-
-    if not tokens:
-        cur = _get_model(group_id)
-        cur_base = get_deepseek_base_url(group_id)
-        global_base = getattr(get_driver().config, "deepseek_base_url", "https://api.deepseek.com") or "https://api.deepseek.com"
-        base_disp = cur_base if cur_base else f"全局配置（{global_base}）"
-        lines = [
-            f"当前本群 AI 对话模型：{cur}（别名 {_deepseek_model_alias(cur)}）",
-            f"当前 base_url：{base_disp}",
-            "",
-            "切换模型：ai模型 <别名或原始名>",
-            "切换模型+端点：ai模型 <模型> <base_url>",
-            "仅改端点：ai模型 base <base_url>",
-            "重置端点为全局：ai模型 base reset",
-            "重置模型为默认：ai模型 reset",
-            "",
-            "可用模型别名：",
-        ]
-        for alias, raw in DEEPSEEK_MODEL_ALIASES.items():
-            lines.append(f"  {alias}  ->  {raw}")
-        lines.append("")
-        lines.append("也可直接发送原始模型名，如：ai模型 deepseek-chat")
-        lines.append("base_url 填代理/中转地址，需以 http:// 或 https:// 开头")
-        await matcher.finish(Message([MessageSegment.text("\n".join(lines))]))
-
-    # 仅改 base_url 子命令
-    if tokens[0] == "base":
-        if len(tokens) < 2 or tokens[1] in ("reset", "-"):
-            new_base = ""
-        elif tokens[1].startswith(("http://", "https://")):
-            new_base = tokens[1]
-        else:
-            await matcher.finish(Message([MessageSegment.text("❌ base_url 需以 http:// 或 https:// 开头，或发送「ai模型 base reset」恢复全局")]))
-        set_deepseek_config(group_id, get_deepseek_model(group_id), new_base)
-        disp = new_base or "全局配置"
-        await matcher.finish(Message([MessageSegment.text(f"✅ 本群 AI base_url 已设为 {disp}")]))
-
-    # 解析模型
-    model_tok = tokens[0]
-    if model_tok == "reset":
-        set_deepseek_config(group_id, "", get_deepseek_base_url(group_id))
-        await matcher.finish(Message([MessageSegment.text("✅ 本群 AI 对话模型已重置为默认（使用 config.deepseek_model）")]))
-
-    resolved = _resolve_deepseek_model(model_tok)
-    if not resolved:
-        await matcher.finish(Message([MessageSegment.text(f"❌ 无效模型名「{model_tok}」")]))
-
-    # 解析可选的 base_url（缺省则沿用当前）
-    new_base = get_deepseek_base_url(group_id)
-    if len(tokens) > 1:
-        base_tok = tokens[1]
-        if base_tok in ("reset", "-"):
-            new_base = ""
-        elif base_tok.startswith(("http://", "https://")):
-            new_base = base_tok
-        else:
-            await matcher.finish(Message([MessageSegment.text("❌ base_url 需以 http:// 或 https:// 开头")]))
-
-    set_deepseek_config(group_id, resolved, new_base)
-    base_disp = new_base or "全局配置"
-    await matcher.finish(Message([
-        MessageSegment.text(f"✅ 已切换本群 AI 对话模型为 {resolved}（别名 {_deepseek_model_alias(resolved)}），base_url={base_disp}")
-    ]))
