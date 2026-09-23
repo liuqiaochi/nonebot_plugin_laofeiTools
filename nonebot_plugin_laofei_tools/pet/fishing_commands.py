@@ -84,7 +84,7 @@ async def handle_fishing(
         return
 
     # 刷新体力
-    refresh_stamina_if_needed(pet)
+    refresh_stamina_if_needed(user_id)
     if pet.stamina < FISHING_STAMINA_COST:
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),

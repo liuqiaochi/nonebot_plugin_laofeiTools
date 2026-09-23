@@ -631,7 +631,8 @@ def refresh_stamina_if_needed(user_id: str) -> None:
 
     today = datetime.now().strftime("%Y-%m-%d")
     if pet.last_stamina_date != today:
-        pet.stamina = pet.max_stamina
+        # 突破上限后保留已囤积的溢出体力：仅当低于 max_stamina 时才补满
+        pet.stamina = max(pet.stamina, pet.max_stamina)
         pet.last_stamina_date = today
         save_pet(user_id)
 
@@ -644,7 +645,8 @@ def refresh_all_stamina() -> None:
     """
     today = datetime.now().strftime("%Y-%m-%d")
     for user_id, pet in _pet_cache.items():
-        pet.stamina = pet.max_stamina
+        # 突破上限后保留已囤积的溢出体力：仅当低于 max_stamina 时才补满
+        pet.stamina = max(pet.stamina, pet.max_stamina)
         pet.last_stamina_date = today
     _save_pet_data()
 
