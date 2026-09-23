@@ -487,10 +487,7 @@ def equip_accessory(user_id: str, acc_name: str) -> dict:
     # 重新计算 max_stamina：基础体力 + 新配饰体力加成
     base_stamina = DRAGON_STAMINA if pet.pet_type == "dragon" else DEFAULT_STAMINA
     pet.max_stamina = base_stamina + ACCESSORIES[acc_name]["stamina"]
-
-    # 如果当前体力超过新的 max_stamina，则截断
-    if pet.stamina > pet.max_stamina:
-        pet.stamina = pet.max_stamina
+    # 突破上限后体力可超过 max_stamina，佩戴配饰不再截断（保留已囤积溢出体力）
 
     # 保存数据
     save_pet(user_id)
@@ -527,10 +524,7 @@ def unequip_accessory(user_id: str) -> dict:
     # 重置 max_stamina 为基础值
     base_stamina = DRAGON_STAMINA if pet.pet_type == "dragon" else DEFAULT_STAMINA
     pet.max_stamina = base_stamina
-
-    # 如果当前体力超过新的 max_stamina，则截断
-    if pet.stamina > pet.max_stamina:
-        pet.stamina = pet.max_stamina
+    # 突破上限后体力可超过 max_stamina，卸下配饰不再截断（保留已囤积溢出体力）
 
     # 保存数据
     save_pet(user_id)
@@ -745,7 +739,7 @@ def do_walk(user_id: str) -> dict:
     phoebe_stamina_restore = 0
     if pet.pet_type == "phoebe" and random.random() < 0.2:
         phoebe_stamina_restore = 20
-        pet.stamina = min(pet.stamina + 20, pet.max_stamina)
+        pet.stamina = min(pet.stamina + 20, FEED_STAMINA_CAP)
 
     # 10. 保存宠物数据
     save_pet(user_id)
