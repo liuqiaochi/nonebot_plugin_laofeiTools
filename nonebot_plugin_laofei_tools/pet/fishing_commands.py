@@ -311,10 +311,21 @@ async def handle_quick_fishing(
         })
 
     if catch_count == 0:
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("体力不足，无法钓鱼")
-        ]))
+        # 区分真实原因：每日次数已用完 vs 体力不足
+        if get_fishing_remaining(user_id) <= 0:
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text(
+                    f"今日钓鱼次数已用完（{DAILY_FISHING_LIMIT}/{DAILY_FISHING_LIMIT}），明天再来吧 🐟"
+                )
+            ]))
+        else:
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text(
+                    f"你的宠物体力不足，钓鱼需要 {FISHING_STAMINA_COST} 点体力（当前 {get_pet(user_id).stamina} 点）"
+                )
+            ]))
         return
 
     # 汇总节点
