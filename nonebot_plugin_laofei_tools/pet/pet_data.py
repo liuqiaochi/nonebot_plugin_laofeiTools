@@ -87,7 +87,7 @@ PET_TYPES = {
         "fav_food": "白米饭",
     },
     "mu": {
-        "name": "睦子米",
+        "name": "木子米",
         "luck": 20,
         "force": 10,
         "talent": "祥子吃瓜",
@@ -663,7 +663,7 @@ WALK_NO_DROP_MESSAGES = [
 # ========== 散步逻辑 ==========
 
 def _mu_bonus_points(user_id: str, pet) -> int:
-    """睦子米天赋「祥子吃瓜」：5%概率额外获得50积分（仅睦子米触发，由本函数在积分账户直接发放）"""
+    """木子米天赋「祥子吃瓜」：5%概率额外获得50积分（仅木子米触发，由本函数在积分账户直接发放）"""
     if pet.pet_type == "mu" and random.random() < 0.05:
         pu = get_points_user(user_id)
         pu.points += 50
@@ -748,7 +748,7 @@ def do_walk(user_id: str) -> dict:
     # 10. 保存宠物数据
     save_pet(user_id)
 
-    # 睦子米天赋「祥子吃瓜」：5%概率额外获得50积分
+    # 木子米天赋「祥子吃瓜」：5%概率额外获得50积分
     bonus_points = _mu_bonus_points(user_id, pet)
 
     # 11. 返回结果
@@ -812,7 +812,7 @@ def do_pat(user_id: str) -> dict:
     # 7. 保存数据
     save_pet(user_id)
 
-    # 睦子米天赋「祥子吃瓜」：5%概率额外获得50积分
+    # 木子米天赋「祥子吃瓜」：5%概率额外获得50积分
     bonus_points = _mu_bonus_points(user_id, pet)
 
     # 8. 返回结果
@@ -960,7 +960,7 @@ def do_work(user_id: str) -> dict:
     if pet.pet_type == "dfy":
         points_earned = int(points_earned * 1.3)
 
-    # 睦子米天赋「祥子吃瓜」：5%概率额外获得50积分
+    # 木子米天赋「祥子吃瓜」：5%概率额外获得50积分
     bonus_points = _mu_bonus_points(user_id, pet)
 
     return {
