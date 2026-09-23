@@ -374,6 +374,9 @@ async def handle_walk(matcher: Matcher, event: MessageEvent):
     else:
         msg += result["message"]
 
+    if result.get("bonus_points", 0) > 0:
+        msg += f"\n🍀 祥子吃瓜触发！额外获得 {result['bonus_points']} 积分"
+
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
         MessageSegment.text(msg)
@@ -417,6 +420,9 @@ async def handle_pat(matcher: Matcher, event: MessageEvent):
     gain = result["affection_gain"]
     msg = f"🐾 你抚摸了 {result['pet_name']}~\n"
     msg += f"好感度: {result['affection_before']} → {result['affection_after']}（+{gain}）"
+
+    if result.get("bonus_points", 0) > 0:
+        msg += f"\n🍀 祥子吃瓜触发！额外获得 {result['bonus_points']} 积分"
 
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
@@ -972,6 +978,8 @@ async def handle_work(matcher: Matcher, event: MessageEvent):
     msg += f"体力: {result['stamina_after']}"
     if result["dropped_items"]:
         msg += f"\n🎁 额外获得: {'、'.join(result['dropped_items'])}"
+    if result.get("bonus_points", 0) > 0:
+        msg += f"\n🍀 祥子吃瓜触发！额外获得 {result['bonus_points']} 积分"
 
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
@@ -1516,6 +1524,8 @@ async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
         lines.append(
             f"🤚 抚摸：好感 {pat['affection_before']} → {pat['affection_after']}（+{pat['affection_gain']}）"
         )
+        if pat.get("bonus_points", 0) > 0:
+            lines.append(f"🍀 祥子吃瓜：+{pat['bonus_points']} 积分")
     else:
         lines.append(f"🤚 抚摸：{pat['message']}")
 
@@ -1528,6 +1538,8 @@ async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
         save_points_user(user_id)
         extra = "，额外获得 " + "、".join(work["dropped_items"]) if work["dropped_items"] else ""
         lines.append(f"💼 打工：+{work['points_earned']} 积分{extra}")
+        if work.get("bonus_points", 0) > 0:
+            lines.append(f"🍀 祥子吃瓜：+{work['bonus_points']} 积分")
     else:
         lines.append(f"💼 打工：{work['message']}")
 
@@ -1536,6 +1548,8 @@ async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
     if walk["success"]:
         drop_text = f"，捡到 {walk['dropped_item']}" if walk["dropped"] else "，未掉落道具"
         lines.append(f"🐾 散步：{drop_text}")
+        if walk.get("bonus_points", 0) > 0:
+            lines.append(f"🍀 祥子吃瓜：+{walk['bonus_points']} 积分")
     else:
         lines.append(f"🐾 散步：{walk['message']}")
 

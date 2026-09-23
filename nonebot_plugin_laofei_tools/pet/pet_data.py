@@ -13,6 +13,7 @@ from typing import Dict, Optional
 from loguru import logger
 
 from ..common.data_utils import safe_json_save
+from ..common.points_data import get_user as get_points_user, save_user as save_points_user
 
 # 数据文件路径（锚定项目根目录，不依赖运行时 CWD，避免覆盖文件后数据丢失）
 DATA_DIR = Path("data/laofei_tools")
@@ -85,6 +86,15 @@ PET_TYPES = {
         "image": "pet-dfy.gif",
         "fav_food": "白米饭",
     },
+    "mu": {
+        "name": "睦子米",
+        "luck": 20,
+        "force": 10,
+        "talent": "祥子吃瓜",
+        "talent_desc": "打工/散步/抚摸5%概率获得50积分",
+        "image": "pet-mu.gif",
+        "fav_food": "小黄瓜",
+    },
 }
 
 # ========== 食物定义 ==========
@@ -98,6 +108,7 @@ FOODS = {
     "菠萝披萨": {"price": 100, "image": "food-pizza.png", "id": "106", "stamina": 20, "droppable": True},
     "宠物口粮": {"price": 300, "image": "food-pet.png", "id": "107", "stamina": 50, "affection": 20, "droppable": False},
     "白米饭": {"price": 100, "image": "food-rice.png", "id": "108", "stamina": 20, "droppable": True},
+    "小黄瓜": {"price": 100, "image": "food-gua.png", "id": "109", "stamina": 20, "droppable": True},
 }
 
 # ========== 配饰定义 ==========
@@ -651,6 +662,16 @@ WALK_NO_DROP_MESSAGES = [
 
 # ========== 散步逻辑 ==========
 
+def _mu_bonus_points(user_id: str, pet) -> int:
+    """睦子米天赋「祥子吃瓜」：5%概率额外获得50积分（仅睦子米触发，由本函数在积分账户直接发放）"""
+    if pet.pet_type == "mu" and random.random() < 0.05:
+        pu = get_points_user(user_id)
+        pu.points += 50
+        save_points_user(user_id)
+        return 50
+    return 0
+
+
 def do_walk(user_id: str) -> dict:
     """散步逻辑
 
@@ -727,6 +748,9 @@ def do_walk(user_id: str) -> dict:
     # 10. 保存宠物数据
     save_pet(user_id)
 
+    # 睦子米天赋「祥子吃瓜」：5%概率额外获得50积分
+    bonus_points = _mu_bonus_points(user_id, pet)
+
     # 11. 返回结果
     return {
         "success": True,
@@ -740,6 +764,7 @@ def do_walk(user_id: str) -> dict:
         "message": message,
         "pet_name": get_display_name(pet),
         "phoebe_stamina_restore": phoebe_stamina_restore,
+        "bonus_points": bonus_points,
     }
 
 
@@ -787,6 +812,9 @@ def do_pat(user_id: str) -> dict:
     # 7. 保存数据
     save_pet(user_id)
 
+    # 睦子米天赋「祥子吃瓜」：5%概率额外获得50积分
+    bonus_points = _mu_bonus_points(user_id, pet)
+
     # 8. 返回结果
     return {
         "success": True,
@@ -794,6 +822,7 @@ def do_pat(user_id: str) -> dict:
         "affection_before": old_affection,
         "affection_after": pet.affection,
         "pet_name": get_display_name(pet),
+        "bonus_points": bonus_points,
     }
 
 
@@ -931,12 +960,16 @@ def do_work(user_id: str) -> dict:
     if pet.pet_type == "dfy":
         points_earned = int(points_earned * 1.3)
 
+    # 睦子米天赋「祥子吃瓜」：5%概率额外获得50积分
+    bonus_points = _mu_bonus_points(user_id, pet)
+
     return {
         "success": True,
         "pet_name": get_display_name(pet),
         "stamina_after": pet.stamina,
         "points_earned": points_earned,
         "dropped_items": dropped_items,
+        "bonus_points": bonus_points,
     }
 
 
@@ -1110,6 +1143,7 @@ PK_OPENING_BY_TYPE = {
     "doro": "「欧润橘保佑，今天必胜！」",
     "phoebe": "「啾比啾比～卖个萌就把你秒了！」",
     "dfy": "「咕噜咕噜～大肥鱼今天让你年年有余！」",
+    "mu": "「咔嚓一口小黄瓜，祥子吃瓜反杀你！」",
 }
 # 回合中随机蹦出的狠话
 PK_ROUND_LINES = [
