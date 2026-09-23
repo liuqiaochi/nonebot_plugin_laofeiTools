@@ -80,7 +80,7 @@ PET_TYPES = {
         "name": "大肥鱼",
         "luck": 12,
         "force": 10,
-        "talent": "年年有余",
+        "talent": "米饭管够",
         "talent_desc": "打工积分收益+30%",
         "image": "pet-dfy.gif",
         "fav_food": "白米饭",
