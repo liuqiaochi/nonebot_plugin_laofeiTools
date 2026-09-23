@@ -76,6 +76,15 @@ PET_TYPES = {
         "image": "pet-phoebe.gif",
         "fav_food": "菠萝披萨",
     },
+    "dfy": {
+        "name": "大肥鱼",
+        "luck": 12,
+        "force": 10,
+        "talent": "年年有余",
+        "talent_desc": "打工积分收益+30%",
+        "image": "pet-dfy.gif",
+        "fav_food": "白米饭",
+    },
 }
 
 # ========== 食物定义 ==========
@@ -88,6 +97,7 @@ FOODS = {
     "冰淇淋": {"price": 100, "image": "food-icecream.png", "id": "105", "stamina": 20, "droppable": True},
     "菠萝披萨": {"price": 100, "image": "food-pizza.png", "id": "106", "stamina": 20, "droppable": True},
     "宠物口粮": {"price": 300, "image": "food-pet.png", "id": "107", "stamina": 50, "affection": 20, "droppable": False},
+    "白米饭": {"price": 100, "image": "food-rice.png", "id": "108", "stamina": 20, "droppable": True},
 }
 
 # ========== 配饰定义 ==========
@@ -916,11 +926,16 @@ def do_work(user_id: str) -> dict:
     # 7. 保存宠物数据
     save_pet(user_id)
 
+    # 大肥鱼天赋：打工积分收益 +30%
+    points_earned = get_affection_reward(random.randint(50, 100), pet.affection)
+    if pet.pet_type == "dfy":
+        points_earned = int(points_earned * 1.3)
+
     return {
         "success": True,
         "pet_name": get_display_name(pet),
         "stamina_after": pet.stamina,
-        "points_earned": get_affection_reward(random.randint(50, 100), pet.affection),
+        "points_earned": points_earned,
         "dropped_items": dropped_items,
     }
 
@@ -1094,6 +1109,7 @@ PK_OPENING_BY_TYPE = {
     "penguin": "「咕咕嘎嘎！企鹅之力不可阻挡！」",
     "doro": "「欧润橘保佑，今天必胜！」",
     "phoebe": "「啾比啾比～卖个萌就把你秒了！」",
+    "dfy": "「咕噜咕噜～大肥鱼今天让你年年有余！」",
 }
 # 回合中随机蹦出的狠话
 PK_ROUND_LINES = [
