@@ -160,10 +160,21 @@ async def handle_adopt(matcher: Matcher, event: MessageEvent, args: Message = Co
     user_id = str(event.user_id)
 
     # 检查是否已有宠物
-    if get_pet(user_id) is not None:
+    existing = get_pet(user_id)
+    if existing is not None:
+        pet_info = PET_TYPES[existing.pet_type]
+        current_name = existing.nickname if existing.nickname else pet_info['name']
+        msg = f"你已领养「{current_name}」啦～\n"
+        msg += "想换宠物？先发送「弃养」解除当前宠物，再「领养 宠物名」即可更换。\n\n"
+        msg += "当前所有可领养宠物：\n\n"
+        for pet_type, info in PET_TYPES.items():
+            msg += f"🐾 {info['name']}\n"
+            msg += f"   幸运: {info['luck']} | 武力: {info['force']}\n"
+            msg += f"   天赋「{info['talent']}」: {info['talent_desc']}\n\n"
+        msg += "发送「领养 宠物名」来领养，如：领养 Doro"
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text("你已经有宠物了")
+            MessageSegment.text(msg)
         ]))
         return
 
