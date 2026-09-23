@@ -36,7 +36,7 @@ from .pet_data import (
     get_all_pet_owners,
     FEED_STAMINA_CAP,
 )
-from .fishing_data import roll_fish, add_caught_fish
+from .fishing_data import roll_fish, add_caught_fish, FISHING_STAMINA_COST
 
 # 宠物图片目录（插件根目录下的 image 文件夹）
 PET_IMAGE_DIR = Path(__file__).parent.parent / "image"
@@ -1553,17 +1553,19 @@ async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
     else:
         lines.append(f"🐾 散步：{walk['message']}")
 
-    # 5. 钓鱼 x1
+    # 5. 钓鱼 x1（与单钓一致，需扣 10 体力）
     pet = get_pet(user_id)
-    if pet.stamina >= 10:
+    if pet.stamina >= FISHING_STAMINA_COST:
         fish = roll_fish()
+        pet.stamina -= FISHING_STAMINA_COST
+        save_pet(user_id)
         if fish.get("rarity") == "junk":
-            lines.append(f"🎣 钓鱼：钓到了「{fish['name']}」，不值钱扔掉了")
+            lines.append(f"🎣 钓鱼：钓到了「{fish['name']}」，不值钱扔掉了（-{FISHING_STAMINA_COST} 体力）")
         else:
             add_caught_fish(user_id, fish["id"])
-            lines.append(f"🎣 钓鱼：钓到 [{fish.get('name', '?')}]（{fish.get('rarity', '?')}）")
+            lines.append(f"🎣 钓鱼：钓到 [{fish.get('name', '?')}]（{fish.get('rarity', '?')}）（-{FISHING_STAMINA_COST} 体力）")
     else:
-        lines.append("🎣 钓鱼：体力不足（需 10 体力）")
+        lines.append(f"🎣 钓鱼：体力不足（需 {FISHING_STAMINA_COST} 体力，当前 {pet.stamina}）")
 
     # 6. 随机偷取一个玩家
     steal_targets = _get_random_targets(user_id, n=5)
