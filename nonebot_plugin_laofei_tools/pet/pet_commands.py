@@ -515,14 +515,27 @@ async def handle_feed(matcher: Matcher, event: MessageEvent, args: Message = Com
         return
 
     pet_name = fed_details[0][4]
-    # 仅喂了 1 个食物时展示明细；复数食物（多类型或单类型×N）直接给合计，避免一长串
-    if len(fed_details) == 1:
+    distinct_foods = {d[0] for d in fed_details}
+    if len(distinct_foods) == 1 and len(fed_details) > 1:
+        # 单一食物喂多次：一行明细（保留💕最爱）+ 总数 + 合计，避免一长串
+        fn, sg, ag, fav, _ = fed_details[0]
+        tag = " 💕最爱" if fav else ""
+        msg = (f"🐾 你喂了 {pet_name}：\n"
+               f"{fn}　+{sg}体力 +{ag}好感{tag}\n"
+               f"总共 {len(fed_details)}个\n"
+               f"合计 体力 +{total_stamina_gain}　好感 +{total_affection_gain}")
+    elif len(distinct_foods) == 1:
+        # 单一食物喂 1 次：仅明细行
         fn, sg, ag, fav, _ = fed_details[0]
         tag = " 💕最爱" if fav else ""
         msg = f"🐾 你喂了 {pet_name}：{fn}　+{sg}体力 +{ag}好感{tag}"
     else:
-        msg = (f"🐾 你喂了 {pet_name}：\n"
-               f"合计 体力 +{total_stamina_gain}　好感 +{total_affection_gain}")
+        # 混搭多种食物：逐条明细 + 合计（旧版展示方式）
+        msg = f"🐾 你喂了 {pet_name}：\n"
+        for fn, sg, ag, fav, _ in fed_details:
+            tag = " 💕最爱" if fav else ""
+            msg += f"  {fn}　+{sg}体力 +{ag}好感{tag}\n"
+        msg += f"——————————\n合计 体力 +{total_stamina_gain}　好感 +{total_affection_gain}"
     if failed:
         uniq = {}
         for fn, r in failed:
