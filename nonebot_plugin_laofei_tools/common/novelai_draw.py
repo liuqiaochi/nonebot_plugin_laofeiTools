@@ -632,7 +632,7 @@ async def handle_novelai_help(matcher: Matcher, event: MessageEvent):
         ]),
         ("个人设置（可配置生成参数，每人独立）", [
             ("ai画图设置", "查看本人当前 6 项生成参数（步数/引导/采样器/质量/UC/重缩放）"),
-            ("ai画图设置 字段 值", "修改单个参数，例：步数 25 / 引导 7.5 / 采样器 euler_a / 质量 关 / uc human_focus / 重缩放 0.04"),
+            ("ai画图设置 字段 值", "修改单个参数（不带值则查询该字段可设置范围），例：步数 25 / 引导 7.5 / 采样器 euler_a / 质量 关 / uc human_focus / 重缩放 0.04"),
             ("ai画图重置设置", "恢复本人全部默认参数"),
         ]),
         ("__text__", "默认尺寸 832×1216（竖屏），默认模型 nai-diffusion-4-5-curated。尺寸参数放最前：竖/横/方，不写则用竖屏。"),
@@ -861,6 +861,17 @@ def _parse_nai_setting_value(spec: dict, raw: str):
     return value, ""
 
 
+def _describe_nai_field_range(spec: dict) -> str:
+    """返回该字段可设置范围的文字说明"""
+    t = spec["type"]
+    if t == "enum":
+        return "可选值: " + "、".join(sorted(spec["choices"]))
+    if t == bool:
+        return "可选值: 开 / 关（也可用 true / false）"
+    unit = "（整数）" if t is int else "（小数）"
+    return f"取值范围: {spec['min']} ~ {spec['max']}{unit}"
+
+
 novelai_settings_cmd = on_command(
     "ai画图设置",
     aliases={"ai生图设置", "ai绘画设置", "ai绘图设置"},
@@ -891,15 +902,25 @@ async def handle_nai_settings(matcher: Matcher, event: MessageEvent, args: Messa
             "修改: ai画图设置 字段名 值",
             "重置: ai画图重置设置",
             "字段名: 步数(steps) / 引导(scale) / 采样器(sampler) / 质量(quality) / uc / 重缩放(rescale)",
+            "查询某字段可设置范围: ai画图设置 字段名（不带值）",
         ]
         await matcher.finish(Message([MessageSegment.text("\n".join(lines))]))
 
     # 带参数：修改 字段 值
     parts = raw.split(maxsplit=1)
-    if len(parts) < 2:
-        await matcher.finish(
-            Message([MessageSegment.text("用法: ai画图设置 字段名 值\n字段名: 步数/引导/采样器/质量/uc/重缩放")])
-        )
+    if len(parts) == 1:
+        # 仅给出字段名（不带值）-> 查询该字段可设置范围
+        field = _resolve_nai_field(parts[0])
+        if not field:
+            await matcher.finish(Message([MessageSegment.text(
+                f"未知字段「{parts[0]}」\n可用字段: 步数(steps) / 引导(scale) / 采样器(sampler) / 质量(quality) / uc / 重缩放(rescale)"
+            )]))
+        spec = NAI_SETTING_FIELDS[field]
+        cur = get_nai_draw_settings(user_id)[field]
+        await matcher.finish(Message([MessageSegment.text(
+            f"🔍 {spec['label']} ({field})\n{_describe_nai_field_range(spec)}\n当前值: {cur}\n设置: ai画图设置 {parts[0]} <值>"
+        )]))
+    # 字段 + 值 -> 修改
     field = _resolve_nai_field(parts[0])
     if not field:
         await matcher.finish(
