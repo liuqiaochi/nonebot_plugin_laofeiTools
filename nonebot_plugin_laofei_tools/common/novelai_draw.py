@@ -8,6 +8,7 @@ NovelAI 画图模块 — 调用 NovelAI 文生图 API
 
 import asyncio
 import base64
+import json
 import io
 import os
 import random
