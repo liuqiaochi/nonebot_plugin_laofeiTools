@@ -630,6 +630,11 @@ async def handle_novelai_help(matcher: Matcher, event: MessageEvent):
         ("查询额度（仅超级用户）", [
             ("ai画图额度 / ai画图余额", "查询账户剩余 Anlas 与 Opus 免费 V5 额度"),
         ]),
+        ("个人设置（可配置生成参数，每人独立）", [
+            ("ai画图设置", "查看本人当前 6 项生成参数（步数/引导/采样器/质量/UC/重缩放）"),
+            ("ai画图设置 字段 值", "修改单个参数，例：步数 25 / 引导 7.5 / 采样器 euler_a / 质量 关 / uc human_focus / 重缩放 0.04"),
+            ("ai画图重置设置", "恢复本人全部默认参数"),
+        ]),
         ("__text__", "默认尺寸 832×1216（竖屏），默认模型 nai-diffusion-4-5-curated。尺寸参数放最前：竖/横/方，不写则用竖屏。"),
     ]
     img_b64 = render_help_image("AI 画图帮助", sections, footer="AI 画图 · NovelAI")
