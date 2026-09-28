@@ -35,7 +35,9 @@ from ..config import (
     disable_novelai_group,
     get_novelai_model,
     set_novelai_model,
+    DATA_DIR,
 )
+from .data_utils import safe_json_save
 from .help_image import render_help_image
 
 # ========== 配置 ==========
@@ -88,6 +90,107 @@ DEFAULT_NEGATIVE = (
     "extra digit, fewer digits, cropped, worst quality, low quality, "
     "normal quality, jpeg artifacts, signature, watermark, username, blurry"
 )
+
+# ========== 用户级画图设置（仿 everpic 的 user_settings 机制） ==========
+
+# 用户设置文件（落 data/laofei_tools/，符合项目数据约定）
+NOVELAI_USER_SETTINGS_FILE = DATA_DIR / "novelai_user_settings.json"
+
+# NAI 支持的采样器
+NAI_SAMPLERS = {
+    "k_euler", "k_euler_ancestral", "k_euler_sqrt", "k_euler_sqrt_ancestral",
+    "k_heun", "k_heun_ancestral",
+    "k_dpmpp_2m", "k_dpmpp_2m_sde", "k_dpmpp_2m_sde_gpu", "k_dpmpp_2m_alt",
+    "k_dpmpp_2m_ancestral", "k_dpmpp_2s", "k_dpmpp_2s_ancestral",
+    "k_dpmpp_3m_sde", "k_dpmpp_3m_sde_gpu",
+    "k_dpm_2m", "k_dpm_2m_alt", "k_llama",
+    "ddpm", "ddim_v3", "uni_pc", "uni_pc_bh2",
+}
+
+# UC 预设：字符串 -> v4_negative_prompt.uc_preset 整数值（参考 NovelAI SDK 映射）
+# human_focus=3 即用户要的「uc present: human focus」
+NAI_UC_PRESETS = {
+    "strong": 0,
+    "light": 1,
+    "furry_focus": 2,
+    "human_focus": 3,
+    "none": 4,
+}
+
+# 用户可设置字段的默认值
+DEFAULT_NAI_SETTINGS = {
+    "steps": DEFAULT_STEPS,                       # 28
+    "scale": DEFAULT_SCALE,                       # 5.0
+    "sampler": DEFAULT_SAMPLER,                   # k_euler_ancestral
+    "quality_toggle": True,                       # quality tags: standard 开启
+    "uc_preset": "light",                         # 默认 light
+    "cfg_rescale": 0.0,                           # prompt guidance rescale
+}
+
+# 字段校验规则
+NAI_SETTING_FIELDS = {
+    "steps":         {"type": int,   "min": 1,   "max": 50,  "label": "Steps"},
+    "scale":         {"type": float, "min": 0.0, "max": 30.0, "label": "Prompt Guidance (CFG)"},
+    "sampler":       {"type": "enum", "choices": NAI_SAMPLERS, "label": "Sampler"},
+    "quality_toggle": {"type": bool, "label": "Quality Tags"},
+    "uc_preset":     {"type": "enum", "choices": set(NAI_UC_PRESETS.keys()), "label": "UC Preset"},
+    "cfg_rescale":   {"type": float, "min": 0.0, "max": 1.0,  "label": "Prompt Guidance Rescale"},
+}
+
+# 中文别名 -> 字段名
+NAI_SETTING_ALIASES = {
+    "步数": "steps", "step": "steps",
+    "引导": "scale", "guidance": "scale", "cfg": "scale", "promptguidance": "scale",
+    "采样器": "sampler", "sampler": "sampler",
+    "质量": "quality_toggle", "quality": "quality_toggle", "质量标签": "quality_toggle",
+    "uc": "uc_preset", "预设": "uc_preset", "ucpreset": "uc_preset",
+    "重缩放": "cfg_rescale", "rescale": "cfg_rescale", "重标度": "cfg_rescale",
+}
+
+
+def _resolve_nai_field(name: str) -> str | None:
+    name = (name or "").lower().strip()
+    if name in NAI_SETTING_FIELDS:
+        return name
+    return NAI_SETTING_ALIASES.get(name)
+
+
+def _load_user_settings() -> dict:
+    if NOVELAI_USER_SETTINGS_FILE.exists():
+        try:
+            with open(NOVELAI_USER_SETTINGS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _save_user_settings(data: dict):
+    safe_json_save(NOVELAI_USER_SETTINGS_FILE, data)
+
+
+def get_nai_draw_settings(user_id: str) -> dict:
+    """获取用户画图设置，缺失字段用默认值补全"""
+    data = _load_user_settings()
+    return {**DEFAULT_NAI_SETTINGS, **data.get(str(user_id), {})}
+
+
+def update_nai_draw_setting(user_id: str, key: str, value) -> dict:
+    """更新单个设置项，返回更新后的完整设置"""
+    data = _load_user_settings()
+    uid = str(user_id)
+    if uid not in data:
+        data[uid] = {}
+    data[uid][key] = value
+    _save_user_settings(data)
+    return {**DEFAULT_NAI_SETTINGS, **data[uid]}
+
+
+def reset_nai_draw_settings(user_id: str):
+    """重置用户设置为默认"""
+    data = _load_user_settings()
+    data.pop(str(user_id), None)
+    _save_user_settings(data)
 
 
 driver = get_driver()
@@ -169,8 +272,14 @@ def _resolve_size_arg(token: str):
     return None
 
 
-def _build_payload(prompt: str, negative: str, model: str, width: int = DEFAULT_WIDTH, height: int = DEFAULT_HEIGHT) -> dict:
-    """构造 NovelAI 文生图请求体（按模型版本自动切换 payload 结构）"""
+def _build_payload(prompt: str, negative: str, model: str, width: int = DEFAULT_WIDTH, height: int = DEFAULT_HEIGHT, settings: dict | None = None) -> dict:
+    """构造 NovelAI 文生图请求体（按模型版本自动切换 payload 结构）
+
+    settings: 用户级画图设置（来自 get_nai_draw_settings），缺失字段用默认值补全
+    """
+    # 合并默认值，保证 settings 缺字段时也能正常生成
+    s = {**DEFAULT_NAI_SETTINGS, **(settings or {})}
+
     # 自动追加质量标签（避免重复）
     base_caption = prompt.strip()
     low = base_caption.lower()
@@ -183,13 +292,14 @@ def _build_payload(prompt: str, negative: str, model: str, width: int = DEFAULT_
         "characterPrompts": [],
         "width": width,
         "height": height,
-        "steps": DEFAULT_STEPS,
-        "scale": DEFAULT_SCALE,
-        "sampler": DEFAULT_SAMPLER,
+        "steps": s["steps"],
+        "scale": s["scale"],
+        "sampler": s["sampler"],
         "noise_schedule": DEFAULT_NOISE_SCHEDULE,
         "seed": random.randint(0, 2**31 - 1),
         "n_samples": 1,
-        "qualityToggle": True,
+        "qualityToggle": s["quality_toggle"],
+        "cfg_rescale": s["cfg_rescale"],
     }
 
     if _is_v4_model(model):
@@ -209,6 +319,8 @@ def _build_payload(prompt: str, negative: str, model: str, width: int = DEFAULT_
                 "char_captions": [],
             },
             "legacy_uc": False,
+            # UC 预设（人类聚焦等）：字符串 -> 整数值；未知值回退 light(1)
+            "uc_preset": NAI_UC_PRESETS.get(s["uc_preset"], 1),
         }
     else:
         # v3 / v2 / furry：旧式 prompt / uc
@@ -347,7 +459,7 @@ async def handle_novelai(matcher: Matcher, bot: Bot, event: MessageEvent, args: 
         h = size[1] if size else DEFAULT_HEIGHT
         await matcher.send(Message([MessageSegment.text(f"🎨 正在调用 NovelAI 生成图片（{w}×{h}），请稍候…")]))
 
-        payload = _build_payload(positive, negative, _get_model(group_id), w, h)
+        payload = _build_payload(positive, negative, _get_model(group_id), w, h, get_nai_draw_settings(str(event.user_id)))
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -715,3 +827,103 @@ async def handle_novelai_balance(matcher: Matcher, event: MessageEvent):
         await matcher.send(MessageSegment.image(tmp.name))
     except Exception as e:
         logger.error(f"ai画图额度 图片渲染/发送失败：{e}")
+
+
+# ========== 用户级画图设置（查看 / 修改 / 重置，仿 everpic 的 everpic设置） ==========
+
+def _parse_nai_setting_value(spec: dict, raw: str):
+    """解析设置值，返回 (value, error_msg)。error_msg 非空表示失败。"""
+    t = spec["type"]
+    if t == bool:
+        r = raw.strip().lower()
+        if r in ("true", "开", "on", "1", "yes", "是"):
+            return True, ""
+        if r in ("false", "关", "off", "0", "no", "否"):
+            return False, ""
+        return None, "需要布尔值（开/关 或 true/false）"
+    if t == "enum":
+        r = raw.strip().lower()
+        if r not in spec["choices"]:
+            return None, f"可选值：{', '.join(sorted(spec['choices']))}"
+        return r, ""
+    # int / float
+    try:
+        value = t(raw)
+    except ValueError:
+        return None, f"需要 {t.__name__} 类型"
+    if value < spec["min"] or value > spec["max"]:
+        return None, f"范围：{spec['min']} ~ {spec['max']}"
+    return value, ""
+
+
+novelai_settings_cmd = on_command(
+    "ai画图设置",
+    aliases={"ai生图设置", "ai绘画设置", "ai绘图设置"},
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+@novelai_settings_cmd.handle()
+async def handle_nai_settings(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()):
+    """查看 / 修改用户画图设置；无参数查看，带「字段 值」修改单个字段"""
+    user_id = str(event.user_id)
+    raw = args.extract_plain_text().strip()
+
+    # 无参数：查看
+    if not raw:
+        s = get_nai_draw_settings(user_id)
+        lines = [
+            "⚙️ 你的 AI 画图设置：",
+            f"  Steps: {s['steps']}",
+            f"  Prompt Guidance (CFG): {s['scale']}",
+            f"  Sampler: {s['sampler']}",
+            f"  Quality Tags: {'开' if s['quality_toggle'] else '关'}",
+            f"  UC Preset: {s['uc_preset']}",
+            f"  Prompt Guidance Rescale: {s['cfg_rescale']}",
+            "",
+            "修改: ai画图设置 字段名 值",
+            "重置: ai画图重置设置",
+            "字段名: 步数(steps) / 引导(scale) / 采样器(sampler) / 质量(quality) / uc / 重缩放(rescale)",
+        ]
+        await matcher.finish(Message([MessageSegment.text("\n".join(lines))]))
+
+    # 带参数：修改 字段 值
+    parts = raw.split(maxsplit=1)
+    if len(parts) < 2:
+        await matcher.finish(
+            Message([MessageSegment.text("用法: ai画图设置 字段名 值\n字段名: 步数/引导/采样器/质量/uc/重缩放")])
+        )
+    field = _resolve_nai_field(parts[0])
+    if not field:
+        await matcher.finish(
+            Message([MessageSegment.text(
+                f"未知字段「{parts[0]}」\n可用字段: 步数(steps) / 引导(scale) / 采样器(sampler) / 质量(quality) / uc / 重缩放(rescale)"
+            )])
+        )
+    value, err = _parse_nai_setting_value(NAI_SETTING_FIELDS[field], parts[1])
+    if err:
+        await matcher.finish(
+            Message([MessageSegment.text(f"❌ {NAI_SETTING_FIELDS[field]['label']} {err}")])
+        )
+    new_s = update_nai_draw_setting(user_id, field, value)
+    await matcher.finish(
+        Message([MessageSegment.text(f"✅ {NAI_SETTING_FIELDS[field]['label']} 已设置为: {value}")])
+    )
+
+
+novelai_reset_settings_cmd = on_command(
+    "ai画图重置设置",
+    aliases={"ai生图重置设置", "ai绘画重置设置", "ai绘图重置设置"},
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+@novelai_reset_settings_cmd.handle()
+async def handle_nai_reset_settings(matcher: Matcher, event: MessageEvent):
+    """重置用户画图设置为默认"""
+    reset_nai_draw_settings(str(event.user_id))
+    await matcher.finish(Message([MessageSegment.text("✅ AI 画图设置已重置为默认值")]))
