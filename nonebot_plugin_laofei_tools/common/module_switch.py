@@ -21,6 +21,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from ..config import (
     FEATURE_MODULES,
+    MODULE_ORDER,
     is_module_enabled,
     set_module_enabled,
     resolve_module_key,
@@ -170,9 +171,10 @@ async def _handle_enable(event: MessageEvent, matcher: Matcher):
     name = _parse_module_name(raw, "开启")
     key = resolve_module_key(name)
     if not key:
-        available = "、".join(m["name"] for m in FEATURE_MODULES.values())
         await matcher.finish(Message([
-            MessageSegment.text(f"❓ 未知模块「{name}」，可用：{available}")
+            MessageSegment.text(
+                f"❓ 未知模块「{name}」，可发送「功能开关」查看，或用序号 1-{len(MODULE_ORDER)}"
+            )
         ]))
     ok, msg = set_module_enabled(str(event.group_id), key, True)
     await matcher.finish(Message([MessageSegment.text(msg)]))
@@ -184,9 +186,10 @@ async def _handle_disable(event: MessageEvent, matcher: Matcher):
     name = _parse_module_name(raw, "关闭")
     key = resolve_module_key(name)
     if not key:
-        available = "、".join(m["name"] for m in FEATURE_MODULES.values())
         await matcher.finish(Message([
-            MessageSegment.text(f"❓ 未知模块「{name}」，可用：{available}")
+            MessageSegment.text(
+                f"❓ 未知模块「{name}」，可发送「功能开关」查看，或用序号 1-{len(MODULE_ORDER)}"
+            )
         ]))
     ok, msg = set_module_enabled(str(event.group_id), key, False)
     await matcher.finish(Message([MessageSegment.text(msg)]))
@@ -227,20 +230,20 @@ def _draw_status_icon(draw, cx: int, cy: int, enabled: bool, r: int = 11):
 
 
 def generate_module_switch_image(group_id: str) -> str:
-    """生成本群功能开关状态图片（勾=可用 / 叉=不可用）"""
+    """生成本群功能开关状态图片（序号 + 勾=可用 / 叉=不可用）"""
     font_title = _try_load_font(26)
     font_name = _try_load_font(20)
     font_sub = _try_load_font(13)
+    font_num = _try_load_font(17)
 
     switches = get_module_switches(group_id)
-    order = ["points", "pet", "fishing", "qrcode", "life", "search", "ai_chat", "ai_draw"]
 
-    width = 480
+    width = 500
     row_h = 62
     header_h = 72
     padding = 26
     footer_h = 44
-    total_height = padding + header_h + len(order) * row_h + footer_h
+    total_height = padding + header_h + len(MODULE_ORDER) * row_h + footer_h
 
     img = Image.new("RGB", (width, total_height), (45, 45, 55))
     draw = ImageDraw.Draw(img)
@@ -253,7 +256,7 @@ def generate_module_switch_image(group_id: str) -> str:
     draw.line([(padding, padding + header_h - 14), (width - padding, padding + header_h - 14)],
               fill=(80, 80, 95), width=1)
 
-    for i, key in enumerate(order):
+    for i, key in enumerate(MODULE_ORDER):
         meta = FEATURE_MODULES[key]
         eff = is_module_enabled(group_id, key)        # 级联推导后的真实可用状态
         self_on = switches.get(key, meta["default"])  # 自身开关（未含依赖）
@@ -265,8 +268,23 @@ def generate_module_switch_image(group_id: str) -> str:
                 radius=6, fill=(52, 52, 64)
             )
 
-        _draw_status_icon(draw, padding + 12, row_top + 22, eff)
-        draw.text((padding + 38, row_top + 10), meta["name"], fill=(245, 245, 250), font=font_name)
+        # 序号块：金色圆角底色 + 深色数字（醒目，供「开启/关闭 <序号>」使用）
+        box_w, box_h = 32, 30
+        box_x, box_y = padding, row_top + 6
+        draw.rounded_rectangle([box_x, box_y, box_x + box_w, box_y + box_h],
+                               radius=8, fill=(255, 200, 100))
+        num = str(i + 1)
+        nb = draw.textbbox((0, 0), num, font=font_num)
+        draw.text((box_x + (box_w - (nb[2] - nb[0])) / 2 - nb[0],
+                   box_y + (box_h - (nb[3] - nb[1])) / 2 - nb[1]),
+                  num, fill=(45, 45, 55), font=font_num)
+
+        # 状态图标（勾 / 叉）
+        icon_cx = box_x + box_w + 18
+        _draw_status_icon(draw, icon_cx, row_top + 21, eff)
+
+        text_x = icon_cx + 22
+        draw.text((text_x, row_top + 9), meta["name"], fill=(245, 245, 250), font=font_name)
 
         # 副行说明：默认状态 · 依赖 · 不可用原因
         sub = ["默认开" if meta["default"] else "默认关"]
@@ -279,10 +297,10 @@ def generate_module_switch_image(group_id: str) -> str:
             sub.append("（本群已开启）")
         elif not eff:
             sub.append("（依赖未开启，暂不可用）")
-        draw.text((padding + 40, row_top + 37), "  ·  ".join(sub),
+        draw.text((text_x + 2, row_top + 36), "  ·  ".join(sub),
                   fill=(158, 158, 178), font=font_sub)
 
-    tip = "超管发送「开启 / 关闭 模块名」调整"
+    tip = "超管发送「开启/关闭 <序号 或 模块名>」调整"
     bbox = draw.textbbox((0, 0), tip, font=font_sub)
     tip_w = bbox[2] - bbox[0]
     draw.text(((width - tip_w) // 2, total_height - padding - 4), tip,

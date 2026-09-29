@@ -260,6 +260,9 @@ FEATURE_MODULES = {
     "ai_draw": {"name": "AI画图",  "default": False, "requires": None},
 }
 
+# 模块展示顺序 / 序号（1-based）：图片列表与「开启 3」序号解析共用此唯一顺序
+MODULE_ORDER = ["points", "pet", "fishing", "qrcode", "life", "search", "ai_chat", "ai_draw"]
+
 # 模块名 / 常用别名 -> 模块 key（指令层负责去除「开启/关闭」前缀后再查）
 _MODULE_KEY_ALIASES: dict = {}
 for _k, _v in FEATURE_MODULES.items():
@@ -317,10 +320,16 @@ _module_switches = _load_module_switches()  # 重新加载（含迁移结果）
 
 
 def resolve_module_key(text: str):
-    """将模块名/别名解析为模块 key；无法识别返回 None"""
+    """将模块名 / 别名 / 序号（1-based）解析为模块 key；无法识别返回 None"""
     if not text:
         return None
-    return _MODULE_KEY_ALIASES.get(text.strip())
+    t = text.strip()
+    if t.isdigit():
+        n = int(t)
+        if 1 <= n <= len(MODULE_ORDER):
+            return MODULE_ORDER[n - 1]
+        return None
+    return _MODULE_KEY_ALIASES.get(t)
 
 
 def get_module_switches(group_id: str) -> dict:
