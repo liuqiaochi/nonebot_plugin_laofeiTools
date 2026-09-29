@@ -247,8 +247,12 @@ async def handle_pet_help(matcher: Matcher, event: MessageEvent):
 领养 宠物名 - 领养指定宠物
 宠物散步 - 消耗体力散步获取经验和道具
 宠物打工 - 消耗体力打工赚取积分（4小时间隔）
-快速打工 - 自动打工至体力耗尽，合并转发结果
-快速散步 - 自动散步至体力耗尽，合并转发结果
+快速打工 - 自动打工至体力耗尽，合并转发结果（别名：一键打工）
+快速散步 - 自动散步至体力耗尽，合并转发结果（别名：一键散步）
+一键日常 / 宠物日常 - 签到+抚摸+打工+散步+钓鱼+偷取 一键完成
+一键日常1 - 一键日常 + 快速打工（打工至体力耗尽）
+一键日常2 - 一键日常 + 快速散步（散步至体力耗尽）
+一键日常3 - 一键日常 + 快速钓鱼（钓鱼至体力耗尽）
 宠物抚摸 - 每日抚摸提升好感度
 宠物喂食 食物名1 食物名2 ... - 多食物空格分隔喂食（或 食物名 数量），体力可突破上限累加至 9999
 宠物pk @某人 - 与他人宠物PK对战
@@ -1503,27 +1507,8 @@ pet_daily_cmd = on_command(
 )
 
 
-@pet_daily_cmd.handle()
-async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
-    """一键完成宠物日常：签到 → 抚摸 → 打工 → 散步 → 钓鱼 → 随机偷取"""
-    # 群聊检查积分系统
-    if isinstance(event, GroupMessageEvent):
-        if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
-            return
-
-    user_id = str(event.user_id)
-    pet = get_pet(user_id)
-    if pet is None:
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("你还没有领养宠物，请先发送「我的宠物」领养一只")
-        ]))
-        return
-
+async def _run_daily_steps(user_id: str) -> list:
+    """执行日常六步（签到/抚摸/打工/散步/钓鱼/偷取），返回明细行；积分发放在内部完成"""
     # 先确保体力已按日刷新
     refresh_stamina_if_needed(user_id)
 
@@ -1605,18 +1590,202 @@ async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
                 break
     lines.append(f"🤫 偷取：{st_text}")
 
-    # 汇总输出
+    return lines
+
+
+def _daily_header(user_id: str) -> str:
+    """日常汇总头部（展示最终宠物状态，需在全部步骤+额外活动之后调用）"""
     pet = get_pet(user_id)
     level = get_pet_level(pet.exp)
     aff = get_affection_level(pet.affection)
-    header = (
+    return (
         f"📋 {get_display_name(pet)} 日常完成\n"
         f"等级 Lv.{level} | 好感 Lv.{aff} | 体力 {pet.stamina}/{pet.max_stamina}\n"
         f"————————————\n"
     )
+
+
+def _grind_work(user_id: str) -> dict:
+    """快速打工循环（打工至体力耗尽），积分在内部发放"""
+    total_points = 0
+    drops = []
+    count = 0
+    while count < 30:
+        result = do_work(user_id)
+        if not result["success"]:
+            break
+        count += 1
+        total_points += result["points_earned"]
+        drops.extend(result["dropped_items"])
+        points_user = get_points_user(user_id)
+        points_user.points += result["points_earned"]
+        save_points_user(user_id)
+    return {"count": count, "total_points": total_points, "drops": drops}
+
+
+def _grind_walk(user_id: str) -> dict:
+    """快速散步循环（散步至体力耗尽）"""
+    drops = []
+    count = 0
+    while count < 30:
+        result = do_walk(user_id)
+        if not result["success"]:
+            break
+        count += 1
+        if result["dropped"]:
+            drops.append(result["dropped_item"])
+    return {"count": count, "drops": drops}
+
+
+def _grind_fish(user_id: str) -> dict:
+    """快速钓鱼循环（钓鱼至体力耗尽）"""
+    pet = get_pet(user_id)
+    count = 0
+    while pet.stamina >= FISHING_STAMINA_COST and count < 200:
+        fish = roll_fish()
+        pet.stamina -= FISHING_STAMINA_COST
+        if fish.get("rarity") != "junk":
+            add_caught_fish(user_id, fish["id"])
+        count += 1
+    save_pet(user_id)
+    return {"count": count}
+
+
+def _append_grind_result(lines: list, label: str, g: dict):
+    """把额外快速活动的统计追加到日常明细行"""
+    lines.append("————————————")
+    if label == "打工":
+        if g["count"] > 0:
+            lines.append(f"💼 额外快速打工 ×{g['count']}：共 +{g['total_points']} 积分")
+            if g["drops"]:
+                lines.append(f"🎁 掉落: {'、'.join(g['drops'])}")
+        else:
+            lines.append("💼 额外快速打工：体力不足，未打工")
+    elif label == "散步":
+        if g["count"] > 0:
+            lines.append(f"🐾 额外快速散步 ×{g['count']}：共 +{g['count'] * 20} 经验")
+            if g["drops"]:
+                lines.append(f"🎁 捡到: {'、'.join(g['drops'])}")
+        else:
+            lines.append("🐾 额外快速散步：体力不足，未散步")
+    else:  # 钓鱼
+        if g["count"] > 0:
+            lines.append(f"🎣 额外快速钓鱼 ×{g['count']}：清空剩余体力")
+        else:
+            lines.append("🎣 额外快速钓鱼：体力不足，未钓鱼")
+
+
+@pet_daily_cmd.handle()
+async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
+    """一键完成宠物日常：签到 → 抚摸 → 打工 → 散步 → 钓鱼 → 随机偷取"""
+    # 群聊检查积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
+
+    user_id = str(event.user_id)
+    pet = get_pet(user_id)
+    if pet is None:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("你还没有领养宠物，请先发送「我的宠物」领养一只")
+        ]))
+        return
+
+    lines = await _run_daily_steps(user_id)
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
-        MessageSegment.text(header + "\n".join(lines))
+        MessageSegment.text(_daily_header(user_id) + "\n".join(lines))
+    ]))
+
+
+# ========== 一键日常变体（日常 + 额外快速单项） ==========
+# 一键日常1 = 日常 + 快速打工；一键日常2 = 日常 + 快速散步；一键日常3 = 日常 + 快速钓鱼
+pet_daily1_cmd = on_command("一键日常1", aliases={"日常1"}, priority=5, block=True, force_whitespace=True)
+
+
+@pet_daily1_cmd.handle()
+async def handle_pet_daily1(matcher: Matcher, event: MessageEvent):
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
+    user_id = str(event.user_id)
+    pet = get_pet(user_id)
+    if pet is None:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("你还没有领养宠物，请先发送「我的宠物」领养一只")
+        ]))
+        return
+    lines = await _run_daily_steps(user_id)
+    _append_grind_result(lines, "打工", _grind_work(user_id))
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(_daily_header(user_id) + "\n".join(lines))
+    ]))
+
+
+pet_daily2_cmd = on_command("一键日常2", aliases={"日常2"}, priority=5, block=True, force_whitespace=True)
+
+
+@pet_daily2_cmd.handle()
+async def handle_pet_daily2(matcher: Matcher, event: MessageEvent):
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
+    user_id = str(event.user_id)
+    pet = get_pet(user_id)
+    if pet is None:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("你还没有领养宠物，请先发送「我的宠物」领养一只")
+        ]))
+        return
+    lines = await _run_daily_steps(user_id)
+    _append_grind_result(lines, "散步", _grind_walk(user_id))
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(_daily_header(user_id) + "\n".join(lines))
+    ]))
+
+
+pet_daily3_cmd = on_command("一键日常3", aliases={"日常3"}, priority=5, block=True, force_whitespace=True)
+
+
+@pet_daily3_cmd.handle()
+async def handle_pet_daily3(matcher: Matcher, event: MessageEvent):
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
+    user_id = str(event.user_id)
+    pet = get_pet(user_id)
+    if pet is None:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("你还没有领养宠物，请先发送「我的宠物」领养一只")
+        ]))
+        return
+    lines = await _run_daily_steps(user_id)
+    _append_grind_result(lines, "钓鱼", _grind_fish(user_id))
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(_daily_header(user_id) + "\n".join(lines))
     ]))
 
 

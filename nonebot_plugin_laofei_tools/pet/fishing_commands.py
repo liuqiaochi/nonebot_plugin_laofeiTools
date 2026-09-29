@@ -183,7 +183,7 @@ async def handle_fishing(
 
 fishing_quick_cmd = on_command(
     "快速钓鱼",
-    aliases={"连续钓鱼"},
+    aliases={"连续钓鱼", "一键钓鱼"},
     priority=5,
     block=True,
     force_whitespace=True,
