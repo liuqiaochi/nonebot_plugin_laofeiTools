@@ -68,10 +68,7 @@ async def handle_fishing(
         return
 
     if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
+        await matcher.finish()
         return
 
     user_id = str(event.user_id)
@@ -203,10 +200,7 @@ async def handle_quick_fishing(
         return
 
     if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
+        await matcher.finish()
         return
 
     user_id = str(event.user_id)
@@ -390,10 +384,7 @@ async def handle_fishing_guide(
         return
 
     if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
+        await matcher.finish()
         return
 
     user_id = str(event.user_id)
@@ -490,10 +481,7 @@ async def handle_fishing_box(
         return
 
     if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
+        await matcher.finish()
         return
 
     user_id = str(event.user_id)
@@ -580,10 +568,7 @@ async def handle_fishing_sell(
         return
 
     if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
+        await matcher.finish()
         return
 
     user_id = str(event.user_id)

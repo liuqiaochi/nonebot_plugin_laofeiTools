@@ -138,15 +138,8 @@ module_switch_guard = on_message(rule=Rule(_guard_rule), priority=1, block=True)
 
 @module_switch_guard.handle()
 async def _handle_guard(event: MessageEvent):
-    cmd = _plain_text(event).split()[0]
-    module = MODULE_USE_COMMANDS.get(cmd)
-    name = FEATURE_MODULES[module]["name"]
-    await module_switch_guard.finish(Message([
-        MessageSegment.reply(event.message_id),
-        MessageSegment.text(
-            f"⚠️ 本群未开启{name}，超管发送「开启 {name}」即可启用"
-        ),
-    ]))
+    # 模块未开启：静默拦截，不回复（与 AI 对话关闭行为一致）
+    await module_switch_guard.finish()
 
 
 # ========== 开启 / 关闭 模块 ==========

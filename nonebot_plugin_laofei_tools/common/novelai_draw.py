@@ -394,12 +394,7 @@ async def handle_novelai(matcher: Matcher, bot: Bot, event: MessageEvent, args: 
 
     group_id = str(event.group_id)
     if not is_novelai_group_enabled(group_id):
-        await matcher.finish(
-            Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("⚠️ 本群未开启 ai画图 功能（需超级管理员发送「开启ai画图」开启）"),
-            ])
-        )
+        await matcher.finish()
 
     raw = args.extract_plain_text().strip()
     if not raw:

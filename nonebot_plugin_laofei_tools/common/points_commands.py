@@ -102,10 +102,7 @@ async def handle_sign(matcher: Matcher, event: MessageEvent):
     # 检查群聊是否开启了积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
     
     user_id = str(event.user_id)
@@ -177,10 +174,7 @@ async def handle_points(matcher: Matcher, event: MessageEvent):
     # 检查群聊是否开启了积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
     
     user_id = str(event.user_id)
@@ -224,10 +218,7 @@ async def handle_transfer(
     
     # 检查群聊是否开启了积分系统
     if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
+        await matcher.finish()
         return
     
     # 检查是否@了某人
@@ -423,10 +414,7 @@ async def handle_newbie(matcher: Matcher, event: MessageEvent):
     # 检查群聊是否开启了积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
     
     user_id = str(event.user_id)

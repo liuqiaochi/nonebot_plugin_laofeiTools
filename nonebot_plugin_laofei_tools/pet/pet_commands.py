@@ -74,10 +74,7 @@ async def handle_my_pet(matcher: Matcher, event: MessageEvent):
     # 检查群聊是否开启积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
 
     user_id = str(event.user_id)
@@ -151,10 +148,7 @@ async def handle_adopt(matcher: Matcher, event: MessageEvent, args: Message = Co
     # 检查群聊是否开启积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
 
     user_id = str(event.user_id)
@@ -282,10 +276,7 @@ async def handle_inventory(matcher: Matcher, event: MessageEvent):
     # 检查群聊是否开启积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
 
     user_id = str(event.user_id)
@@ -344,10 +335,7 @@ async def handle_walk(matcher: Matcher, event: MessageEvent):
     # 检查群聊是否开启积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
 
     user_id = str(event.user_id)
@@ -397,10 +385,7 @@ async def handle_pat(matcher: Matcher, event: MessageEvent):
     # 检查群聊是否开启积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
 
     user_id = str(event.user_id)
@@ -444,10 +429,7 @@ async def handle_feed(matcher: Matcher, event: MessageEvent, args: Message = Com
     # 检查群聊是否开启积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
 
     user_id = str(event.user_id)
@@ -570,10 +552,7 @@ async def handle_pk(matcher: Matcher, bot: Bot, event: MessageEvent, args: Messa
     # 检查群聊是否开启积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
 
     user_id = str(event.user_id)
@@ -649,10 +628,7 @@ async def handle_shop(matcher: Matcher, event: MessageEvent):
     # 检查群聊是否开启积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
 
     shop_b64 = None
@@ -729,10 +705,7 @@ async def handle_buy(matcher: Matcher, event: MessageEvent, args: Message = Comm
     # 检查群聊是否开启积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
 
     user_id = str(event.user_id)
@@ -823,10 +796,7 @@ async def handle_equip(matcher: Matcher, event: MessageEvent, args: Message = Co
     # 检查群聊是否开启积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
 
     user_id = str(event.user_id)
@@ -874,10 +844,7 @@ async def handle_sell(matcher: Matcher, event: MessageEvent, args: Message = Com
     # 检查群聊是否开启积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
 
     user_id = str(event.user_id)
@@ -964,10 +931,7 @@ async def handle_work(matcher: Matcher, event: MessageEvent):
     # 检查群聊是否开启积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
 
     user_id = str(event.user_id)
@@ -1019,10 +983,7 @@ async def handle_quick_work(bot: Bot, matcher: Matcher, event: MessageEvent):
     # 群聊需开启积分系统；私聊不受群开关限制
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
 
     user_id = str(event.user_id)
@@ -1122,10 +1083,7 @@ async def handle_quick_walk(bot: Bot, matcher: Matcher, event: MessageEvent):
     # 群聊需开启积分系统；私聊不受群开关限制
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
 
     user_id = str(event.user_id)
@@ -1226,10 +1184,7 @@ async def handle_steal(matcher: Matcher, event: MessageEvent, args: Message = Co
         return
 
     if not is_points_enabled(str(event.group_id)):
-        await matcher.finish(Message([
-            MessageSegment.reply(event.message_id),
-            MessageSegment.text("本群积分系统已关闭")
-        ]))
+        await matcher.finish()
         return
 
     user_id = str(event.user_id)
@@ -1287,10 +1242,7 @@ async def handle_abandon(matcher: Matcher, event: MessageEvent):
     # 检查群聊是否开启积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
 
     user_id = str(event.user_id)
@@ -1363,10 +1315,7 @@ async def handle_rename(matcher: Matcher, event: MessageEvent, args: Message = C
     # 检查群聊是否开启积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
 
     user_id = str(event.user_id)
@@ -1681,10 +1630,7 @@ async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
     # 群聊检查积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
 
     user_id = str(event.user_id)
@@ -1712,10 +1658,7 @@ pet_daily1_cmd = on_command("一键日常1", aliases={"日常1"}, priority=5, bl
 async def handle_pet_daily1(matcher: Matcher, event: MessageEvent):
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
     user_id = str(event.user_id)
     pet = get_pet(user_id)
@@ -1740,10 +1683,7 @@ pet_daily2_cmd = on_command("一键日常2", aliases={"日常2"}, priority=5, bl
 async def handle_pet_daily2(matcher: Matcher, event: MessageEvent):
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
     user_id = str(event.user_id)
     pet = get_pet(user_id)
@@ -1768,10 +1708,7 @@ pet_daily3_cmd = on_command("一键日常3", aliases={"日常3"}, priority=5, bl
 async def handle_pet_daily3(matcher: Matcher, event: MessageEvent):
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
     user_id = str(event.user_id)
     pet = get_pet(user_id)
@@ -1799,10 +1736,7 @@ async def handle_feed_all(matcher: Matcher, event: MessageEvent):
     # 检查群聊是否开启积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
 
     user_id = str(event.user_id)
@@ -1886,10 +1820,7 @@ async def handle_sell_all(matcher: Matcher, event: MessageEvent):
     # 检查群聊是否开启积分系统
     if isinstance(event, GroupMessageEvent):
         if not is_points_enabled(str(event.group_id)):
-            await matcher.finish(Message([
-                MessageSegment.reply(event.message_id),
-                MessageSegment.text("本群积分系统已关闭")
-            ]))
+            await matcher.finish()
             return
 
     user_id = str(event.user_id)

@@ -53,7 +53,7 @@ async def handle_search_image(
     # 2. 检查群聊是否开启了功能
     group_id = str(event.group_id)
     if not is_group_enabled(group_id):
-        await matcher.finish("搜图功能未开启，请联系超级用户发送「开启lg搜图」")
+        await matcher.finish()
         return
     
     # 3. 检查是否引用了消息
