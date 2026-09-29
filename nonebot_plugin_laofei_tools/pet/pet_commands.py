@@ -994,6 +994,8 @@ async def handle_work(matcher: Matcher, event: MessageEvent):
     msg += f"体力: {result['stamina_after']}"
     if result["dropped_items"]:
         msg += f"\n🎁 额外获得: {'、'.join(result['dropped_items'])}"
+    if result.get("dfy_bonus", False):
+        msg += f"\n🐟 米饭管够触发！积分收益 +30%"
     if result.get("bonus_points", 0) > 0:
         msg += f"\n🍀 祥子吃瓜触发！额外获得 {result['bonus_points']} 积分"
 
@@ -1053,6 +1055,8 @@ async def handle_quick_work(bot: Bot, matcher: Matcher, event: MessageEvent):
         node_text = f"💼 第{work_count}次打工\n获得 {result['points_earned']} 积分\n体力: {result['stamina_after']}"
         if result["dropped_items"]:
             node_text += f"\n🎁 额外获得: {'、'.join(result['dropped_items'])}"
+        if result.get("dfy_bonus", False):
+            node_text += f"\n🐟 米饭管够触发！积分 +30%"
         nodes.append({
             "type": "node",
             "data": {
@@ -1613,4 +1617,154 @@ async def handle_pet_daily(matcher: Matcher, event: MessageEvent):
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
         MessageSegment.text(header + "\n".join(lines))
+    ]))
+
+
+# ========== 一键喂养指令 ==========
+pet_feed_all_cmd = on_command("一键喂养", aliases={"一键喂食", "全部喂养", "全部喂食", "吃光食物"}, priority=5, block=True)
+
+
+@pet_feed_all_cmd.handle()
+async def handle_feed_all(matcher: Matcher, event: MessageEvent):
+    """一键喂养：把背包里所有食物全部喂给宠物"""
+    # 检查群聊是否开启积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
+
+    user_id = str(event.user_id)
+    pet = get_pet(user_id)
+    if pet is None:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("你还没有领养宠物，请先发送「我的宠物」领养一只")
+        ]))
+        return
+
+    inv = get_inventory(user_id)
+    food_items = [(name, cnt) for name, cnt in inv.foods.items() if cnt > 0]
+    if not food_items:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("背包里没有任何食物可以喂~")
+        ]))
+        return
+
+    # 逐个食物喂光；体力达到硬上限（9999）则停止后续喂食
+    agg = {}  # food_name -> {"count", "stamina", "affection", "fav"}
+    total_stamina = 0
+    total_affection = 0
+    failed = []
+    stop = False
+    for name, cnt in food_items:
+        if stop:
+            break
+        for _ in range(cnt):
+            cur = get_pet(user_id)
+            if cur and cur.stamina >= FEED_STAMINA_CAP:
+                stop = True
+                break
+            result = do_feed(user_id, name)
+            if not result["success"]:
+                failed.append((name, result["message"]))
+                stop = True
+                break
+            a = agg.setdefault(name, {"count": 0, "stamina": 0, "affection": 0, "fav": False})
+            a["count"] += 1
+            a["stamina"] += result["stamina_gain"]
+            a["affection"] += result["affection_gain"]
+            a["fav"] = a["fav"] or result["is_favorite"]
+            total_stamina += result["stamina_gain"]
+            total_affection += result["affection_gain"]
+
+    if not agg:
+        reason = failed[0][1] if failed else f"宠物体力已达上限（{FEED_STAMINA_CAP}），不需要喂食"
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(reason)
+        ]))
+        return
+
+    pet_name = get_display_name(get_pet(user_id))
+    msg = f"🐾 你喂了 {pet_name}：\n"
+    for name, a in agg.items():
+        tag = " 💕最爱" if a["fav"] else ""
+        msg += f"  {name} ×{a['count']}　+{a['stamina']}体力 +{a['affection']}好感{tag}\n"
+    msg += f"——————————\n合计 体力 +{total_stamina}　好感 +{total_affection}"
+    if failed:
+        uniq = {}
+        for fn, r in failed:
+            uniq[fn] = r
+        msg += "\n未喂食：" + "、".join(f"{fn}({r})" for fn, r in uniq.items())
+
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(msg)
+    ]))
+
+
+# ========== 一键出售指令 ==========
+pet_sell_all_cmd = on_command("一键出售", aliases={"全部出售", "批量出售", "清仓"}, priority=5, block=True)
+
+
+@pet_sell_all_cmd.handle()
+async def handle_sell_all(matcher: Matcher, event: MessageEvent):
+    """一键出售：出售背包里除已装备配饰和食物外的所有道具"""
+    # 检查群聊是否开启积分系统
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("本群积分系统已关闭")
+            ]))
+            return
+
+    user_id = str(event.user_id)
+    pet = get_pet(user_id)
+    if pet is None:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("你还没有领养宠物，请先发送「我的宠物」领养一只")
+        ]))
+        return
+
+    inv = get_inventory(user_id)
+    equipped = pet.accessory  # 已装备配饰保留不卖
+
+    total_points = 0
+    sold = []  # (name, count, total)
+    # 遍历副本，避免 remove_item 删除键时影响迭代
+    for name, cnt in list(inv.accessories.items()):
+        if cnt <= 0 or name == equipped:
+            continue
+        price = ACCESSORIES[name]["price"] // 4
+        total = price * cnt
+        total_points += total
+        remove_item(user_id, "accessory", name, cnt)
+        sold.append((name, cnt, total))
+
+    if not sold:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("没有可出售的道具（已保留食物和已装备配饰）")
+        ]))
+        return
+
+    # 发放积分
+    points_user = get_points_user(user_id)
+    points_user.points += total_points
+    save_points_user(user_id)
+
+    msg = "🧹 一键出售完成！\n"
+    for name, cnt, total in sold:
+        msg += f"  {name} ×{cnt}  (+{total})\n"
+    msg += f"——————————\n共获得 {total_points} 积分"
+
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(msg)
     ]))

@@ -82,7 +82,7 @@ PET_TYPES = {
         "luck": 12,
         "force": 10,
         "talent": "米饭管够",
-        "talent_desc": "打工积分收益+30%",
+        "talent_desc": "打工50%概率积分收益+30%",
         "image": "pet-dfy.gif",
         "fav_food": "白米饭",
     },
@@ -91,7 +91,7 @@ PET_TYPES = {
         "luck": 20,
         "force": 10,
         "talent": "祥子吃瓜",
-        "talent_desc": "打工/散步/抚摸5%概率获得50积分",
+        "talent_desc": "打工/散步/抚摸10%概率获得50积分",
         "image": "pet-mu.gif",
         "fav_food": "小黄瓜",
     },
@@ -659,8 +659,8 @@ WALK_NO_DROP_MESSAGES = [
 # ========== 散步逻辑 ==========
 
 def _mu_bonus_points(user_id: str, pet) -> int:
-    """木子米天赋「祥子吃瓜」：5%概率额外获得50积分（仅木子米触发，由本函数在积分账户直接发放）"""
-    if pet.pet_type == "mu" and random.random() < 0.05:
+    """木子米天赋「祥子吃瓜」：10%概率额外获得50积分（仅木子米触发，由本函数在积分账户直接发放）"""
+    if pet.pet_type == "mu" and random.random() < 0.10:
         pu = get_points_user(user_id)
         pu.points += 50
         save_points_user(user_id)
@@ -951,12 +951,14 @@ def do_work(user_id: str) -> dict:
     # 7. 保存宠物数据
     save_pet(user_id)
 
-    # 大肥鱼天赋：打工积分收益 +30%
+    # 大肥鱼天赋「米饭管够」：打工有 50% 概率积分收益 +30%
     points_earned = get_affection_reward(random.randint(50, 100), pet.affection)
-    if pet.pet_type == "dfy":
+    dfy_bonus = False
+    if pet.pet_type == "dfy" and random.random() < 0.5:
         points_earned = int(points_earned * 1.3)
+        dfy_bonus = True
 
-    # 木子米天赋「祥子吃瓜」：5%概率额外获得50积分
+    # 木子米天赋「祥子吃瓜」：10%概率额外获得50积分
     bonus_points = _mu_bonus_points(user_id, pet)
 
     return {
@@ -966,6 +968,7 @@ def do_work(user_id: str) -> dict:
         "points_earned": points_earned,
         "dropped_items": dropped_items,
         "bonus_points": bonus_points,
+        "dfy_bonus": dfy_bonus,
     }
 
 
