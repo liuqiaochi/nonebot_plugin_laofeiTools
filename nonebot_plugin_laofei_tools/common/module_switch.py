@@ -234,7 +234,7 @@ def generate_module_switch_image(group_id: str) -> str:
     font_title = _try_load_font(26)
     font_name = _try_load_font(20)
     font_sub = _try_load_font(13)
-    font_num = _try_load_font(17)
+    font_num = _try_load_font(24)
 
     switches = get_module_switches(group_id)
 
@@ -268,16 +268,19 @@ def generate_module_switch_image(group_id: str) -> str:
                 radius=6, fill=(52, 52, 64)
             )
 
-        # 序号块：金色圆角底色 + 深色数字（醒目，供「开启/关闭 <序号>」使用）
-        box_w, box_h = 32, 30
-        box_x, box_y = padding, row_top + 6
-        draw.rounded_rectangle([box_x, box_y, box_x + box_w, box_y + box_h],
-                               radius=8, fill=(255, 200, 100))
+        # 序号：金色加粗 + 黑色描边（透明底，醒目；供「开启/关闭 <序号>」使用）
+        box_w = 32
+        box_x = padding
         num = str(i + 1)
-        nb = draw.textbbox((0, 0), num, font=font_num)
-        draw.text((box_x + (box_w - (nb[2] - nb[0])) / 2 - nb[0],
-                   box_y + (box_h - (nb[3] - nb[1])) / 2 - nb[1]),
-                  num, fill=(45, 45, 55), font=font_num)
+        num_cx = box_x + box_w / 2
+        num_cy = row_top + 21
+        nb = draw.textbbox((0, 0), num, font=font_num, stroke_width=2)
+        draw.text(
+            (num_cx - (nb[2] - nb[0]) / 2 - nb[0],
+             num_cy - (nb[3] - nb[1]) / 2 - nb[1]),
+            num, fill=(255, 200, 100), font=font_num,
+            stroke_width=2, stroke_fill=(0, 0, 0),
+        )
 
         # 状态图标（勾 / 叉）
         icon_cx = box_x + box_w + 18
