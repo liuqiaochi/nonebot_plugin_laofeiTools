@@ -19,7 +19,7 @@ from nonebot.matcher import Matcher
 require("nonebot_plugin_localstore")
 require("nonebot_plugin_apscheduler")
 
-from .common import points_commands, restart, life_utils, ai_chat, rest_mode, qrcode_tool, glossary, novelai_draw
+from .common import points_commands, restart, life_utils, ai_chat, rest_mode, qrcode_tool, glossary, novelai_draw, module_switch
 from .pet import pet_commands
 from .search import commands
 from .config import Config, init_enabled_groups
@@ -148,7 +148,11 @@ sections = [
         ("二维码识别", "引用/发送含二维码的图片后发此指令，识别图中二维码内容"),
         ("生成二维码", "引用一条文本后发此指令，或直接发「生成二维码 内容」，生成二维码图片"),
     ]),
+    ("功能开关", [
+        ("功能开关", "以图片查看本群各功能模块的开启状态（勾=可用）"),
+    ]),
     ("管理指令", [
+        ("开启/关闭 <模块名>", "管理群聊各功能模块（如 开启 搜图功能 / 关闭 钓鱼系统）"),
         ("开启/关闭 lg搜图", "管理群聊搜图功能"),
         ("开启/关闭 积分", "管理群聊积分系统"),
         ("开启AI / 关闭AI", "管理群聊 AI 功能"),
