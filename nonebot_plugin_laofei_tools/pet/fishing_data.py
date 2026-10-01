@@ -465,7 +465,7 @@ FISHING_DELAY = {
 FISHING_STAMINA_COST = 10
 
 # 每人每天钓鱼次数上限
-DAILY_FISHING_LIMIT = 15
+DAILY_FISHING_LIMIT = 30
 
 # 内存缓存
 _fishing_cache: dict[str, dict] = {}

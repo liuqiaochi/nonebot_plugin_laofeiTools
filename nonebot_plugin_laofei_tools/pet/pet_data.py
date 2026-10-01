@@ -37,7 +37,7 @@ PET_TYPES = {
         "luck": 20,
         "force": 10,
         "talent": "咕咕嘎嘎",
-        "talent_desc": "食物恢复比例1.4倍",
+        "talent_desc": "喂食50%概率体力恢复+30%",
         "image": "pet-pengun.gif",
         "fav_food": "汉堡",
     },
@@ -867,9 +867,11 @@ def do_feed(user_id: str, food_name: str) -> dict:
         stamina_gain += 10   # 最爱额外 +10 体力
         affection_gain += 10  # 最爱额外 +10 好感
 
-    # 香企鹅天赋：体力恢复量 ×1.4
-    if pet.pet_type == "penguin":
-        stamina_gain = int(stamina_gain * 1.4)
+    # 香企鹅天赋「咕咕嘎嘎」：喂食有 50% 概率体力恢复量 +30%
+    penguin_bonus = False
+    if pet.pet_type == "penguin" and random.random() < 0.5:
+        stamina_gain = int(stamina_gain * 1.3)
+        penguin_bonus = True
 
     # 6. 应用体力增量，不超过 max_stamina
     old_stamina = pet.stamina
@@ -895,6 +897,7 @@ def do_feed(user_id: str, food_name: str) -> dict:
         "affection_before": old_affection,
         "affection_after": pet.affection,
         "pet_name": get_display_name(pet),
+        "penguin_bonus": penguin_bonus,
     }
 
 

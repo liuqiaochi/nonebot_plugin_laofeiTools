@@ -36,7 +36,10 @@ from .pet_data import (
     get_all_pet_owners,
     FEED_STAMINA_CAP,
 )
-from .fishing_data import roll_fish, add_caught_fish, FISHING_STAMINA_COST
+from .fishing_data import (
+    roll_fish, add_caught_fish, FISHING_STAMINA_COST,
+    DAILY_FISHING_LIMIT, record_fishing, get_fishing_remaining,
+)
 
 # 宠物图片目录（插件根目录下的 image 文件夹）
 PET_IMAGE_DIR = Path(__file__).parent.parent / "image"
@@ -464,6 +467,7 @@ async def handle_feed(matcher: Matcher, event: MessageEvent, args: Message = Com
     total_affection_gain = 0
     fed_details = []   # (food_name, stamina_gain, affection_gain, is_favorite, pet_name)
     failed = []        # (food_name, reason)
+    penguin_triggered = False
 
     for food_name in food_list:
         for _ in range(per_count):
@@ -488,6 +492,8 @@ async def handle_feed(matcher: Matcher, event: MessageEvent, args: Message = Com
                 result["is_favorite"],
                 result["pet_name"],
             ))
+            if result.get("penguin_bonus", False):
+                penguin_triggered = True
             total_stamina_gain += result["stamina_gain"]
             total_affection_gain += result["affection_gain"]
 
@@ -527,6 +533,8 @@ async def handle_feed(matcher: Matcher, event: MessageEvent, args: Message = Com
         for fn, r in failed:
             uniq[fn] = r
         msg += "\n未喂食：" + "、".join(f"{fn}({r})" for fn, r in uniq.items())
+    if penguin_triggered:
+        msg += "\n🐧 咕咕嘎嘎触发！体力收益 +30%"
 
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
@@ -1507,19 +1515,20 @@ async def _run_daily_steps(user_id: str) -> list:
     else:
         lines.append(f"🐾 散步：{walk['message']}")
 
-    # 5. 钓鱼 x1（与单钓一致，需扣 10 体力）
+    # 5. 钓鱼 x1（与单钓一致，需扣 10 体力，计入每日钓鱼上限）
     pet = get_pet(user_id)
-    if pet.stamina >= FISHING_STAMINA_COST:
+    if get_fishing_remaining(user_id) > 0 and pet.stamina >= FISHING_STAMINA_COST:
         fish = roll_fish()
         pet.stamina -= FISHING_STAMINA_COST
         save_pet(user_id)
+        record_fishing(user_id)
         if fish.get("rarity") == "junk":
             lines.append(f"🎣 钓鱼：钓到了「{fish['name']}」，不值钱扔掉了（-{FISHING_STAMINA_COST} 体力）")
         else:
             add_caught_fish(user_id, fish["id"])
             lines.append(f"🎣 钓鱼：钓到 [{fish.get('name', '?')}]（{fish.get('rarity', '?')}）（-{FISHING_STAMINA_COST} 体力）")
     else:
-        lines.append(f"🎣 钓鱼：体力不足（需 {FISHING_STAMINA_COST} 体力，当前 {pet.stamina}）")
+        lines.append(f"🎣 钓鱼：今日次数已用完或体力不足（需 {FISHING_STAMINA_COST} 体力）")
 
     # 6. 随机偷取一个玩家
     steal_targets = _get_random_targets(user_id, n=5)
@@ -1587,14 +1596,15 @@ def _grind_walk(user_id: str) -> dict:
 
 
 def _grind_fish(user_id: str) -> dict:
-    """快速钓鱼循环（钓鱼至体力耗尽）"""
+    """快速钓鱼循环（钓鱼至体力耗尽，且计入每日钓鱼上限）"""
     pet = get_pet(user_id)
     count = 0
-    while pet.stamina >= FISHING_STAMINA_COST and count < 200:
+    while pet.stamina >= FISHING_STAMINA_COST and count < DAILY_FISHING_LIMIT and get_fishing_remaining(user_id) > 0:
         fish = roll_fish()
         pet.stamina -= FISHING_STAMINA_COST
         if fish.get("rarity") != "junk":
             add_caught_fish(user_id, fish["id"])
+        record_fishing(user_id)
         count += 1
     save_pet(user_id)
     return {"count": count}
@@ -1763,6 +1773,7 @@ async def handle_feed_all(matcher: Matcher, event: MessageEvent):
     total_affection = 0
     failed = []
     stop = False
+    penguin_triggered = False
     for name, cnt in food_items:
         if stop:
             break
@@ -1783,6 +1794,8 @@ async def handle_feed_all(matcher: Matcher, event: MessageEvent):
             a["fav"] = a["fav"] or result["is_favorite"]
             total_stamina += result["stamina_gain"]
             total_affection += result["affection_gain"]
+            if result.get("penguin_bonus", False):
+                penguin_triggered = True
 
     if not agg:
         reason = failed[0][1] if failed else f"宠物体力已达上限（{FEED_STAMINA_CAP}），不需要喂食"
@@ -1803,6 +1816,8 @@ async def handle_feed_all(matcher: Matcher, event: MessageEvent):
         for fn, r in failed:
             uniq[fn] = r
         msg += "\n未喂食：" + "、".join(f"{fn}({r})" for fn, r in uniq.items())
+    if penguin_triggered:
+        msg += "\n🐧 咕咕嘎嘎触发！体力收益 +30%"
 
     await matcher.finish(Message([
         MessageSegment.reply(event.message_id),
