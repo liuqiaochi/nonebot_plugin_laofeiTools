@@ -668,6 +668,89 @@ def _mu_bonus_points(user_id: str, pet) -> int:
     return 0
 
 
+# ========== 每日活动次数限制（打工/散步，类比钓鱼 daily_fishing） ==========
+DAILY_WORK_LIMIT = 30
+DAILY_WALK_LIMIT = 30
+
+_DAILY_ACTIVITY_FILE = DATA_DIR / "daily_activity.json"
+_daily_activity_cache: dict = {}
+
+def _ensure_daily_activity_loaded():
+    global _daily_activity_cache
+    if not _daily_activity_cache:
+        if _DAILY_ACTIVITY_FILE.exists():
+            try:
+                with open(_DAILY_ACTIVITY_FILE, "r", encoding="utf-8") as f:
+                    _daily_activity_cache = json.load(f)
+            except Exception:
+                _daily_activity_cache = {}
+
+def _save_daily_activity():
+    safe_json_save(_DAILY_ACTIVITY_FILE, _daily_activity_cache)
+
+def _daily_today_str() -> str:
+    return datetime.now().strftime("%Y-%m-%d")
+
+def get_daily_activity(user_id: str) -> dict:
+    _ensure_daily_activity_loaded()
+    if user_id not in _daily_activity_cache:
+        _daily_activity_cache[user_id] = {
+            "daily_work": {"date": "", "count": 0},
+            "daily_walk": {"date": "", "count": 0},
+        }
+    rec = _daily_activity_cache[user_id]
+    for key in ("daily_work", "daily_walk"):
+        if key not in rec:
+            rec[key] = {"date": "", "count": 0}
+    return rec
+
+def get_work_remaining(user_id: str) -> int:
+    """返回今日剩余可打工次数（跨天后自动重置）"""
+    rec = get_daily_activity(user_id)
+    daily = rec["daily_work"]
+    today = _daily_today_str()
+    if daily.get("date") != today:
+        daily["date"] = today
+        daily["count"] = 0
+        _save_daily_activity()
+    return max(0, DAILY_WORK_LIMIT - daily["count"])
+
+def record_work(user_id: str) -> int:
+    """记录一次打工（跨天后自动重置计数），返回今日已打工次数"""
+    rec = get_daily_activity(user_id)
+    daily = rec["daily_work"]
+    today = _daily_today_str()
+    if daily.get("date") != today:
+        daily["date"] = today
+        daily["count"] = 0
+    daily["count"] += 1
+    _save_daily_activity()
+    return daily["count"]
+
+def get_walk_remaining(user_id: str) -> int:
+    """返回今日剩余可散步次数（跨天后自动重置）"""
+    rec = get_daily_activity(user_id)
+    daily = rec["daily_walk"]
+    today = _daily_today_str()
+    if daily.get("date") != today:
+        daily["date"] = today
+        daily["count"] = 0
+        _save_daily_activity()
+    return max(0, DAILY_WALK_LIMIT - daily["count"])
+
+def record_walk(user_id: str) -> int:
+    """记录一次散步（跨天后自动重置计数），返回今日已散步次数"""
+    rec = get_daily_activity(user_id)
+    daily = rec["daily_walk"]
+    today = _daily_today_str()
+    if daily.get("date") != today:
+        daily["date"] = today
+        daily["count"] = 0
+    daily["count"] += 1
+    _save_daily_activity()
+    return daily["count"]
+
+
 def do_walk(user_id: str) -> dict:
     """散步逻辑
 
@@ -686,6 +769,10 @@ def do_walk(user_id: str) -> dict:
     pet = get_pet(user_id)
     if pet is None:
         return {"success": False, "message": "你还没有领养宠物"}
+
+    # 2.5 每日散步次数限制
+    if get_walk_remaining(user_id) <= 0:
+        return {"success": False, "message": f"今日散步次数已用完（每日上限{DAILY_WALK_LIMIT}次），明天0点重置~"}
 
     # 3. 检查体力
     if pet.stamina < 20:
@@ -746,6 +833,9 @@ def do_walk(user_id: str) -> dict:
 
     # 木子米天赋「祥子吃瓜」：5%概率额外获得50积分
     bonus_points = _mu_bonus_points(user_id, pet)
+
+    # 记录每日散步次数
+    record_walk(user_id)
 
     # 11. 返回结果
     return {
@@ -924,6 +1014,10 @@ def do_work(user_id: str) -> dict:
     if pet is None:
         return {"success": False, "message": "你还没有领养宠物"}
     
+    # 2.5 每日打工次数限制
+    if get_work_remaining(user_id) <= 0:
+        return {"success": False, "message": f"今日打工次数已用完（每日上限{DAILY_WORK_LIMIT}次），明天0点重置~"}
+
     # 3. 检查体力
     if pet.stamina < 30:
         return {"success": False, "message": f"宠物体力不足，无法打工（当前体力: {pet.stamina}，需要30）"}
@@ -963,6 +1057,9 @@ def do_work(user_id: str) -> dict:
 
     # 木子米天赋「祥子吃瓜」：10%概率额外获得50积分
     bonus_points = _mu_bonus_points(user_id, pet)
+
+    # 记录每日打工次数
+    record_work(user_id)
 
     return {
         "success": True,

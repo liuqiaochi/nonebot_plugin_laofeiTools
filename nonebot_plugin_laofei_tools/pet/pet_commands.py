@@ -1043,7 +1043,7 @@ async def handle_quick_work(bot: Bot, matcher: Matcher, event: MessageEvent):
     if work_count == 0:
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text(f"体力不足，无法打工（当前体力: {get_pet(user_id).stamina}，需要30）")
+            MessageSegment.text(result["message"] if result is not None else f"体力不足，无法打工（当前体力: {get_pet(user_id).stamina}，需要30）")
         ]))
         return
 
@@ -1139,7 +1139,7 @@ async def handle_quick_walk(bot: Bot, matcher: Matcher, event: MessageEvent):
     if walk_count == 0:
         await matcher.finish(Message([
             MessageSegment.reply(event.message_id),
-            MessageSegment.text(f"体力不足，无法散步（当前体力: {get_pet(user_id).stamina}，需要20）")
+            MessageSegment.text(result["message"] if result is not None else f"体力不足，无法散步（当前体力: {get_pet(user_id).stamina}，需要20）")
         ]))
         return
 
