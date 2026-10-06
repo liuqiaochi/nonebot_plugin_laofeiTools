@@ -6,6 +6,7 @@
 
 from pathlib import Path
 import random
+import time
 
 from nonebot import on_command, logger
 from nonebot.permission import SUPERUSER
@@ -24,7 +25,7 @@ from ..config import is_points_enabled
 from ..common.points_data import get_user as get_points_user, save_user as save_points_user, do_sign
 from .pet_data import (
     PET_TYPES, FOODS, ACCESSORIES, AFFECTION_LEVELS,
-    get_pet, create_pet, save_pet, abandon_pet,
+    get_pet, create_pet, save_pet, abandon_pet, reincarnate_pet,
     get_pet_level, get_affection_level, get_effective_force, get_effective_luck,
     get_pet_max_hp,
     get_display_name,
@@ -218,6 +219,175 @@ async def handle_adopt(matcher: Matcher, event: MessageEvent, args: Message = Co
     await matcher.finish(Message(msg_chain))
 
 
+# ========== 宠物转移（转生）指令 ==========
+TRANSFER_COST = 5000
+# 待二次确认状态：user_id -> {"new_type": str, "ts": float}
+_transfer_pending: dict = {}
+
+
+pet_transfer_cmd = on_command("宠物转移", aliases={"转移宠物", "宠物转生", "宠物转型"}, priority=5, block=True, force_whitespace=True)
+
+
+@pet_transfer_cmd.handle()
+async def handle_transfer(matcher: Matcher, event: MessageEvent, args: Message = CommandArg()):
+    """宠物转移（转生）：消耗 5000 积分，将当前宠物转换为其他种类并继承全部属性"""
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish()
+            return
+
+    user_id = str(event.user_id)
+    pet = get_pet(user_id)
+    if pet is None:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("你还没有领养宠物，请先发送「我的宠物」领养一只")
+        ]))
+        return
+
+    # 解析目标宠物种类
+    pet_name = args.extract_plain_text().strip()
+    if not pet_name:
+        msg = "请使用「宠物转移 宠物名」格式，如：宠物转移 Doro\n\n当前所有可转移为的种类：\n\n"
+        for pet_type, info in PET_TYPES.items():
+            msg += f"🐾 {info['name']}\n"
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(msg)
+        ]))
+        return
+
+    target_type = None
+    for pet_type, info in PET_TYPES.items():
+        if pet_name == info["name"] or pet_name.lower() == pet_type:
+            target_type = pet_type
+            break
+    if target_type is None:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("请选择有效的宠物种类，发送「宠物转移」查看可选列表")
+        ]))
+        return
+
+    if target_type == pet.pet_type:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(f"你当前已经是「{PET_TYPES[pet.pet_type]['name']}」了，无法转移成同种宠物")
+        ]))
+        return
+
+    # 检查积分
+    points_user = get_points_user(user_id)
+    if points_user.points < TRANSFER_COST:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(f"积分不足，宠物转移需要 {TRANSFER_COST} 积分，你只有 {points_user.points} 积分")
+        ]))
+        return
+
+    # 存入待确认状态（二次确认）
+    _transfer_pending[user_id] = {"new_type": target_type, "ts": time.time()}
+    old_name = pet.nickname if pet.nickname else PET_TYPES[pet.pet_type]['name']
+    new_name = PET_TYPES[target_type]['name']
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text(
+            f"⚠️ 确认将你的宠物「{old_name}」转移为「{new_name}」？\n"
+            f"将消耗 {TRANSFER_COST} 积分，且不可撤销（原宠物将被替换，新宠物继承全部属性）。\n"
+            f"回复「确认转移」完成，或回复「取消转移」取消。"
+        )
+    ]))
+    return
+
+
+pet_transfer_confirm_cmd = on_command("确认转移", aliases={"确认宠物转移"}, priority=5, block=True, force_whitespace=True)
+
+
+@pet_transfer_confirm_cmd.handle()
+async def handle_transfer_confirm(matcher: Matcher, event: MessageEvent):
+    """二次确认：完成宠物转移"""
+    if isinstance(event, GroupMessageEvent):
+        if not is_points_enabled(str(event.group_id)):
+            await matcher.finish()
+            return
+
+    user_id = str(event.user_id)
+    pending = _transfer_pending.get(user_id)
+    if pending is None:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("你当前没有待确认的宠物转移，请先发送「宠物转移 宠物名」")
+        ]))
+        return
+
+    # 超时校验（5 分钟）
+    if time.time() - pending.get("ts", 0) > 300:
+        _transfer_pending.pop(user_id, None)
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("宠物转移确认已超时（5 分钟），请重新发起「宠物转移 宠物名」")
+        ]))
+        return
+
+    new_type = pending["new_type"]
+    # 重新校验宠物与积分（防止期间状态变化）
+    pet = get_pet(user_id)
+    if pet is None:
+        _transfer_pending.pop(user_id, None)
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("你已没有宠物，无法完成转移")
+        ]))
+        return
+    points_user = get_points_user(user_id)
+    if points_user.points < TRANSFER_COST:
+        _transfer_pending.pop(user_id, None)
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text(f"积分不足，转移需要 {TRANSFER_COST} 积分，你只有 {points_user.points} 积分")
+        ]))
+        return
+
+    # 扣积分 + 转生
+    points_user.points -= TRANSFER_COST
+    save_points_user(user_id)
+    old_name = pet.nickname if pet.nickname else PET_TYPES[pet.pet_type]['name']
+    new_pet = reincarnate_pet(user_id, new_type)
+    _transfer_pending.pop(user_id, None)
+
+    new_info = PET_TYPES[new_type]
+    msg = f"✅ 转移成功！你的宠物已从「{old_name}」变为「{new_info['name']}」\n"
+    msg += f"消耗 {TRANSFER_COST} 积分，剩余 {points_user.points} 积分\n"
+    msg += f"已继承全部属性：经验 {new_pet.exp} | 体力 {new_pet.stamina}/{new_pet.max_stamina} | 好感 {new_pet.affection}\n"
+    msg += f"天赋「{new_info['talent']}」: {new_info['talent_desc']}"
+
+    msg_chain = [MessageSegment.reply(event.message_id)]
+    image_path = PET_IMAGE_DIR / new_info["image"]
+    if image_path.exists():
+        msg_chain.append(MessageSegment.image(f"file://{image_path}"))
+    msg_chain.append(MessageSegment.text(msg))
+    await matcher.finish(Message(msg_chain))
+
+
+pet_transfer_cancel_cmd = on_command("取消转移", aliases={"取消宠物转移"}, priority=5, block=True, force_whitespace=True)
+
+
+@pet_transfer_cancel_cmd.handle()
+async def handle_transfer_cancel(matcher: Matcher, event: MessageEvent):
+    """取消宠物转移"""
+    user_id = str(event.user_id)
+    if _transfer_pending.pop(user_id, None) is not None:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("已取消宠物转移")
+        ]))
+        return
+    await matcher.finish(Message([
+        MessageSegment.reply(event.message_id),
+        MessageSegment.text("你当前没有待确认的宠物转移")
+    ]))
+
+
 # ========== 宠物帮助指令 ==========
 pet_help_cmd = on_command("宠物帮助", priority=5, block=True, force_whitespace=True)
 
@@ -261,6 +431,7 @@ async def handle_pet_help(matcher: Matcher, event: MessageEvent):
 宠物排行榜 [武力/幸运] - 展示等级/武力/幸运 TOP10
 宠物背包 - 查看道具背包
 宠物弃养 - 弃养宠物（需二次确认）
+宠物转移 宠物名 - 消耗 5000 积分将当前宠物转生为目标种类并继承全部属性（需二次确认）
 宠物帮助 - 查看本帮助信息"""
 
         await matcher.finish(Message([
