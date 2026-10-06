@@ -384,8 +384,11 @@ def abandon_pet(user_id: str) -> bool:
 def reincarnate_pet(user_id: str, new_pet_type: str) -> Optional[PetData]:
     """宠物转移（转生）：将用户当前宠物转换为 new_pet_type
 
-    基础幸运/基础武力采用「新种类」的初始值（PET_TYPES[new_type]），
-    其余属性（昵称/好感/经验/体力/最大体力/配饰/各日期字段）从原宠物复制继承，
+    宠物自带属性（基础幸运/基础武力/天赋/最大体力上限）按「新种类」：
+    - 基础幸运/基础武力取 PET_TYPES[new_type] 初始值；
+    - 天赋由 pet_type 决定，自动随新种类切换；
+    - 最大体力（体系上限）按新种类基础值 + 配饰体力加成重算。
+    后天形成的属性（昵称/好感/经验/体力/配饰/各日期字段）从原宠物复制继承，
     因此配饰的武力/幸运/血量加成与等级加成会一并延续到新宠物。
     返回新的 PetData；若用户无宠物则返回 None。
     """
@@ -397,13 +400,17 @@ def reincarnate_pet(user_id: str, new_pet_type: str) -> Optional[PetData]:
     new_pet.nickname = old.nickname
     new_pet.affection = old.affection
     new_pet.exp = old.exp
-    new_pet.stamina = old.stamina
-    new_pet.max_stamina = old.max_stamina
+    new_pet.stamina = old.stamina  # 当前体力（后天形成）继承
+    # max_stamina（体系上限）在下方设置配饰后按新种族基础 + 配饰加成重算
     # 基础幸运/基础武力采用新种类的初始值（不沿用旧种类）
     new_pet_type_info = PET_TYPES[new_pet_type]
     new_pet.base_luck = new_pet_type_info["luck"]
     new_pet.base_force = new_pet_type_info["force"]
     new_pet.accessory = old.accessory
+    # 体系上限（最大体力）按新种族基础 + 配饰体力加成重算
+    _base_stamina = DRAGON_STAMINA if new_pet_type == "dragon" else DEFAULT_STAMINA
+    _acc_stamina = ACCESSORIES.get(new_pet.accessory, {}).get("stamina", 0) if new_pet.accessory else 0
+    new_pet.max_stamina = _base_stamina + _acc_stamina
     new_pet.last_pat_date = old.last_pat_date
     new_pet.last_stamina_date = old.last_stamina_date
     new_pet.last_work_time = old.last_work_time
