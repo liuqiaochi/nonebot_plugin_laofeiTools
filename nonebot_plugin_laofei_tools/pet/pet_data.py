@@ -382,11 +382,12 @@ def abandon_pet(user_id: str) -> bool:
 
 
 def reincarnate_pet(user_id: str, new_pet_type: str) -> Optional[PetData]:
-    """宠物转移（转生）：将用户当前宠物转换为 new_pet_type，继承原宠物全部属性
+    """宠物转移（转生）：将用户当前宠物转换为 new_pet_type
 
-    仅 pet_type 改变（决定种类/外观/天赋），其余属性
-    （昵称/好感/经验/体力/最大体力/基础幸运/基础武力/配饰/各日期字段）
-    全部从原宠物复制继承。返回新的 PetData；若用户无宠物则返回 None。
+    基础幸运/基础武力采用「新种类」的初始值（PET_TYPES[new_type]），
+    其余属性（昵称/好感/经验/体力/最大体力/配饰/各日期字段）从原宠物复制继承，
+    因此配饰的武力/幸运/血量加成与等级加成会一并延续到新宠物。
+    返回新的 PetData；若用户无宠物则返回 None。
     """
     old = get_pet(user_id)
     if old is None:
@@ -398,8 +399,10 @@ def reincarnate_pet(user_id: str, new_pet_type: str) -> Optional[PetData]:
     new_pet.exp = old.exp
     new_pet.stamina = old.stamina
     new_pet.max_stamina = old.max_stamina
-    new_pet.base_luck = old.base_luck
-    new_pet.base_force = old.base_force
+    # 基础幸运/基础武力采用新种类的初始值（不沿用旧种类）
+    new_pet_type_info = PET_TYPES[new_pet_type]
+    new_pet.base_luck = new_pet_type_info["luck"]
+    new_pet.base_force = new_pet_type_info["force"]
     new_pet.accessory = old.accessory
     new_pet.last_pat_date = old.last_pat_date
     new_pet.last_stamina_date = old.last_stamina_date
