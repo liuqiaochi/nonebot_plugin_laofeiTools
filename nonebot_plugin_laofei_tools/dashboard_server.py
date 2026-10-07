@@ -8,34 +8,33 @@
 为什么需要它：浏览器以 file:// 打开 HTML 时会被 CORS 限制，无法直接 fetch 本地 JSON；
 本服务同时托管 dashboard.html 与数据接口，同源访问即可。
 
+数据目录定位（按优先级，详见 resolve_data_dir）：
+    1) --data-dir 显式指定（最可靠，推荐部署写死绝对路径）
+    2) 环境变量 LAOFEI_DATA_DIR
+    3) 从脚本目录 / 当前工作目录逐级向上查找 "data/laofei_tools"
+    4) 回退到 当前工作目录/data/laofei_tools （与 bot 的 DATA_DIR 相对 CWD 行为一致）
+
 用法：
-    python dashboard_server.py                 # 默认 http://0.0.0.0:8080
-    python dashboard_server.py --port 9000     # 指定端口
-    python dashboard_server.py --host 127.0.0.1 # 仅本机访问
+    python dashboard_server.py --data-dir /home/laofei/Project/esbot/data/laofei_tools
+    python dashboard_server.py                 # 默认 0.0.0.0:8080，自动查找数据目录
+    python dashboard_server.py --port 9000
+    python dashboard_server.py --host 127.0.0.1
 
 接口：
     GET /                       -> dashboard.html
     GET /dashboard.html         -> dashboard.html
     GET /api/data               -> 合并后的全部看板数据（JSON）
     GET /api/raw/<filename>     -> 单个原始存储文件（便于排查）
-
-数据目录定位（按优先级）：
-    1) 脚本所在插件目录的 ../data/laofei_tools
-    2) 当前工作目录下的 data/laofei_tools
 """
 
 import argparse
 import json
 import mimetypes
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 PLUGIN_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = PLUGIN_DIR.parent  # nonebotLaofeiTools/
-DATA_DIR_CANDIDATES = [
-    PROJECT_ROOT / "data" / "laofei_tools",
-    Path.cwd() / "data" / "laofei_tools",
-]
 
 # (看板字段名, 存储文件名) —— 直接把文件内容挂到对应字段下，
 # 渲染层读取的仍是原内层 key（如 D.module_switches.switches），无需改动前端。
@@ -62,12 +61,36 @@ STORAGE_FILES = [
 ]
 
 
-def resolve_data_dir() -> Path:
-    for d in DATA_DIR_CANDIDATES:
-        if d.exists():
-            return d
-    # 都不存在则返回首选，让上层以"空数据"优雅降级
-    return DATA_DIR_CANDIDATES[0]
+def find_data_dir_up(start: Path) -> Path | None:
+    """从 start 逐级向上查找 <祖先>/data/laofei_tools 目录。"""
+    start = start.resolve()
+    for d in [start, *start.parents]:
+        cand = d / "data" / "laofei_tools"
+        if cand.is_dir():
+            return cand
+    return None
+
+
+def resolve_data_dir(data_dir_arg: str | None) -> Path:
+    """按优先级解析数据目录。"""
+    # 1) 命令行显式指定
+    if data_dir_arg:
+        return Path(data_dir_arg).expanduser().resolve()
+    # 2) 环境变量
+    env = os.environ.get("LAOFEI_DATA_DIR")
+    if env:
+        return Path(env).expanduser().resolve()
+    # 3) 从脚本目录 / 当前工作目录逐级向上查找
+    for start in (PLUGIN_DIR, Path.cwd()):
+        found = find_data_dir_up(start)
+        if found:
+            return found
+    # 4) 回退：与 bot 的 DATA_DIR（相对 CWD）行为一致
+    return (Path.cwd() / "data" / "laofei_tools").resolve()
+
+
+# 由 main() 在启动前计算并写入，Handler 读取此全局
+RESOLVED_DATA_DIR: Path = Path.cwd() / "data" / "laofei_tools"
 
 
 def load_dashboard_data(data_dir: Path) -> dict:
@@ -107,7 +130,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
-        data_dir = resolve_data_dir()
+        data_dir = RESOLVED_DATA_DIR
 
         if path in ("/", "/dashboard.html"):
             fp = PLUGIN_DIR / "dashboard.html"
@@ -143,13 +166,23 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    global RESOLVED_DATA_DIR
     parser = argparse.ArgumentParser(description="龙哥工具箱数据看板本地服务")
     parser.add_argument("--host", default="0.0.0.0", help="监听地址 (默认 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8080, help="监听端口 (默认 8080)")
+    parser.add_argument(
+        "--data-dir",
+        default=None,
+        help="插件存储目录（含 data/laofei_tools 的上级或同级），"
+        "如 /home/laofei/Project/esbot/data/laofei_tools。缺省自动查找。",
+    )
     args = parser.parse_args()
 
-    data_dir = resolve_data_dir()
-    print(f"[dashboard] 数据目录: {data_dir} (存在: {data_dir.exists()})")
+    RESOLVED_DATA_DIR = resolve_data_dir(args.data_dir)
+    print(f"[dashboard] 数据目录: {RESOLVED_DATA_DIR} (存在: {RESOLVED_DATA_DIR.exists()})")
+    if not RESOLVED_DATA_DIR.exists():
+        print("[dashboard] ⚠️  数据目录不存在！请通过 --data-dir 指定，"
+              "或确认启动目录正确。看板将只显示空数据。")
     print(f"[dashboard] 看板地址: http://{args.host}:{args.port}/")
     print("[dashboard] 按 Ctrl+C 停止")
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
