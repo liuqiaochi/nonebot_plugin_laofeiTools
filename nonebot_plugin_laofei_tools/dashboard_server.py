@@ -16,7 +16,7 @@
     如需强制指定绝对路径，用 --data-dir。
 
 用法：
-    python dashboard_server.py                 # 默认 0.0.0.0:8080，自动使用插件数据目录
+    python dashboard_server.py                 # 默认 0.0.0.0:5233，自动使用插件数据目录
     python dashboard_server.py --data-dir /home/laofei/Project/esbot/data/laofei_tools
     python dashboard_server.py --port 9000
     python dashboard_server.py --host 127.0.0.1
@@ -163,7 +163,7 @@ def main():
     global RESOLVED_DATA_DIR
     parser = argparse.ArgumentParser(description="龙哥工具箱数据看板本地服务")
     parser.add_argument("--host", default="0.0.0.0", help="监听地址 (默认 0.0.0.0)")
-    parser.add_argument("--port", type=int, default=8080, help="监听端口 (默认 8080)")
+    parser.add_argument("--port", type=int, default=5233, help="监听端口 (默认 5233)")
     parser.add_argument(
         "--data-dir",
         default=None,
@@ -185,7 +185,7 @@ def main():
         if e.errno in (98, 48):  # Address already in use
             print(f"[dashboard] ❌ 端口 {args.port} 已被占用！"
                   f"请先结束占用进程，或换端口启动：")
-            print(f"           python dashboard_server.py --port 8081")
+            print(f"           python dashboard_server.py --port 5234")
             print(f"           （查找占用：lsof -i:{args.port}  或  pkill -f dashboard_server.py）")
         else:
             print(f"[dashboard] ❌ 启动失败：{e}")
