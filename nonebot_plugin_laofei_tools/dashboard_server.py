@@ -8,15 +8,15 @@
 为什么需要它：浏览器以 file:// 打开 HTML 时会被 CORS 限制，无法直接 fetch 本地 JSON；
 本服务同时托管 dashboard.html 与数据接口，同源访问即可。
 
-数据目录定位（按优先级，详见 resolve_data_dir）：
-    1) --data-dir 显式指定（最可靠，推荐部署写死绝对路径）
-    2) 环境变量 LAOFEI_DATA_DIR
-    3) 从脚本目录 / 当前工作目录逐级向上查找 "data/laofei_tools"
-    4) 回退到 当前工作目录/data/laofei_tools （与 bot 的 DATA_DIR 相对 CWD 行为一致）
+数据目录定位：
+    与插件 config.DATA_DIR 完全一致——即「项目根/data/laofei_tools」。
+    本脚本位于 <项目根>/<插件目录>/ 下，因此默认数据目录 = 脚本父目录的父目录 / data / laofei_tools，
+    也就是 bot 运行时真正写入的那个目录。
+    如需覆盖（例如显式指定绝对路径），用 --data-dir。
 
 用法：
+    python dashboard_server.py                 # 默认 0.0.0.0:8080，自动使用插件数据目录
     python dashboard_server.py --data-dir /home/laofei/Project/esbot/data/laofei_tools
-    python dashboard_server.py                 # 默认 0.0.0.0:8080，自动查找数据目录
     python dashboard_server.py --port 9000
     python dashboard_server.py --host 127.0.0.1
 
@@ -30,11 +30,14 @@
 import argparse
 import json
 import mimetypes
-import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 PLUGIN_DIR = Path(__file__).resolve().parent
+# 项目根 = 插件目录的父目录；bot 启动时的 CWD 即项目根，
+# 因此 DATA_DIR 与 config.DATA_DIR（Path("data/laofei_tools") 相对 CWD）完全一致。
+PROJECT_ROOT = PLUGIN_DIR.parent
+DEFAULT_DATA_DIR = (PROJECT_ROOT / "data" / "laofei_tools").resolve()
 
 # (看板字段名, 存储文件名) —— 直接把文件内容挂到对应字段下，
 # 渲染层读取的仍是原内层 key（如 D.module_switches.switches），无需改动前端。
@@ -61,36 +64,15 @@ STORAGE_FILES = [
 ]
 
 
-def find_data_dir_up(start: Path) -> Path | None:
-    """从 start 逐级向上查找 <祖先>/data/laofei_tools 目录。"""
-    start = start.resolve()
-    for d in [start, *start.parents]:
-        cand = d / "data" / "laofei_tools"
-        if cand.is_dir():
-            return cand
-    return None
-
-
 def resolve_data_dir(data_dir_arg: str | None) -> Path:
-    """按优先级解析数据目录。"""
-    # 1) 命令行显式指定
+    """数据目录：默认与插件 config.DATA_DIR 完全一致；--data-dir 可显式覆盖。"""
     if data_dir_arg:
         return Path(data_dir_arg).expanduser().resolve()
-    # 2) 环境变量
-    env = os.environ.get("LAOFEI_DATA_DIR")
-    if env:
-        return Path(env).expanduser().resolve()
-    # 3) 从脚本目录 / 当前工作目录逐级向上查找
-    for start in (PLUGIN_DIR, Path.cwd()):
-        found = find_data_dir_up(start)
-        if found:
-            return found
-    # 4) 回退：与 bot 的 DATA_DIR（相对 CWD）行为一致
-    return (Path.cwd() / "data" / "laofei_tools").resolve()
+    return DEFAULT_DATA_DIR
 
 
 # 由 main() 在启动前计算并写入，Handler 读取此全局
-RESOLVED_DATA_DIR: Path = Path.cwd() / "data" / "laofei_tools"
+RESOLVED_DATA_DIR: Path = DEFAULT_DATA_DIR
 
 
 def load_dashboard_data(data_dir: Path) -> dict:
@@ -173,8 +155,8 @@ def main():
     parser.add_argument(
         "--data-dir",
         default=None,
-        help="插件存储目录（含 data/laofei_tools 的上级或同级），"
-        "如 /home/laofei/Project/esbot/data/laofei_tools。缺省自动查找。",
+        help="插件存储目录绝对路径，如 /home/laofei/Project/esbot/data/laofei_tools。"
+        "缺省使用与 config.DATA_DIR 一致的默认目录。",
     )
     args = parser.parse_args()
 
