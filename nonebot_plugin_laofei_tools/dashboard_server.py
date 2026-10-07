@@ -9,10 +9,11 @@
 本服务同时托管 dashboard.html 与数据接口，同源访问即可。
 
 数据目录定位：
-    与插件 config.DATA_DIR 完全一致——即「项目根/data/laofei_tools」。
-    本脚本位于 <项目根>/<插件目录>/ 下，因此默认数据目录 = 脚本父目录的父目录 / data / laofei_tools，
-    也就是 bot 运行时真正写入的那个目录。
-    如需覆盖（例如显式指定绝对路径），用 --data-dir。
+    与插件 config.DATA_DIR 完全一致——即 bot 运行时真正写入的 data/laofei_tools。
+    本脚本从自身所在目录逐级向上，找到第一个真实存在 data/laofei_tools 的目录，
+    因此无论插件在项目里嵌套多深（如 src/plugins/...），都能命中 bot 的数据目录。
+    若数据目录尚未生成，回退到「插件目录父目录/data/laofei_tools」。
+    如需强制指定绝对路径，用 --data-dir。
 
 用法：
     python dashboard_server.py                 # 默认 0.0.0.0:8080，自动使用插件数据目录
@@ -34,10 +35,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 PLUGIN_DIR = Path(__file__).resolve().parent
-# 项目根 = 插件目录的父目录；bot 启动时的 CWD 即项目根，
-# 因此 DATA_DIR 与 config.DATA_DIR（Path("data/laofei_tools") 相对 CWD）完全一致。
-PROJECT_ROOT = PLUGIN_DIR.parent
-DEFAULT_DATA_DIR = (PROJECT_ROOT / "data" / "laofei_tools").resolve()
+# 回退约定：尚未生成数据目录时，按「插件目录父目录/data/laofei_tools」兜底。
+DEFAULT_DATA_DIR = (PLUGIN_DIR.parent / "data" / "laofei_tools").resolve()
+
+
+def find_data_dir(start: Path) -> Path | None:
+    """从 start 逐级向上，返回第一个真实存在 data/laofei_tools 的目录（即 bot 写入数据的目录）。"""
+    start = start.resolve()
+    for d in [start, *start.parents]:
+        cand = d / "data" / "laofei_tools"
+        if cand.is_dir():
+            return cand
+    return None
 
 # (看板字段名, 存储文件名) —— 直接把文件内容挂到对应字段下，
 # 渲染层读取的仍是原内层 key（如 D.module_switches.switches），无需改动前端。
@@ -65,9 +74,12 @@ STORAGE_FILES = [
 
 
 def resolve_data_dir(data_dir_arg: str | None) -> Path:
-    """数据目录：默认与插件 config.DATA_DIR 完全一致；--data-dir 可显式覆盖。"""
+    """数据目录：默认找插件所在项目中真实存在的 data/laofei_tools（bot 写入处）；--data-dir 可显式覆盖。"""
     if data_dir_arg:
         return Path(data_dir_arg).expanduser().resolve()
+    found = find_data_dir(PLUGIN_DIR)
+    if found:
+        return found
     return DEFAULT_DATA_DIR
 
 
@@ -167,7 +179,17 @@ def main():
               "或确认启动目录正确。看板将只显示空数据。")
     print(f"[dashboard] 看板地址: http://{args.host}:{args.port}/")
     print("[dashboard] 按 Ctrl+C 停止")
-    srv = ThreadingHTTPServer((args.host, args.port), Handler)
+    try:
+        srv = ThreadingHTTPServer((args.host, args.port), Handler)
+    except OSError as e:
+        if e.errno in (98, 48):  # Address already in use
+            print(f"[dashboard] ❌ 端口 {args.port} 已被占用！"
+                  f"请先结束占用进程，或换端口启动：")
+            print(f"           python dashboard_server.py --port 8081")
+            print(f"           （查找占用：lsof -i:{args.port}  或  pkill -f dashboard_server.py）")
+        else:
+            print(f"[dashboard] ❌ 启动失败：{e}")
+        return
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
