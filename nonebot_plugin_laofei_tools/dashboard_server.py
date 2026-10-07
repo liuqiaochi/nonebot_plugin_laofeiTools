@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""
+龙哥工具箱 · 数据看板本地服务
+
+作用：把插件存储目录 data/laofei_tools/*.json 实时读出来，
+通过 HTTP 接口喂给 dashboard.html，取代原先写死在页面里的静态 DASH_DATA。
+
+为什么需要它：浏览器以 file:// 打开 HTML 时会被 CORS 限制，无法直接 fetch 本地 JSON；
+本服务同时托管 dashboard.html 与数据接口，同源访问即可。
+
+用法：
+    python dashboard_server.py                 # 默认 http://0.0.0.0:8080
+    python dashboard_server.py --port 9000     # 指定端口
+    python dashboard_server.py --host 127.0.0.1 # 仅本机访问
+
+接口：
+    GET /                       -> dashboard.html
+    GET /dashboard.html         -> dashboard.html
+    GET /api/data               -> 合并后的全部看板数据（JSON）
+    GET /api/raw/<filename>     -> 单个原始存储文件（便于排查）
+
+数据目录定位（按优先级）：
+    1) 脚本所在插件目录的 ../data/laofei_tools
+    2) 当前工作目录下的 data/laofei_tools
+"""
+
+import argparse
+import json
+import mimetypes
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+PLUGIN_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = PLUGIN_DIR.parent  # nonebotLaofeiTools/
+DATA_DIR_CANDIDATES = [
+    PROJECT_ROOT / "data" / "laofei_tools",
+    Path.cwd() / "data" / "laofei_tools",
+]
+
+# (看板字段名, 存储文件名) —— 直接把文件内容挂到对应字段下，
+# 渲染层读取的仍是原内层 key（如 D.module_switches.switches），无需改动前端。
+STORAGE_FILES = [
+    ("ai_enabled_groups", "ai_enabled_groups.json"),
+    ("daily_activity", "daily_activity.json"),
+    ("user_points", "user_points.json"),
+    ("pet_data", "pet_data.json"),
+    ("pet_inventory", "pet_inventory.json"),
+    ("pet_pk_records", "pet_pk_records.json"),
+    ("lottery_pool", "lottery_pool.json"),
+    ("lottery_history", "lottery_history.json"),
+    ("lottery_bets", "lottery_bets.json"),
+    ("fishing_records", "fishing_records.json"),
+    ("daily_fortune", "daily_fortune.json"),
+    ("steal_records", "steal_records.json"),
+    ("enabled_groups", "enabled_groups.json"),
+    ("novelai_enabled_groups", "novelai_enabled_groups.json"),
+    ("points_disabled_groups", "points_disabled_groups.json"),
+    ("module_switches", "module_switches.json"),
+    ("deepseek_model_groups", "deepseek_model_groups.json"),
+    ("novelai_model_groups", "novelai_model_groups.json"),
+    ("novelai_user_settings", "novelai_user_settings.json"),
+]
+
+
+def resolve_data_dir() -> Path:
+    for d in DATA_DIR_CANDIDATES:
+        if d.exists():
+            return d
+    # 都不存在则返回首选，让上层以"空数据"优雅降级
+    return DATA_DIR_CANDIDATES[0]
+
+
+def load_dashboard_data(data_dir: Path) -> dict:
+    """逐文件读取插件存储文件并合并为看板所需结构。缺失/损坏文件自动跳过。"""
+    merged: dict = {}
+    skipped = []
+    for key, filename in STORAGE_FILES:
+        fp = data_dir / filename
+        if not fp.exists():
+            skipped.append(filename)
+            continue
+        try:
+            with fp.open("r", encoding="utf-8") as f:
+                merged[key] = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            skipped.append(f"{filename}(err:{e})")
+    merged["_meta"] = {
+        "data_dir": str(data_dir),
+        "loaded": [k for k, _ in STORAGE_FILES if k in merged],
+        "skipped": skipped,
+    }
+    return merged
+
+
+class Handler(BaseHTTPRequestHandler):
+    def _send(self, code, body: bytes, content_type: str):
+        self.send_response(code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_json(self, obj, code=200):
+        body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        self._send(code, body, "application/json; charset=utf-8")
+
+    def do_GET(self):
+        path = self.path.split("?")[0]
+        data_dir = resolve_data_dir()
+
+        if path in ("/", "/dashboard.html"):
+            fp = PLUGIN_DIR / "dashboard.html"
+            if not fp.exists():
+                self._send_json({"error": "dashboard.html not found"}, 404)
+                return
+            body = fp.read_bytes()
+            self._send(200, body, "text/html; charset=utf-8")
+            return
+
+        if path == "/api/data":
+            self._send_json(load_dashboard_data(data_dir))
+            return
+
+        if path.startswith("/api/raw/"):
+            filename = path[len("/api/raw/"):]
+            # 仅允许访问 data 目录内、以 .json 结尾的文件，防目录穿越
+            fp = (data_dir / filename).resolve()
+            if not str(fp).startswith(str(data_dir.resolve())) or not filename.endswith(".json"):
+                self._send_json({"error": "forbidden"}, 403)
+                return
+            if not fp.exists():
+                self._send_json({"error": "not found"}, 404)
+                return
+            self._send(200, fp.read_bytes(), "application/json; charset=utf-8")
+            return
+
+        self._send_json({"error": "not found"}, 404)
+
+    def log_message(self, fmt, *args):
+        # 精简日志，避免刷屏
+        return
+
+
+def main():
+    parser = argparse.ArgumentParser(description="龙哥工具箱数据看板本地服务")
+    parser.add_argument("--host", default="0.0.0.0", help="监听地址 (默认 0.0.0.0)")
+    parser.add_argument("--port", type=int, default=8080, help="监听端口 (默认 8080)")
+    args = parser.parse_args()
+
+    data_dir = resolve_data_dir()
+    print(f"[dashboard] 数据目录: {data_dir} (存在: {data_dir.exists()})")
+    print(f"[dashboard] 看板地址: http://{args.host}:{args.port}/")
+    print("[dashboard] 按 Ctrl+C 停止")
+    srv = ThreadingHTTPServer((args.host, args.port), Handler)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        print("\n[dashboard] 已停止")
+        srv.shutdown()
+
+
+if __name__ == "__main__":
+    main()

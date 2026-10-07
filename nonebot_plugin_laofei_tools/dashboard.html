@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>机器人数据看板 · Bot Analytics</title>
+<style>
+  :root{
+    --bg:#f4f6fb; --surface:#ffffff; --surface-2:#f8fafc; --text:#1a1f2e;
+    --muted:#6b7280; --border:#e7eaf1; --shadow:0 6px 24px rgba(31,41,55,.08);
+    --accent:#6366f1; --accent2:#8b5cf6;
+    --success:#10b981; --warning:#f59e0b; --danger:#ef4444; --info:#06b6d4;
+    --track:#eceff5; --radius:16px;
+  }
+  [data-theme="dark"]{
+    --bg:#0e1016; --surface:#171a23; --surface-2:#1d212c; --text:#e7eaf3;
+    --muted:#9aa3b2; --border:#272c39; --shadow:0 8px 30px rgba(0,0,0,.45);
+    --track:#232834;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--text);line-height:1.55;-webkit-font-smoothing:antialiased;transition:background .35s,color .35s}
+  a{color:inherit;text-decoration:none}
+
+  /* layout */
+  .layout{display:flex;min-height:100vh}
+  .sidebar{width:248px;flex:0 0 248px;background:var(--surface);border-right:1px solid var(--border);
+    position:sticky;top:0;height:100vh;display:flex;flex-direction:column;padding:22px 16px;gap:6px;transition:background .35s,transform .3s}
+  .brand{display:flex;align-items:center;gap:12px;padding:6px 10px 18px}
+  .brand .logo{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;font-size:22px;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:0 6px 18px rgba(99,102,241,.4)}
+  .brand .t1{font-weight:700;font-size:16px;letter-spacing:.3px}
+  .brand .t2{font-size:11px;color:var(--muted)}
+  .nav{display:flex;flex-direction:column;gap:4px;overflow-y:auto;flex:1}
+  .nav a{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:11px;color:var(--muted);
+    font-size:14px;font-weight:500;transition:.2s}
+  .nav a .ic{font-size:17px;width:22px;text-align:center}
+  .nav a:hover{background:var(--surface-2);color:var(--text)}
+  .nav a.active{background:linear-gradient(135deg,rgba(99,102,241,.16),rgba(139,92,246,.12));color:var(--text);
+    box-shadow:inset 0 0 0 1px rgba(99,102,241,.3)}
+  .nav a.active .ic{filter:drop-shadow(0 0 6px rgba(139,92,246,.6))}
+  .side-foot{font-size:11px;color:var(--muted);padding:10px 12px;border-top:1px solid var(--border)}
+
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  header.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;
+    padding:16px 28px;background:color-mix(in srgb,var(--surface) 82%,transparent);backdrop-filter:blur(12px);
+    border-bottom:1px solid var(--border)}
+  .topbar h1{font-size:18px;font-weight:700}
+  .topbar .sub{font-size:12px;color:var(--muted);margin-top:2px}
+  .topbar-right{display:flex;align-items:center;gap:14px}
+  .clock{font-variant-numeric:tabular-nums;font-size:13px;color:var(--muted)}
+  .theme-btn{cursor:pointer;border:1px solid var(--border);background:var(--surface-2);color:var(--text);
+    width:44px;height:40px;border-radius:11px;display:grid;place-items:center;font-size:18px;transition:.2s}
+  .theme-btn:hover{border-color:var(--accent);transform:translateY(-1px)}
+  .menu-btn{display:none;cursor:pointer;background:var(--surface-2);border:1px solid var(--border);
+    border-radius:10px;width:40px;height:40px;font-size:18px;color:var(--text)}
+
+  main{padding:26px 28px 60px;max-width:1320px;margin:0 auto;width:100%}
+  section.module{margin-bottom:46px;scroll-margin-top:84px}
+  .sec-head{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+  .sec-head .badge{font-size:22px}
+  .sec-head h2{font-size:20px;font-weight:700}
+  .sec-head .desc{font-size:12.5px;color:var(--muted);margin-left:auto}
+
+  .grid{display:grid;gap:18px}
+  .g-kpi{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+  .g-2{grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}
+  .g-3{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    padding:18px 20px;box-shadow:var(--shadow);transition:background .35s,transform .2s,border-color .2s}
+  .card:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--accent) 40%,var(--border))}
+  .card h3{font-size:13px;color:var(--muted);font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+  .card h3 .dot{width:8px;height:8px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2))}
+
+  .kpi{position:relative;overflow:hidden}
+  .kpi .label{font-size:12.5px;color:var(--muted);font-weight:600}
+  .kpi .val{font-size:30px;font-weight:800;margin-top:6px;letter-spacing:.5px;font-variant-numeric:tabular-nums}
+  .kpi .val small{font-size:14px;font-weight:600;color:var(--muted);margin-left:3px}
+  .kpi .spark{position:absolute;right:-6px;bottom:-6px;font-size:54px;opacity:.07}
+  .kpi .trend{font-size:11.5px;margin-top:6px;color:var(--muted)}
+
+  /* bars */
+  .bar-row{display:flex;align-items:center;gap:12px;margin:9px 0;font-size:13px}
+  .bar-row .name{width:120px;flex:0 0 120px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bar-row .track{flex:1;height:11px;background:var(--track);border-radius:7px;overflow:hidden}
+  .bar-row .fill{height:100%;border-radius:7px;background:linear-gradient(90deg,var(--accent),var(--accent2));
+    transition:width .9s cubic-bezier(.2,.8,.2,1)}
+  .bar-row .v{width:74px;flex:0 0 74px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums;font-weight:600}
+
+  /* donut */
+  .donut-wrap{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
+  .donut{width:170px;height:170px;border-radius:50%;flex:0 0 170px;position:relative}
+  .donut::after{content:"";position:absolute;inset:30px;border-radius:50%;background:var(--surface)}
+  .donut .center{position:absolute;inset:0;display:grid;place-items:center;text-align:center;z-index:2}
+  .donut .center .n{font-size:22px;font-weight:800}
+  .donut .center .c{font-size:11px;color:var(--muted)}
+  .legend{display:flex;flex-direction:column;gap:7px;font-size:13px;flex:1;min-width:160px}
+  .legend .li{display:flex;align-items:center;gap:9px}
+  .legend .sw{width:11px;height:11px;border-radius:3px;flex:0 0 11px}
+  .legend .ln{flex:1;color:var(--muted)}
+  .legend .lv{font-weight:700;font-variant-numeric:tabular-nums}
+
+  /* table */
+  .tbl-wrap{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+  th{color:var(--muted);font-weight:600;font-size:12px;position:sticky;top:0}
+  tbody tr:hover{background:var(--surface-2)}
+  td.num{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+  .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11.5px;font-weight:600}
+  .pill.on{background:rgba(16,185,129,.16);color:var(--success)}
+  .pill.off{background:rgba(239,68,68,.16);color:var(--danger)}
+  .pill.neutral{background:var(--track);color:var(--muted)}
+
+  /* line chart */
+  .line-svg{width:100%;height:auto;display:block}
+  .muted{color:var(--muted)}
+  .stat-line{display:flex;flex-wrap:wrap;gap:10px 26px;font-size:13px}
+  .stat-line .s b{font-size:18px;font-weight:800;display:block}
+  .stat-line .s span{color:var(--muted);font-size:11.5px}
+  .note{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5}
+  .tag{display:inline-block;padding:3px 10px;margin:3px 4px 0 0;border-radius:8px;background:var(--surface-2);
+    border:1px solid var(--border);font-size:12px;color:var(--text)}
+
+  @media(max-width:900px){
+    .sidebar{position:fixed;left:0;top:0;z-index:40;transform:translateX(-100%)}
+    .sidebar.open{transform:translateX(0)}
+    .menu-btn{display:grid;place-items:center}
+    .scrim{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:35}
+    .scrim.show{display:block}
+    main{padding:18px 16px 50px}
+    header.topbar{padding:14px 16px}
+    .clock{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="logo">🤖</div>
+      <div><div class="t1">机器人数据看板</div><div class="t2">Bot Analytics Dashboard</div></div>
+    </div>
+    <nav class="nav" id="nav">
+      <a href="#overview" class="active"><span class="ic">📊</span>总览</a>
+      <a href="#points"><span class="ic">💰</span>积分系统</a>
+      <a href="#pets"><span class="ic">🐾</span>宠物系统</a>
+      <a href="#fishing"><span class="ic">🎣</span>钓鱼系统</a>
+      <a href="#fortune"><span class="ic">🔮</span>每日运势</a>
+      <a href="#groups"><span class="ic">⚙️</span>群组与功能</a>
+    </nav>
+    <div class="side-foot" id="sideFoot">数据源：data/laofei_tools/*.json<br>实时读取插件存储文件</div>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+
+  <div class="main">
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:12px">
+        <button class="menu-btn" id="menuBtn">☰</button>
+        <div><h1>机器人运营数据看板</h1><div class="sub" id="subDate">—</div></div>
+      </div>
+      <div class="topbar-right">
+        <div class="clock" id="clock">--:--:--</div>
+        <button class="theme-btn" id="refreshBtn" title="刷新数据">🔄</button>
+        <button class="theme-btn" id="themeBtn" title="切换主题">🌙</button>
+      </div>
+    </header>
+
+    <main id="app"><!-- rendered by JS --></main>
+  </div>
+</div>
+<script>
+function renderDashboard(){
+  const D = window.DASH_DATA;
+  const PALETTE = ['#6366f1','#8b5cf6','#ec4899','#f59e0b','#10b981','#06b6d4','#3b82f6','#ef4444','#84cc16','#f97316','#14b8a6','#a855f7'];
+  const FISH = {crucian_carp:'鲫鱼',anglerfish:'鮟鱇鱼',loach:'泥鳅',oarfish:'皇带鱼',napoleon_wrasse:'苏眉鱼',salmon:'三文鱼',manta_ray:'蝠鲼',saury:'秋刀鱼',hairtail:'带鱼',snakehead:'黑鱼',catfish:'鲶鱼',mackerel:'鲭鱼',silver_carp:'白鲢',tilapia:'罗非鱼',bream:'鳊鱼',bluefin_tuna:'蓝鳍金枪鱼',bighead_carp:'胖头鱼',swamp_eel:'黄鳝',sea_bass:'鲈鱼',sardine:'沙丁鱼',yellow_croaker:'黄花鱼',goldfish:'金鱼',carp:'鲤鱼',archerfish:'射水鱼',sunfish:'翻车鱼',seahorse:'海马',cod:'鳕鱼',stonefish:'石头鱼',grass_carp:'草鱼',arowana_red:'红龙鱼',mudskipper:'弹涂鱼',electric_eel:'电鳗',coelacanth:'腔棘鱼',chinese_sturgeon:'中华鲟',arapaima:'巨骨舌鱼',mullet:'鲻鱼',whale:'鲸鱼',lionfish:'狮子鱼',white_bait:'银鱼',paddlerfish:'白鲟'};
+  const PET = {phoebe:'菲比',dfy:'小鱼',dog:'小狗',penguin:'企鹅',doro:'多罗',cat:'小猫',dragon:'小龙',mu:'姆姆'};
+  const SW = {points:'积分',fishing:'钓鱼',ai_chat:'AI对话',ai_draw:'AI绘画',search:'搜索'};
+  const FORT_ORDER = ['大吉','中吉','小吉','平签','撞大运','小凶','凶','大凶'];
+  const FORT_COLOR = {'大吉':'#10b981','中吉':'#22c55e','小吉':'#84cc16','平签':'#06b6d4','撞大运':'#f59e0b','小凶':'#f97316','凶':'#ef4444','大凶':'#b91c1c'};
+
+  const $ = (s,r=document)=>r.querySelector(s);
+  const el = (tag,cls,html)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(html!=null)e.innerHTML=html;return e;};
+  const fmt = n => (n==null?0:n).toLocaleString('en-US');
+  const uid = id => String(id);
+
+  // ---- helpers ----
+  function bars(items, max){
+    max = max || Math.max(...items.map(i=>i.value),1);
+    return '<div>'+items.map((it,i)=>{
+      const w = Math.max(2, Math.round(it.value/max*100));
+      const c = it.color || `linear-gradient(90deg,${PALETTE[i%PALETTE.length]},${PALETTE[(i+2)%PALETTE.length]})`;
+      return `<div class="bar-row"><div class="name" title="${it.label}">${it.label}</div>`+
+        `<div class="track"><div class="fill" style="width:${w}%;background:${c}"></div></div>`+
+        `<div class="v">${typeof it.value==='number'?fmt(it.value):it.value}</div></div>`;
+    }).join('')+'</div>';
+  }
+  function donut(segs, centerN, centerC){
+    const total = segs.reduce((s,x)=>s+x.value,0)||1;
+    let acc=0, stops=[];
+    segs.forEach(s=>{const p=s.value/total*100; stops.push(`${s.color} ${acc.toFixed(2)}% ${(acc+p).toFixed(2)}%`); acc+=p;});
+    const legend = segs.map(s=>`<div class="li"><span class="sw" style="background:${s.color}"></span>`+
+      `<span class="ln">${s.label}</span><span class="lv">${s.value} · ${(s.value/total*100).toFixed(1)}%</span></div>`).join('');
+    return `<div class="donut-wrap"><div class="donut" style="background:conic-gradient(${stops.join(',')})">`+
+      `<div class="center"><div><div class="n">${centerN}</div><div class="c">${centerC}</div></div></div></div>`+
+      `<div class="legend">${legend}</div></div>`;
+  }
+  function lineChart(series, opts){
+    opts=opts||{};
+    const W=620,H=220,padL=44,padR=14,padT=16,padB=30;
+    const vals=series.map(s=>s.value); const max=Math.max(...vals,1), min=Math.min(...vals,0);
+    const range=(max-min)||1;
+    const n=series.length;
+    const x=i=> padL + (n<=1?0:i*(W-padL-padR)/(n-1));
+    const y=v=> padT + (1-(v-min)/range)*(H-padT-padB);
+    const pts=series.map((s,i)=>[x(i),y(s.value)]);
+    const line=pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+    const area=`M${pts[0][0]} ${H-padB} `+pts.map(p=>'L'+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ')+` L${pts[n-1][0]} ${H-padB} Z`;
+    const grid=[0,.25,.5,.75,1].map(t=>{const yy=padT+t*(H-padT-padB);const vv=(max-t*range).toFixed(0);
+      return `<line x1="${padL}" y1="${yy}" x2="${W-padR}" y2="${yy}" stroke="var(--border)" stroke-width="1"/>`+
+      `<text x="${padL-8}" y="${yy+4}" text-anchor="end" font-size="10" fill="var(--muted)">${vv}</text>`;}).join('');
+    const dots=pts.map((p,i)=>`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.5" fill="var(--accent)"/>`+
+      `<text x="${p[0].toFixed(1)}" y="${H-10}" text-anchor="middle" font-size="10" fill="var(--muted)">${series[i].label}</text>`).join('');
+    const gid='g'+Math.random().toString(36).slice(2,7);
+    return `<svg class="line-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`+
+      `<defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">`+
+      `<stop offset="0%" stop-color="var(--accent)" stop-opacity="0.35"/><stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>`+
+      grid+`<path d="${area}" fill="url(#${gid})"/><path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round"/>`+dots+`</svg>`;
+  }
+  function table(head, rows){
+    return `<div class="tbl-wrap"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead>`+
+      `<tbody>${rows.map(r=>`<tr>${r.map(c=>`<td class="${c.cls||''}">${c.v}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  }
+  function card(title, body, extra){return `<div class="card">${title?`<h3><span class="dot"></span>${title}</h3>`:''}${body}${extra||''}</div>`;}
+  function section(id,badge,title,desc,inner){
+    return `<section class="module" id="${id}"><div class="sec-head"><span class="badge">${badge}</span><h2>${title}</h2><span class="desc">${desc||''}</span></div>${inner}</section>`;
+  }
+  function kpi(label,val,unit,trend,emoji){
+    return `<div class="card kpi"><div class="label">${label}</div><div class="val">${val}${unit?`<small>${unit}</small>`:''}</div>`+
+      (trend?`<div class="trend">${trend}</div>`:'')+(emoji?`<div class="spark">${emoji}</div>`:'')+`</div>`;
+  }
+
+  // ============ compute ============
+  const up = D.user_points||{}; const upArr = Object.entries(up).map(([id,v])=>({id,...v}));
+  const upSorted = [...upArr].sort((a,b)=>b.points-a.points);
+  const totalPoints = upArr.reduce((s,u)=>s+(u.points||0),0);
+  const totalExp = upArr.reduce((s,u)=>s+(u.exp||0),0);
+  const totalBank = upArr.reduce((s,u)=>s+(u.bank_points||0),0);
+  const totalSign = upArr.reduce((s,u)=>s+(u.total_sign_days||0),0);
+  const avgPoints = upArr.length?Math.round(totalPoints/upArr.length):0;
+
+  const pets = D.pet_data||{}; const petArr=Object.entries(pets).map(([id,v])=>({id,...v}));
+  const petTypeCount={}; petArr.forEach(p=>petTypeCount[p.pet_type]=(petTypeCount[p.pet_type]||0)+1);
+  const petTypeSegs=Object.entries(petTypeCount).map(([k,v],i)=>({label:PET[k]||k,value:v,color:PALETTE[i%PALETTE.length]}));
+  const petByAff=[...petArr].sort((a,b)=>(b.affection||0)-(a.affection||0)).slice(0,10)
+    .map(p=>({label:(p.nickname||PET[p.pet_type]||p.pet_type)+'#'+(p.id.slice(-4)),value:p.affection}));
+
+  const inv=D.pet_inventory||{}; let foodItems={},accItems={};
+  Object.values(inv).forEach(u=>{for(const[k,n] of Object.entries(u.foods||{}))foodItems[k]=(foodItems[k]||0)+n;
+    for(const[k,n] of Object.entries(u.accessories||{}))accItems[k]=(accItems[k]||0)+n;});
+  const foodSegs=Object.entries(foodItems).sort((a,b)=>b[1]-a[1]).map(([k,v],i)=>({label:k,value:v,color:PALETTE[i%PALETTE.length]}));
+  const accSegs=Object.entries(accItems).sort((a,b)=>b[1]-a[1]).map(([k,v],i)=>({label:k,value:v,color:PALETTE[i%PALETTE.length]}));
+  const pkCount=Object.keys(D.pet_pk_records||{}).length;
+
+  const pool=D.lottery_pool||{}; const lh=D.lottery_history||[];
+  const bets=D.lottery_bets||{}; let totalBetPoints=0,betCount=0;
+  Object.values(bets).forEach(arr=>arr.forEach(b=>{totalBetPoints+=b.points||0;betCount++;}));
+  const lotSeries=[...lh.map(r=>({label:'R'+r.round,value:r.total_pool})),
+    {label:'R'+((pool.current_round||lh.length+1)),value:pool.pool_amount||0}];
+
+  const fish=D.fishing_records||{}; const fishCount={}; let fishUsers=0,totalCatches=0;
+  Object.entries(fish).forEach(([id,rec])=>{const c=rec.caught||[];if(c.length){fishUsers++;totalCatches+=c.length;c.forEach(f=>fishCount[f]=(fishCount[f]||0)+1);}});
+  const fishSegs=Object.entries(fishCount).sort((a,b)=>b[1]-a[1]).map(([k,v],i)=>({label:FISH[k]||k,value:v,color:PALETTE[i%PALETTE.length]}));
+
+  const fort=D.daily_fortune||{}; const fortCount={}; Object.values(fort).forEach(v=>{fortCount[v.fortune.level]=(fortCount[v.fortune.level]||0)+1;});
+  const fortSegs=FORT_ORDER.filter(l=>fortCount[l]).map(l=>({label:l,value:fortCount[l],color:FORT_COLOR[l]})).sort((a,b)=>b.value-a.value);
+  const fortMost=fortSegs[0];
+
+  const da=D.daily_activity||{}; let workTotal=0,walkTotal=0; const actUsers=Object.keys(da).length;
+  Object.values(da).forEach(u=>{workTotal+=(u.daily_work?.count||0);walkTotal+=(u.daily_walk?.count||0);});
+  const actTop=Object.entries(da).map(([id,u])=>({id,work:u.daily_work?.count||0,walk:u.daily_walk?.count||0}))
+    .sort((a,b)=>(b.work+b.walk)-(a.work+a.walk)).slice(0,8)
+    .map(u=>({label:u.id.slice(-4),value:u.work+u.walk}));
+
+  const eg=D.enabled_groups?.enabled_groups||[];
+  const aig=D.ai_enabled_groups?.enabled_groups||[];
+  const naig=D.novelai_enabled_groups?.enabled_groups||[];
+  const pdg=D.points_disabled_groups?.disabled_groups||[];
+  const sw=D.module_switches?.switches||{};
+  const dmg=D.deepseek_model_groups?.model_groups||{};
+  const nmg=D.novelai_model_groups?.model_groups||{};
+
+  // ============ render ============
+  const app=$('#app'); let html='';
+
+  // OVERVIEW
+  html+=section('overview','📊','总览','全局关键指标一览',
+    `<div class="grid g-kpi">
+      ${kpi('积分用户','<span>'+upArr.length+'</span>','人','累计积分 '+fmt(totalPoints),'💰')}
+      ${kpi('宠物数量','<span>'+petArr.length+'</span>','只','覆盖 '+Object.keys(petTypeCount).length+' 个种类','🐾')}
+      ${kpi('钓鱼参与','<span>'+fishUsers+'</span>','人','累计钓获 '+fmt(totalCatches)+' 条','🎣')}
+      ${kpi('运势抽签','<span>'+Object.keys(fort).length+'</span>','人','最常见「'+fortMost.label+'」','🔮')}
+      ${kpi('启用群组','<span>'+eg.length+'</span>','个','含 AI '+aig.length+' · 绘图 '+naig.length,'⚙️')}
+    </div>
+    <div class="grid g-2" style="margin-top:18px">
+      ${card('各模块参与人数','<div class="donut-wrap"><div class="donut" style="background:conic-gradient('+
+        ['#6366f1 0 24%','#8b5cf6 24% 48%','#ec4899 48% 70%','#f59e0b 70% 86%','#10b981 86% 100%']+
+        ')"><div class="center"><div><div class="n">5</div><div class="c">功能模块</div></div></div></div>'+
+        '<div class="legend">'+
+        ['积分|'+upArr.length,'宠物|'+petArr.length,'钓鱼|'+fishUsers,'运势|'+Object.keys(fort).length,'活跃|'+actUsers]
+        .map((s,i)=>{const[a,b]=s.split('|');return `<div class="li"><span class="sw" style="background:${PALETTE[i]}"></span><span class="ln">${a}</span><span class="lv">${b}</span></div>`;}).join('')+
+        '</div></div>')}
+      ${card('积分流通概况','<div class="stat-line">'+
+        `<div class="s"><b>${fmt(totalPoints)}</b><span>流通总积分</span></div>`+
+        `<div class="s"><b>${fmt(avgPoints)}</b><span>人均积分</span></div>`+
+        `<div class="s"><b>${fmt(totalBank)}</b><span>银行存储</span></div>`+
+        `<div class="s"><b>${fmt(totalSign)}</b><span>累计签到(天)</span></div>`+
+        `<div class="s"><b>${fmt(totalExp)}</b><span>累计经验</span></div>`+
+        `</div><div class="note">积分系统中最高资产用户为 <b>#${upSorted[0].id.slice(-4)}</b>，持有 ${fmt(upSorted[0].points)} 分。</div>`)}
+    </div>`);
+
+  // POINTS
+  const topRows=upSorted.slice(0,12).map(u=>[
+    {v:'#'+u.id.slice(-4)},{v:fmt(u.points),cls:'num'},
+    {v:fmt(u.exp),cls:'num'},{v:fmt(u.bank_points),cls:'num'},
+    {v:u.total_sign_days||0,cls:'num'},{v:u.continuous_sign_days||0,cls:'num'}]);
+  html+=section('points','💰','积分系统','用户资产 · 签到 · 银行',
+    `<div class="grid g-2">
+      ${card('积分排行榜 Top 10',bars(upSorted.slice(0,10).map(u=>({label:'#'+u.id.slice(-4),value:u.points})),upSorted[0].points))}
+      ${card('签到天数排行 Top 10',bars([...upArr].sort((a,b)=>(b.total_sign_days||0)-(a.total_sign_days||0)).slice(0,10)
+        .map(u=>({label:'#'+u.id.slice(-4),value:u.total_sign_days||0})),Math.max(...upArr.map(u=>u.total_sign_days||0),1)))}
+    </div>
+    <div class="grid g-3" style="margin-top:18px">
+      ${card('积分分布',donut([...upArr].sort((a,b)=>b.points-a.points).slice(0,6).map((u,i)=>({label:'#'+u.id.slice(-4),value:u.points,color:PALETTE[i]})),fmt(upArr.length),'用户'),'积分最高的 6 位用户占比')}
+      ${card('资产概览','<div class="stat-line">'+
+        `<div class="s"><b>${fmt(totalPoints)}</b><span>总积分</span></div>`+
+        `<div class="s"><b>${fmt(avgPoints)}</b><span>人均</span></div>`+
+        `<div class="s"><b>${fmt(totalBank)}</b><span>银行</span></div>`+
+        `<div class="s"><b>${fmt(totalSign)}</b><span>总签到</span></div></div>`)}
+      ${card('积分禁用群组',pdg.length?pdg.map(g=>`<span class="tag">群 ${g}</span>`).join(''):'<span class="muted">无禁用群组</span>','这些群组已关闭积分功能')}
+    </div>
+    <div class="grid" style="margin-top:18px">${card('积分用户明细','<div style="max-height:360px;overflow:auto">'+table(['用户','积分','经验','银行','总签到','连续签到'],topRows)+'</div>')}</div>`);
+
+  // PETS
+  const petRows=petArr.sort((a,b)=>(b.affection||0)-(a.affection||0)).slice(0,12).map(p=>[
+    {v:'#'+p.id.slice(-4)},{v:PET[p.pet_type]||p.pet_type},
+    {v:p.nickname||'<span class="muted">未命名</span>'},
+    {v:fmt(p.affection),cls:'num'},{v:fmt(p.exp),cls:'num'},
+    {v:(p.stamina||0)+'/'+(p.max_stamina||0),cls:'num'}]);
+  html+=section('pets','🐾','宠物系统','宠物种类 · 亲密度 · 背包 · 对战 · 打工散步',
+    `<div class="grid g-2">
+      ${card('宠物种类分布',donut(petTypeSegs,petArr.length+'只','宠物'))}
+      ${card('亲密度 Top 10',bars(petByAff,petByAff[0]?.value||1))}
+    </div>
+    <div class="grid g-3" style="margin-top:18px">
+      ${card('食物库存 Top',foodSegs.length?bars(foodSegs.slice(0,6),foodSegs[0].value):'<span class="muted">暂无</span>')}
+      ${card('装饰库存 Top',accSegs.length?bars(accSegs.slice(0,6),accSegs[0].value):'<span class="muted">暂无</span>')}
+      ${card('对战记录',`<div class="stat-line"><div class="s"><b>${pkCount}</b><span>对战记录条数</span></div></div><div class="note">包含进攻(attack)与防守(defend)双向记录。</div>`)}
+    </div>
+    <div class="grid g-2" style="margin-top:18px">
+      ${card('打工 / 散步活跃度 Top 8',bars(actTop,actTop[0]?.value||1),'数据来自 daily_activity（打工+散步）')}
+      ${card('打工 / 散步总计','<div class="stat-line">'+
+        '<div class="s"><b>'+fmt(workTotal)+'</b><span>今日打工</span></div>'+
+        '<div class="s"><b>'+fmt(walkTotal)+'</b><span>今日散步</span></div>'+
+        '<div class="s"><b>'+fmt(actUsers)+'</b><span>活跃用户</span></div>'+
+        '</div>')}
+    </div>
+    <div class="grid" style="margin-top:18px">${card('宠物明细','<div style="max-height:360px;overflow:auto">'+table(['用户','种类','昵称','亲密度','经验','体力'],petRows)+'</div>')}</div>`);
+
+  // LOTTERY module removed per request
+
+  // FISHING
+  const fishTop=fishSegs.slice(0,15);
+  const fishRows=Object.entries(fish).map(([id,rec])=>({id,c:n=>rec.caught?.length||0})).sort((a,b)=>b.c-a.c).slice(0,10);
+  html+=section('fishing','🎣','钓鱼系统','钓获统计 · 鱼种分布 · 钓王',
+    `<div class="grid g-kpi">
+      ${kpi('参与人数','<span>'+fishUsers+'</span>','人','累计钓获 '+fmt(totalCatches),'🎣')}
+      ${kpi('鱼种数','<span>'+Object.keys(fishCount).length+'</span>','种','最多种类已收录','🐟')}
+      ${kpi('总钓获','<span>'+fmt(totalCatches)+'</span>','条','人均 '+ (fishUsers?Math.round(totalCatches/fishUsers):0) +' 条','🌊')}
+    </div>
+    <div class="grid g-2" style="margin-top:18px">
+      ${card('鱼种钓获 Top 15',bars(fishTop,fishTop[0].value))}
+      ${card('鱼种占比分布',donut(fishSegs.slice(0,8),Object.keys(fishCount).length+'种','鱼种'),'钓获量最高的 8 种鱼')}
+    </div>
+    <div class="grid" style="margin-top:18px">${card('钓鱼达人 Top 10','<div style="max-height:340px;overflow:auto">'+table(['排名','用户','钓获数'],fishRows.map((r,i)=>[{v:'#'+(i+1)},{v:'#'+r.id.slice(-4)},{v:r.c,cls:'num'}]))+'</div>')}</div>`);
+
+  // FORTUNE
+  html+=section('fortune','🔮','每日运势','运势等级分布 · 吉凶 · 偷取记录',
+    `<div class="grid g-2">
+      ${card('今日运势等级分布',fortSegs.length?donut(fortSegs,Object.keys(fort).length+'人','抽签'):'<span class="muted">暂无</span>','最常见等级：'+(fortMost?fortMost.label:'-'))}
+      ${card('运势吉凶概览','<div class="stat-line">'+
+        '<div class="s"><b style="color:var(--success)">'+fortCount['大吉']+'</b><span>大吉</span></div>'+
+        '<div class="s"><b style="color:var(--warning)">'+((fortCount['小凶']||0)+(fortCount['凶']||0)+(fortCount['大凶']||0))+'</b><span>凶签合计</span></div>'+
+        '<div class="s"><b style="color:var(--info)">'+fortCount['撞大运']+'</b><span>撞大运</span></div>'+
+        '</div>')}
+    </div>
+    <div class="grid" style="margin-top:18px">${card('偷取记录',`<div class="stat-line"><div class="s"><b>${Object.keys(D.steal_records||{}).length}</b><span>有偷取记录用户</span></div></div><div class="note">最近：${ (()=>{const a=Object.values(D.steal_records||{}).map(v=>v.date).filter(Boolean).sort().reverse();return a[0]||'—';})() }</div>`)}</div>`);
+
+  // GROUPS & MODULES
+  const swHead=['群组',...Object.keys(SW).map(k=>SW[k])];
+  const swRows=Object.entries(sw).map(([gid,s])=>[{v:'#'+gid.slice(-4)}].
+    concat(Object.keys(SW).map(k=>({v:`<span class="pill ${s[k]?'on':'off'}">${s[k]?'开':'关'}</span>`}))));
+  const dmgRows=Object.entries(dmg).map(([g,m])=>[{v:'#'+g.slice(-4)},{v:m.model||'-'},{v:m.base_url?m.base_url:'<span class="muted">默认</span>'}]);
+  const nmgRows=Object.entries(nmg).map(([g,m])=>[{v:'#'+g.slice(-4)},{v:m}]);
+  const nus=D.novelai_user_settings||{};
+  const nusRows=Object.entries(nus).map(([u,s])=>[{v:'#'+u.slice(-4)},{v:s.uc_preset||'-'},{v:s.scale!=null?s.scale:'-'},{v:s.cfg_rescale!=null?s.cfg_rescale:'-'}]);
+  html+=section('groups','⚙️','群组与功能','功能开关 · AI 模型配置',
+    `<div class="grid g-kpi">
+      ${kpi('启用群组','<span>'+eg.length+'</span>','个','基础功能开启','⚙️')}
+      ${kpi('AI 对话群','<span>'+aig.length+'</span>','个','DeepSeek 启用','🤖')}
+      ${kpi('AI 绘图群','<span>'+naig.length+'</span>','个','NovelAI 启用','🎨')}
+      ${kpi('积分禁用','<span>'+pdg.length+'</span>','个','积分功能关闭','🚫')}
+    </div>
+    <div class="grid g-2" style="margin-top:18px">
+      ${card('功能开关矩阵',swRows.length?table(swHead,swRows):'<span class="muted">无配置</span>','每行为一个群组的五项功能开关状态')}
+      ${card('DeepSeek 模型分组',dmgRows.length?table(['群组','模型','Base URL'],dmgRows):'<span class="muted">无配置</span>')}
+    </div>
+    <div class="grid g-2" style="margin-top:18px">
+      ${card('NovelAI 模型分组',nmgRows.length?table(['群组','模型'],nmgRows):'<span class="muted">无配置</span>')}
+      ${card('NovelAI 用户偏好',nusRows.length?table(['用户','预设','Scale','CFG Rescale'],nusRows):'<span class="muted">无配置</span>')}
+    </div>`);
+
+  app.innerHTML=html;
+
+  // ---- theme ----
+  const root=document.documentElement; const tb=$('#themeBtn');
+  function setTheme(t){root.setAttribute('data-theme',t);tb.textContent=t==='dark'?'🌙':'☀️';try{localStorage.setItem('dash-theme',t)}catch(e){}}
+  let saved='dark'; try{saved=localStorage.getItem('dash-theme')||'dark';}catch(e){}
+  setTheme(saved);
+  tb.onclick=()=>setTheme(root.getAttribute('data-theme')==='dark'?'light':'dark');
+
+  // ---- clock ----
+  function tick(){const d=new Date();$('#clock').textContent=d.toLocaleTimeString('zh-CN',{hour12:false});
+    $('#subDate').textContent=d.toLocaleDateString('zh-CN',{year:'numeric',month:'long',day:'numeric',weekday:'long'});}
+  tick(); setInterval(tick,1000);
+
+  // ---- nav active + sidebar mobile ----
+  const navLinks=[...document.querySelectorAll('#nav a')];
+  const secs=navLinks.map(a=>document.querySelector(a.getAttribute('href')));
+  const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){const id=e.target.id;
+    navLinks.forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+id));}});},{rootMargin:'-45% 0px -50% 0px'});
+  secs.forEach(s=>s&&io.observe(s));
+  const sb=$('#sidebar'),scrim=$('#scrim');
+  $('#menuBtn').onclick=()=>{sb.classList.add('open');scrim.classList.add('show');};
+  scrim.onclick=()=>{sb.classList.remove('open');scrim.classList.remove('show');};
+  navLinks.forEach(a=>a.onclick=()=>{sb.classList.remove('open');scrim.classList.remove('show');});
+}
+</script>
+
+<script>
+const API_BASE = "";  // 同源部署留空；跨域时改为 http://host:port
+const $ = (sel,r=document)=>r.querySelector(sel);
+
+function setAppLoading(msg){
+  $('#app').innerHTML = '<div class="card"><h3><span class="dot"></span>数据看板</h3>'+
+    '<div style="display:flex;align-items:center;gap:12px;color:var(--muted)">'+
+    '<span style="font-size:26px">⏳</span><div>'+msg+'</div></div></div>';
+}
+function setAppError(err){
+  $('#app').innerHTML = '<div class="card" style="border-color:var(--danger)">'+
+    '<h3><span class="dot"></span>数据加载失败</h3>'+
+    '<div class="note">无法从本地服务读取插件存储文件。<br><br>'+
+    '请先启动数据看板服务：<br>'+
+    '<code style="display:inline-block;background:var(--surface-2);padding:8px 10px;border-radius:8px;margin:6px 0">python dashboard_server.py</code><br>'+
+    '然后访问 <b>http://localhost:8080/</b><br><br>'+
+    '错误信息：<code>'+String(err)+'</code></div></div>';
+}
+
+async function fetchData(){
+  const res = await fetch(API_BASE + "/api/data", {cache:"no-store"});
+  if(!res.ok) throw new Error("HTTP "+res.status);
+  const data = await res.json();
+  if(data && data._meta){
+    const m = data._meta;
+    const foot = $('#sideFoot');
+    if(foot) foot.innerHTML = "数据源：data/laofei_tools/*.json<br>已加载 "+
+      (m.loaded?m.loaded.length:0)+" 项 · 跳过 "+(m.skipped?m.skipped.length:0)+" 项";
+  }
+  return data;
+}
+
+async function boot(){
+  setAppLoading("正在读取插件存储文件…");
+  try{
+    const D = await fetchData();
+    window.DASH_DATA = D;
+    renderDashboard();
+  }catch(e){
+    setAppError(e.message || e);
+  }
+}
+
+$('#refreshBtn').onclick = ()=>{ boot(); };
+
+boot();
+</script>
+</body>
+</html>
