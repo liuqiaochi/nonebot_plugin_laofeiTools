@@ -59,6 +59,15 @@ async def init_config():
         init_enabled_groups(set(str(g) for g in default_groups))
         logger.info(f"龙哥工具箱: 已加载 {len(default_groups)} 个默认开启的群聊")
 
+    # 自动启动数据看板服务（后台 daemon 线程，不阻塞 bot 事件循环）
+    try:
+        from .dashboard_server import start_dashboard_server
+        from .config import DATA_DIR
+        start_dashboard_server(port=5233, data_dir=DATA_DIR.resolve())
+        logger.info("龙哥工具箱: 数据看板已自动启动 -> http://0.0.0.0:5233/")
+    except Exception as e:
+        logger.warning(f"龙哥工具箱: 数据看板启动失败（不影响其他功能）: {e}")
+
 
 # ========== 定时任务 ==========
 from nonebot_plugin_apscheduler import scheduler

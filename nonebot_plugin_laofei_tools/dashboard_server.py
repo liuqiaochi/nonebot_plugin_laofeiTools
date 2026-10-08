@@ -21,6 +21,9 @@
     python dashboard_server.py --port 9000
     python dashboard_server.py --host 127.0.0.1
 
+    也可不手动运行本脚本：nonebot 加载本插件时会通过 start_dashboard_server()
+    在后台线程自动拉起看板服务（见 __init__.py 的 on_startup 钩子），无需额外操作。
+
 接口：
     GET /                       -> dashboard.html
     GET /dashboard.html         -> dashboard.html
@@ -31,6 +34,7 @@
 import argparse
 import json
 import mimetypes
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -159,8 +163,46 @@ class Handler(BaseHTTPRequestHandler):
         return
 
 
-def main():
+def _serve(host: str, port: int, data_dir: Path):
+    """后台线程目标：启动 HTTP 服务。绑定失败仅告警，不影响主进程（如 bot）。"""
     global RESOLVED_DATA_DIR
+    RESOLVED_DATA_DIR = data_dir
+    try:
+        srv = ThreadingHTTPServer((host, port), Handler)
+    except OSError as e:
+        if e.errno in (98, 48):  # Address already in use
+            print(f"[dashboard] ❌ 端口 {port} 已被占用！看板服务未启动。")
+            print(f"           查找占用：lsof -i:{port}  或  pkill -f dashboard_server.py")
+            print(f"           更换端口：python dashboard_server.py --port 5234")
+        else:
+            print(f"[dashboard] ❌ 看板服务启动失败：{e}")
+        return
+    print(f"[dashboard] 数据目录: {data_dir} (存在: {data_dir.exists()})")
+    if not data_dir.exists():
+        print("[dashboard] ⚠️  数据目录不存在，看板将显示空数据。")
+    print(f"[dashboard] 看板已启动: http://{host}:{port}/  (后台线程，随插件进程退出)")
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+
+def start_dashboard_server(host: str = "0.0.0.0", port: int = 5233, data_dir=None):
+    """在后台 daemon 线程启动看板服务，供 nonebot 插件加载时自动拉起。
+
+    - data_dir 为 None 时，自动定位插件真实数据目录（与 config.DATA_DIR 一致）。
+    - 返回启动的线程对象；服务在后台运行，不阻塞调用方（不阻塞 bot 事件循环）。
+    """
+    if data_dir is None:
+        data_dir = resolve_data_dir(None)
+    else:
+        data_dir = Path(data_dir).expanduser().resolve()
+    t = threading.Thread(target=_serve, args=(host, port, data_dir), daemon=True)
+    t.start()
+    return t
+
+
+def main():
     parser = argparse.ArgumentParser(description="龙哥工具箱数据看板本地服务")
     parser.add_argument("--host", default="0.0.0.0", help="监听地址 (默认 0.0.0.0)")
     parser.add_argument("--port", type=int, default=5233, help="监听端口 (默认 5233)")
@@ -171,30 +213,12 @@ def main():
         "缺省使用与 config.DATA_DIR 一致的默认目录。",
     )
     args = parser.parse_args()
-
-    RESOLVED_DATA_DIR = resolve_data_dir(args.data_dir)
-    print(f"[dashboard] 数据目录: {RESOLVED_DATA_DIR} (存在: {RESOLVED_DATA_DIR.exists()})")
-    if not RESOLVED_DATA_DIR.exists():
-        print("[dashboard] ⚠️  数据目录不存在！请通过 --data-dir 指定，"
-              "或确认启动目录正确。看板将只显示空数据。")
-    print(f"[dashboard] 看板地址: http://{args.host}:{args.port}/")
-    print("[dashboard] 按 Ctrl+C 停止")
+    t = start_dashboard_server(args.host, args.port, args.data_dir)
     try:
-        srv = ThreadingHTTPServer((args.host, args.port), Handler)
-    except OSError as e:
-        if e.errno in (98, 48):  # Address already in use
-            print(f"[dashboard] ❌ 端口 {args.port} 已被占用！"
-                  f"请先结束占用进程，或换端口启动：")
-            print(f"           python dashboard_server.py --port 5234")
-            print(f"           （查找占用：lsof -i:{args.port}  或  pkill -f dashboard_server.py）")
-        else:
-            print(f"[dashboard] ❌ 启动失败：{e}")
-        return
-    try:
-        srv.serve_forever()
+        while t.is_alive():
+            t.join(1)
     except KeyboardInterrupt:
         print("\n[dashboard] 已停止")
-        srv.shutdown()
 
 
 if __name__ == "__main__":
