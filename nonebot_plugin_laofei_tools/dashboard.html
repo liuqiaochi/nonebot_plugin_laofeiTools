@@ -57,7 +57,10 @@
     border-radius:10px;width:40px;height:40px;font-size:18px;color:var(--text)}
 
   main{padding:26px 28px 60px;max-width:1320px;margin:0 auto;width:100%}
-  section.module{margin-bottom:46px;scroll-margin-top:84px}
+  .view{display:none}
+  .view.active{display:block;animation:viewIn .35s ease}
+  @keyframes viewIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  section.module{margin-bottom:46px}
   .sec-head{display:flex;align-items:center;gap:12px;margin-bottom:18px}
   .sec-head .badge{font-size:22px}
   .sec-head h2{font-size:20px;font-weight:700}
@@ -144,12 +147,12 @@
       <div><div class="t1">机器人数据看板</div><div class="t2">Bot Analytics Dashboard</div></div>
     </div>
     <nav class="nav" id="nav">
-      <a href="#overview" class="active"><span class="ic">📊</span>总览</a>
-      <a href="#points"><span class="ic">💰</span>积分系统</a>
-      <a href="#pets"><span class="ic">🐾</span>宠物系统</a>
-      <a href="#fishing"><span class="ic">🎣</span>钓鱼系统</a>
-      <a href="#fortune"><span class="ic">🔮</span>每日运势</a>
-      <a href="#groups"><span class="ic">⚙️</span>群组与功能</a>
+      <a data-view="overview" class="active"><span class="ic">📊</span>总览</a>
+      <a data-view="points"><span class="ic">💰</span>积分系统</a>
+      <a data-view="pets"><span class="ic">🐾</span>宠物系统</a>
+      <a data-view="fishing"><span class="ic">🎣</span>钓鱼系统</a>
+      <a data-view="fortune"><span class="ic">🔮</span>每日运势</a>
+      <a data-view="groups"><span class="ic">⚙️</span>群组与功能</a>
     </nav>
     <div class="side-foot" id="sideFoot">数据源：data/laofei_tools/*.json<br>实时读取插件存储文件</div>
   </aside>
@@ -235,7 +238,7 @@ function renderDashboard(){
   }
   function card(title, body, extra){return `<div class="card">${title?`<h3><span class="dot"></span>${title}</h3>`:''}${body}${extra||''}</div>`;}
   function section(id,badge,title,desc,inner){
-    return `<section class="module" id="${id}"><div class="sec-head"><span class="badge">${badge}</span><h2>${title}</h2><span class="desc">${desc||''}</span></div>${inner}</section>`;
+    return `<section class="module view" id="${id}" data-view="${id}"><div class="sec-head"><span class="badge">${badge}</span><h2>${title}</h2><span class="desc">${desc||''}</span></div>${inner}</section>`;
   }
   function kpi(label,val,unit,trend,emoji){
     return `<div class="card kpi"><div class="label">${label}</div><div class="val">${val}${unit?`<small>${unit}</small>`:''}</div>`+
@@ -247,8 +250,9 @@ function renderDashboard(){
   const upSorted = [...upArr].sort((a,b)=>b.points-a.points);
   const totalPoints = upArr.reduce((s,u)=>s+(u.points||0),0);
   const totalExp = upArr.reduce((s,u)=>s+(u.exp||0),0);
-  const totalBank = upArr.reduce((s,u)=>s+(u.bank_points||0),0);
   const totalSign = upArr.reduce((s,u)=>s+(u.total_sign_days||0),0);
+  const maxTotalSign = upArr.reduce((m,u)=>Math.max(m,u.total_sign_days||0),0);
+  const maxContSign = upArr.reduce((m,u)=>Math.max(m,u.continuous_sign_days||0),0);
   const avgPoints = upArr.length?Math.round(totalPoints/upArr.length):0;
 
   const pets = D.pet_data||{}; const petArr=Object.entries(pets).map(([id,v])=>({id,...v}));
@@ -302,7 +306,6 @@ function renderDashboard(){
       ${kpi('宠物数量','<span>'+petArr.length+'</span>','只','覆盖 '+Object.keys(petTypeCount).length+' 个种类','🐾')}
       ${kpi('钓鱼参与','<span>'+fishUsers+'</span>','人','累计钓获 '+fmt(totalCatches)+' 条','🎣')}
       ${kpi('运势抽签','<span>'+Object.keys(fort).length+'</span>','人','最常见「'+fortMost.label+'」','🔮')}
-      ${kpi('启用群组','<span>'+eg.length+'</span>','个','含 AI '+aig.length+' · 绘图 '+naig.length,'⚙️')}
     </div>
     <div class="grid g-2" style="margin-top:18px">
       ${card('各模块参与人数','<div class="donut-wrap"><div class="donut" style="background:conic-gradient('+
@@ -315,33 +318,34 @@ function renderDashboard(){
       ${card('积分流通概况','<div class="stat-line">'+
         `<div class="s"><b>${fmt(totalPoints)}</b><span>流通总积分</span></div>`+
         `<div class="s"><b>${fmt(avgPoints)}</b><span>人均积分</span></div>`+
-        `<div class="s"><b>${fmt(totalBank)}</b><span>银行存储</span></div>`+
         `<div class="s"><b>${fmt(totalSign)}</b><span>累计签到(天)</span></div>`+
         `<div class="s"><b>${fmt(totalExp)}</b><span>累计经验</span></div>`+
+        `<div class="s"><b>${fmt(maxTotalSign)}</b><span>最大签到数</span></div>`+
+        `<div class="s"><b>${fmt(maxContSign)}</b><span>最大连续签到</span></div>`+
         `</div><div class="note">积分系统中最高资产用户为 <b>#${upSorted[0].id.slice(-4)}</b>，持有 ${fmt(upSorted[0].points)} 分。</div>`)}
     </div>`);
 
   // POINTS
   const topRows=upSorted.slice(0,12).map(u=>[
     {v:'#'+u.id.slice(-4)},{v:fmt(u.points),cls:'num'},
-    {v:fmt(u.exp),cls:'num'},{v:fmt(u.bank_points),cls:'num'},
+    {v:fmt(u.exp),cls:'num'},
     {v:u.total_sign_days||0,cls:'num'},{v:u.continuous_sign_days||0,cls:'num'}]);
-  html+=section('points','💰','积分系统','用户资产 · 签到 · 银行',
+  html+=section('points','💰','积分系统','用户资产 · 签到',
     `<div class="grid g-2">
       ${card('积分排行榜 Top 10',bars(upSorted.slice(0,10).map(u=>({label:'#'+u.id.slice(-4),value:u.points})),upSorted[0].points))}
       ${card('签到天数排行 Top 10',bars([...upArr].sort((a,b)=>(b.total_sign_days||0)-(a.total_sign_days||0)).slice(0,10)
         .map(u=>({label:'#'+u.id.slice(-4),value:u.total_sign_days||0})),Math.max(...upArr.map(u=>u.total_sign_days||0),1)))}
     </div>
-    <div class="grid g-3" style="margin-top:18px">
+    <div class="grid g-2" style="margin-top:18px">
       ${card('积分分布',donut([...upArr].sort((a,b)=>b.points-a.points).slice(0,6).map((u,i)=>({label:'#'+u.id.slice(-4),value:u.points,color:PALETTE[i]})),fmt(upArr.length),'用户'),'积分最高的 6 位用户占比')}
       ${card('资产概览','<div class="stat-line">'+
         `<div class="s"><b>${fmt(totalPoints)}</b><span>总积分</span></div>`+
         `<div class="s"><b>${fmt(avgPoints)}</b><span>人均</span></div>`+
-        `<div class="s"><b>${fmt(totalBank)}</b><span>银行</span></div>`+
-        `<div class="s"><b>${fmt(totalSign)}</b><span>总签到</span></div></div>`)}
-      ${card('积分禁用群组',pdg.length?pdg.map(g=>`<span class="tag">群 ${g}</span>`).join(''):'<span class="muted">无禁用群组</span>','这些群组已关闭积分功能')}
+        `<div class="s"><b>${fmt(totalSign)}</b><span>总签到</span></div>`+
+        `<div class="s"><b>${fmt(maxTotalSign)}</b><span>最大签到</span></div>`+
+        `<div class="s"><b>${fmt(maxContSign)}</b><span>最大连续签到</span></div></div>`)}
     </div>
-    <div class="grid" style="margin-top:18px">${card('积分用户明细','<div style="max-height:360px;overflow:auto">'+table(['用户','积分','经验','银行','总签到','连续签到'],topRows)+'</div>')}</div>`);
+    <div class="grid" style="margin-top:18px">${card('积分用户明细','<div style="max-height:360px;overflow:auto">'+table(['用户','积分','经验','总签到','连续签到'],topRows)+'</div>')}</div>`);
 
   // PETS
   const petRows=petArr.sort((a,b)=>(b.affection||0)-(a.affection||0)).slice(0,12).map(p=>[
@@ -436,16 +440,21 @@ function renderDashboard(){
     $('#subDate').textContent=d.toLocaleDateString('zh-CN',{year:'numeric',month:'long',day:'numeric',weekday:'long'});}
   tick(); setInterval(tick,1000);
 
-  // ---- nav active + sidebar mobile ----
+  // ---- nav view switching + sidebar mobile ----
   const navLinks=[...document.querySelectorAll('#nav a')];
-  const secs=navLinks.map(a=>document.querySelector(a.getAttribute('href')));
-  const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){const id=e.target.id;
-    navLinks.forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+id));}});},{rootMargin:'-45% 0px -50% 0px'});
-  secs.forEach(s=>s&&io.observe(s));
   const sb=$('#sidebar'),scrim=$('#scrim');
+  const VIEW_TITLES={overview:'总览',points:'积分系统',pets:'宠物系统',fishing:'钓鱼系统',fortune:'每日运势',groups:'群组与功能'};
+  function showView(v){
+    document.querySelectorAll('.view').forEach(s=>s.classList.toggle('active',s.getAttribute('data-view')===v));
+    navLinks.forEach(a=>a.classList.toggle('active',a.getAttribute('data-view')===v));
+    const h1=$('.topbar h1'); if(h1) h1.textContent=(VIEW_TITLES[v]||'数据看板')+' · 运营看板';
+    window.scrollTo({top:0,behavior:'instant'});
+  }
+  navLinks.forEach(a=>{a.onclick=(e)=>{e.preventDefault();showView(a.getAttribute('data-view'));
+    sb.classList.remove('open');scrim.classList.remove('show');};});
   $('#menuBtn').onclick=()=>{sb.classList.add('open');scrim.classList.add('show');};
   scrim.onclick=()=>{sb.classList.remove('open');scrim.classList.remove('show');};
-  navLinks.forEach(a=>a.onclick=()=>{sb.classList.remove('open');scrim.classList.remove('show');});
+  showView('overview');
 }
 </script>
 
@@ -462,9 +471,8 @@ function setAppError(err){
   $('#app').innerHTML = '<div class="card" style="border-color:var(--danger)">'+
     '<h3><span class="dot"></span>数据加载失败</h3>'+
     '<div class="note">无法从本地服务读取插件存储文件。<br><br>'+
-    '请先启动数据看板服务：<br>'+
-    '<code style="display:inline-block;background:var(--surface-2);padding:8px 10px;border-radius:8px;margin:6px 0">python dashboard_server.py</code><br>'+
-    '然后访问 <b>http://localhost:5233/</b><br><br>'+
+    '看板随插件启动自动开启，请确认机器人进程已正常运行。<br>'+
+    '访问地址：<b>http://localhost:5233/</b><br><br>'+
     '错误信息：<code>'+String(err)+'</code></div></div>';
 }
 
