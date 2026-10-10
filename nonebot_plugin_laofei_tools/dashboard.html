@@ -377,7 +377,7 @@ function renderDashboard(){
 
   // FISHING
   const fishTop=fishSegs.slice(0,15);
-  const fishRows=Object.entries(fish).map(([id,rec])=>({id,c:n=>rec.caught?.length||0})).sort((a,b)=>b.c-a.c).slice(0,10);
+  const fishRows=Object.entries(fish).map(([id,rec])=>({id,c:rec.caught?.length||0})).sort((a,b)=>b.c-a.c).slice(0,10);
   html+=section('fishing','🎣','钓鱼系统','钓获统计 · 鱼种分布 · 钓王',
     `<div class="grid g-kpi">
       ${kpi('参与人数','<span>'+fishUsers+'</span>','人','累计钓获 '+fmt(totalCatches),'🎣')}
