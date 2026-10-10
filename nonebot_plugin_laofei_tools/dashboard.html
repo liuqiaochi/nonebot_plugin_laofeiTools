@@ -363,6 +363,7 @@ function renderDashboard(){
       ${card('装饰库存 Top',accSegs.length?bars(accSegs.slice(0,6),accSegs[0].value):'<span class="muted">暂无</span>')}
       ${card('对战记录',`<div class="stat-line"><div class="s"><b>${pkCount}</b><span>对战记录条数</span></div></div><div class="note">包含进攻(attack)与防守(defend)双向记录。</div>`)}
     </div>
+    <div class="grid" style="margin-top:18px">${card('偷取记录',`<div class="stat-line"><div class="s"><b>${Object.keys(D.steal_records||{}).length}</b><span>有偷取记录用户</span></div></div><div class="note">最近：${ (()=>{const a=Object.values(D.steal_records||{}).map(v=>v.date).filter(Boolean).sort().reverse();return a[0]||'—';})() }</div>`)}</div>
     <div class="grid g-2" style="margin-top:18px">
       ${card('打工 / 散步活跃度 Top 8',bars(actTop,actTop[0]?.value||1),'数据来自 daily_activity（打工+散步）')}
       ${card('打工 / 散步总计','<div class="stat-line">'+
@@ -391,7 +392,7 @@ function renderDashboard(){
     <div class="grid" style="margin-top:18px">${card('钓鱼达人 Top 10','<div style="max-height:340px;overflow:auto">'+table(['排名','用户','钓获数'],fishRows.map((r,i)=>[{v:'#'+(i+1)},{v:'#'+r.id.slice(-4)},{v:r.c,cls:'num'}]))+'</div>')}</div>`);
 
   // FORTUNE
-  html+=section('fortune','🔮','每日运势','运势等级分布 · 吉凶 · 偷取记录',
+  html+=section('fortune','🔮','每日运势','运势等级分布 · 吉凶',
     `<div class="grid g-2">
       ${card('今日运势等级分布',fortSegs.length?donut(fortSegs,Object.keys(fort).length+'人','抽签'):'<span class="muted">暂无</span>','最常见等级：'+(fortMost?fortMost.label:'-'))}
       ${card('运势吉凶概览','<div class="stat-line">'+
@@ -399,8 +400,7 @@ function renderDashboard(){
         '<div class="s"><b style="color:var(--warning)">'+((fortCount['小凶']||0)+(fortCount['凶']||0)+(fortCount['大凶']||0))+'</b><span>凶签合计</span></div>'+
         '<div class="s"><b style="color:var(--info)">'+fortCount['撞大运']+'</b><span>撞大运</span></div>'+
         '</div>')}
-    </div>
-    <div class="grid" style="margin-top:18px">${card('偷取记录',`<div class="stat-line"><div class="s"><b>${Object.keys(D.steal_records||{}).length}</b><span>有偷取记录用户</span></div></div><div class="note">最近：${ (()=>{const a=Object.values(D.steal_records||{}).map(v=>v.date).filter(Boolean).sort().reverse();return a[0]||'—';})() }</div>`)}</div>`);
+    </div>`);
 
   // GROUPS & MODULES
   const swHead=['群组',...Object.keys(SW).map(k=>SW[k])];
