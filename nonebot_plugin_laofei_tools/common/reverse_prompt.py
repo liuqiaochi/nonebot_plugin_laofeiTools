@@ -3,7 +3,8 @@
 
 调用 DeepSeek 视觉模型，从用户发送/引用的图片反推可用于 NovelAI 的 AI 绘画提示词。
 权限：仅超级管理员可使用。
-依赖：deepseek_api_key 已配置，且 deepseek_model 为支持视觉的模型（默认 deepseek-flash）。
+依赖：deepseek_api_key 已配置。
+注意：视觉模型与对话模型（config.deepseek_model）解耦，视觉模型固定使用 VISION_MODEL 常量。
 """
 
 import base64
@@ -17,7 +18,11 @@ from nonebot.permission import SUPERUSER
 from PIL import Image
 
 from .utils import download_image
-from .ai_chat import _get_client, _get_model
+from .ai_chat import _get_client
+
+# 视觉模型固定 slug，与对话模型（config.deepseek_model）分离。
+# DeepSeek 仅以下两个 slug 支持图片输入：deepseek-v4.1-flash、deepseek-v4-flash-vision-exp
+VISION_MODEL = "deepseek-v4-flash-vision-exp"
 
 # 反推提示词的指令：要求输出 Danbooru 风格、逗号分隔的英文标签，覆盖关键维度
 REVERSE_PROMPT_INSTRUCTION = (
@@ -76,14 +81,13 @@ async def handle_reverse_prompt(
     # 3. 调用 DeepSeek 视觉模型反推提示词
     try:
         client = _get_client()
-        model = _get_model()
         data_url = f"data:image/png;base64,{base64.b64encode(image_data).decode()}"
         # 关键：DeepSeek 视觉模型（deepseek-v4-flash-vision-exp / V4.1-Flash 视觉变体）
         # 默认开启“思考模式”，会把整段 max_tokens 预算花在 reasoning_content 上，
         # 导致最终 content 为空（finish_reason=length）。显式关闭思考模式，
         # 确保直接输出提示词（已确认是官方视觉模型的已知行为，非本插件问题）。
         response = client.chat.completions.create(
-            model=model,
+            model=VISION_MODEL,
             messages=[
                 {
                     "role": "user",
@@ -114,7 +118,7 @@ async def handle_reverse_prompt(
             fr = getattr(choice, "finish_reason", None)
             has_reason = bool(getattr(choice.message, "reasoning_content", None))
             logger.warning(
-                f"图反推返回空内容: model={model}, finish_reason={fr}, "
+                f"图反推返回空内容: model={VISION_MODEL}, finish_reason={fr}, "
                 f"有reasoning_content={has_reason}（多为视觉模型思考模式耗尽预算）"
             )
         except Exception:

@@ -9,6 +9,8 @@
    改为下载后用 PIL 真正解码并统一重编码为 PNG（DeepSeek 明确支持的格式），同时校验字节确为可解码图片；超长边 >1280 自动等比缩图降低 base64 体积
 5.修复（图反推返回空提示词）：DeepSeek 视觉模型（deepseek-v4-flash-vision-exp / V4.1-Flash 视觉变体）默认开启思考模式，会把整段 max_tokens 预算花在 reasoning_content，导致 content 为空（finish_reason=length）
    调用时通过 extra_body 显式关闭思考模式（thinking: {type: disabled}），确保直接输出提示词；返回空时记录 finish_reason 与 reasoning_content 便于排查
+6.图反推视觉模型与对话模型解耦：视觉模型固定使用 deepseek-v4-flash-vision-exp（VISION_MODEL 常量），不再复用对话模型（config.deepseek_model）
+   对话模型可自由配置为 deepseek-chat/deepseek-flash 等纯文本模型，不再影响图反推；仅复用 _get_client（共用 DEEPSEEK_API_KEY 与 base_url）
 
 ## 2026-10-06
 1.新增「宠物转移」（别名：转移宠物/宠物转生/宠物转型）：消耗 5000 积分，将当前宠物转生为目标种类并继承原宠物全部属性（经验/体力/好感/配饰/昵称等），仅 pet_type 改变，原宠物被替换
