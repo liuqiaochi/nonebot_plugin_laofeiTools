@@ -12,7 +12,7 @@ import base64
 from io import BytesIO
 
 from nonebot import on_command
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent, MessageSegment
+from nonebot.adapters.onebot.v11 import Bot, MessageEvent, Message, MessageSegment
 from nonebot.log import logger
 from nonebot.matcher import Matcher
 from nonebot.permission import SUPERUSER
