@@ -7,6 +7,7 @@
 注意：视觉模型与对话模型（config.deepseek_model）解耦，视觉模型固定使用 VISION_MODEL 常量（DeepSeek-V4.1-Flash，当前官方唯一视觉 ID）。
 """
 
+import asyncio
 import base64
 from io import BytesIO
 
@@ -84,11 +85,15 @@ async def handle_reverse_prompt(
     try:
         client = _get_client()
         data_url = f"data:image/png;base64,{base64.b64encode(image_data).decode()}"
+        # 注意：OpenAI SDK 的 chat.completions.create 是**同步阻塞**调用，
+        # 必须放进线程池（asyncio.to_thread）以免冻结整个事件循环；
+        # 视觉请求比纯文本慢，且不设 timeout 会永久挂起，故显式 timeout=60。
         # 关键：DeepSeek 视觉模型（deepseek-flash = V4.1-Flash）默认开启“思考模式”，
         # 会把整段 max_tokens 预算花在 reasoning_content 上，
         # 导致最终 content 为空（finish_reason=length）。显式关闭思考模式，
         # 确保直接输出提示词（已确认是官方视觉模型的已知行为，非本插件问题）。
-        response = client.chat.completions.create(
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
             model=VISION_MODEL,
             messages=[
                 {
@@ -101,20 +106,22 @@ async def handle_reverse_prompt(
             ],
             temperature=0.5,
             max_tokens=800,
+            timeout=60,
             extra_body={"thinking": {"type": "disabled"}},
         )
         prompt = (response.choices[0].message.content or "").strip()
     except ValueError as e:
         # DeepSeek API Key 未配置
-        await matcher.finish(str(e))
+        await matcher.finish(f"图反推配置错误：{e}")
         return
     except Exception as e:
         logger.error(f"图反推调用 DeepSeek 失败: {e}")
-        await matcher.finish("反推失败，请稍后再试")
+        # 超管自用，直接回显异常类型与信息便于排查，而非一律“请稍后再试”
+        await matcher.finish(f"反推失败：{type(e).__name__} - {e}")
         return
 
     if not prompt:
-        # 诊断：记录 finish_reason 与是否产生了 reasoning_content，便于后续排查
+        # 诊断：记录并向超管回显 finish_reason / 思考模式状态，便于排查
         try:
             choice = response.choices[0]
             fr = getattr(choice, "finish_reason", None)
@@ -123,9 +130,10 @@ async def handle_reverse_prompt(
                 f"图反推返回空内容: model={VISION_MODEL}, finish_reason={fr}, "
                 f"有reasoning_content={has_reason}（多为视觉模型思考模式耗尽预算）"
             )
+            detail = f"（finish_reason={fr}，思考模式={has_reason}）"
         except Exception:
-            pass
-        await matcher.finish("未能反推出提示词，请换一张图重试")
+            detail = ""
+        await matcher.finish(f"未能反推出提示词，请换一张图重试{detail}")
         return
 
     # 4. 返回结果（超管自用，直接返回文本便于复制）
