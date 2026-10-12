@@ -110,33 +110,57 @@ async def handle_emoji_help(matcher: Matcher, event: MessageEvent):
         ("cmd", "gif变速 + 倍率或fps，如：gif变速 0.5x；gif变速 10fps"),
     ]
 
-    # ---- 文本按像素宽度自动换行（兼容中英文混排）----
-    def wrap_text(text: str, font, max_w: int):
-        out_lines = []
-        for paragraph in text.split("\n"):
-            if paragraph == "":
-                out_lines.append("")
+    # ---- 文本按像素宽度自动换行（兼容中英文混排，并支持 “指令” 高亮）----
+    def wrap_mixed(text: str, base_font, base_color, hl_color, max_w: int):
+        """将段落按像素宽度换行；返回 lines，每行是 [(seg, font, color, is_hl), ...]。
+        “...” 内的文本标记为 is_hl（指令高亮：橙红 + 加粗描边）。"""
+        runs = []  # (text, is_hl)
+        in_hl = False
+        buf = ""
+        for ch in text:
+            if ch in ('“', '”'):
+                if buf:
+                    runs.append((buf, in_hl))
+                    buf = ""
+                in_hl = not in_hl
                 continue
-            cur = ""
-            cur_w = 0
-            for ch in paragraph:
-                w = font.getlength(ch)
-                if cur_w + w > max_w and cur:
-                    out_lines.append(cur)
-                    cur = ch
-                    cur_w = w
-                else:
-                    cur += ch
-                    cur_w += w
-            out_lines.append(cur)
-        return out_lines
+            buf += ch
+        if buf:
+            runs.append((buf, in_hl))
+
+        lines = []
+        cur = []  # [(seg, font, color, is_hl)]
+
+        def cur_width():
+            return sum(base_font.getlength(s) for s, _f, _c, _h in cur)
+
+        for rtxt, is_hl in runs:
+            color = hl_color if is_hl else base_color
+            seg = ""
+            for ch in rtxt:
+                w = base_font.getlength(ch)
+                if cur and cur_width() + base_font.getlength(seg) + w > max_w:
+                    if seg:
+                        cur.append((seg, base_font, color, is_hl))
+                        seg = ""
+                    lines.append(cur)
+                    cur = []
+                seg += ch
+            if seg:
+                cur.append((seg, base_font, color, is_hl))
+        if cur:
+            lines.append(cur)
+        return lines
 
     W = 660
     PAD = 26
     USABLE = W - 2 * PAD
 
+    # 指令高亮色（橙红）
+    HL_C = (255, 95, 35)
+
     # 先排版计算总高度
-    layout = []  # (kind, lines, font, color, line_h, gap_before, indent)
+    layout = []  # (kind, lines, lh, gap, indent)
     total_h = PAD
     for kind, text in content:
         if kind == "h1":
@@ -155,8 +179,8 @@ async def handle_emoji_help(matcher: Matcher, event: MessageEvent):
             font, color, lh, gap = font_p, P_C, 26, 6
             indent = 0
         max_w = USABLE - indent
-        lines = wrap_text(text, font, max_w)
-        layout.append((kind, lines, font, color, lh, gap, indent))
+        lines = wrap_mixed(text, font, color, HL_C, max_w)
+        layout.append((kind, lines, lh, gap, indent))
         if kind == "h2":
             total_h += gap + 14 + len(lines) * lh
         else:
@@ -167,18 +191,23 @@ async def handle_emoji_help(matcher: Matcher, event: MessageEvent):
     draw = ImageDraw.Draw(img)
     y = PAD
 
-    for kind, lines, font, color, lh, gap, indent in layout:
+    for kind, lines, lh, gap, indent in layout:
         y += gap
         if kind == "h2":
             draw.line([(PAD, y), (W - PAD, y)], fill=DIVIDER_C, width=1)
             y += 14
-        for ln in lines:
+        for line in lines:
             x = PAD + indent
             if kind == "h1":
-                bbox = draw.textbbox((0, 0), ln, font=font)
-                tw = bbox[2] - bbox[0]
-                x = (W - tw) // 2
-            draw.text((x, y), ln, fill=color, font=font)
+                tot = sum(f.getlength(s) for s, f, c, h in line)
+                x = (W - tot) // 2
+            for seg, font, color, is_hl in line:
+                if is_hl:
+                    draw.text((x, y), seg, fill=color, font=font,
+                              stroke_width=2, stroke_fill=color)
+                else:
+                    draw.text((x, y), seg, fill=color, font=font)
+                x += font.getlength(seg)
             y += lh
 
     out = BytesIO()
