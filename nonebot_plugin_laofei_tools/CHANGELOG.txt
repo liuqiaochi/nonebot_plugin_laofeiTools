@@ -5,6 +5,8 @@
    复用 ai_chat 的 _get_client/_get_model（deepseek-flash，需已配置 DEEPSEEK_API_KEY 且模型支持视觉）
    图片取消息内附带或引用图片，base64 内联传给模型；要求输出 Danbooru 风格逗号分隔英文标签，覆盖角色/发色/服装/表情/动作/背景/构图/画质tag
    仅超管可用（permission=SUPERUSER），非超管静默无响应
+4.修复（图反推 400 拒图）：原实现靠扩展名/文件头“猜测” MIME，当实际字节非 webp/png/jpeg/gif（如 bmp/tiff/heic 或 url 无扩展名）时兜底成 image/jpeg 被 DeepSeek 拒绝
+   改为下载后用 PIL 真正解码并统一重编码为 PNG（DeepSeek 明确支持的格式），同时校验字节确为可解码图片；超长边 >1280 自动等比缩图降低 base64 体积
 
 ## 2026-10-06
 1.新增「宠物转移」（别名：转移宠物/宠物转生/宠物转型）：消耗 5000 积分，将当前宠物转生为目标种类并继承原宠物全部属性（经验/体力/好感/配饰/昵称等），仅 pet_type 改变，原宠物被替换

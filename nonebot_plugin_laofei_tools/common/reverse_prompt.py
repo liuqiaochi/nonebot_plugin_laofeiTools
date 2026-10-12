@@ -7,12 +7,14 @@
 """
 
 import base64
+from io import BytesIO
 
 from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, MessageEvent, MessageSegment
 from nonebot.log import logger
 from nonebot.matcher import Matcher
 from nonebot.permission import SUPERUSER
+from PIL import Image
 
 from .utils import download_image
 from .ai_chat import _get_client, _get_model
@@ -63,12 +65,19 @@ async def handle_reverse_prompt(
         await matcher.finish("图片下载失败，请重试")
         return
 
+    # 统一转码为 PNG（DeepSeek 明确支持的格式），并校验字节确为可解码图片
+    try:
+        image_data = _normalize_image(image_data)
+    except Exception as e:
+        logger.error(f"图反推图片解码失败: {e}")
+        await matcher.finish("图片无法解码，请换一张图重试")
+        return
+
     # 3. 调用 DeepSeek 视觉模型反推提示词
     try:
         client = _get_client()
         model = _get_model()
-        mime = _guess_mime(image_url, image_data)
-        data_url = f"data:{mime};base64,{base64.b64encode(image_data).decode()}"
+        data_url = f"data:image/png;base64,{base64.b64encode(image_data).decode()}"
         response = client.chat.completions.create(
             model=model,
             messages=[
@@ -126,19 +135,24 @@ def _extract_image_url(event: MessageEvent) -> str:
     return ""
 
 
-def _guess_mime(image_url: str, data: bytes) -> str:
-    """根据 url 扩展名或文件头推断图片 mime，默认 image/jpeg"""
-    lower = (image_url or "").lower()
-    if lower.endswith(".png"):
-        return "image/png"
-    if lower.endswith(".gif"):
-        return "image/gif"
-    if lower.endswith(".webp"):
-        return "image/webp"
-    if data[:8] == b"\x89PNG\r\n\x1a\n":
-        return "image/png"
-    if data[:6] in (b"GIF87a", b"GIF89a"):
-        return "image/gif"
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "image/webp"
-    return "image/jpeg"
+def _normalize_image(data: bytes, max_side: int = 1280) -> bytes:
+    """将任意 PIL 可解码的图片解码并统一重编码为 PNG（DeepSeek 明确支持的格式）。
+
+    作用：
+    - 不再依赖扩展名/文件头“猜测” MIME，从根本上避免“实际字节非 webp/png/jpeg/gif
+      却标成 image/jpeg 被 DeepSeek 拒图”的问题；
+    - 同时校验字节确为可解码图片（若下载到的是错误 HTML 页等，会在这一步抛异常）；
+    - 超长边超过 max_side 时等比缩图，降低 base64 体积与视觉 token 消耗。
+    """
+    img = Image.open(BytesIO(data))
+    img = img.convert("RGB")  # 丢弃 alpha / 动画帧，统一为静态 RGB
+    w, h = img.size
+    if max(w, h) > max_side:
+        scale = max_side / float(max(w, h))
+        img = img.resize(
+            (max(1, int(w * scale)), max(1, int(h * scale))),
+            Image.LANCZOS,
+        )
+    out = BytesIO()
+    img.save(out, format="PNG")
+    return out.getvalue()
