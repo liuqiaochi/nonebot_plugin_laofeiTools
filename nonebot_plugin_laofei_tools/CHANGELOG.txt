@@ -17,6 +17,10 @@
    改用 asyncio.to_thread 将调用丢入线程池避免阻塞事件循环，并显式 timeout=60；异常与空结果详情直接回显给超管（不再吞成“请稍后再试”）便于排查
 9.修复（图反推运行时 NameError）：返回结果处用到 Message() 但未从 nonebot.adapters.onebot.v11 导入 Message，导致 matcher 运行即抛 NameError
    补 import Message，与 Bot/MessageEvent/MessageSegment 一并导入
+10.图反推开放普通用户 + 队列 + 帮助完善：
+   权限放开：移除 SUPERUSER，改为群聊开关守卫 is_ai_group_enabled（ai_chat 模块=“已开启AI功能的群”），未开启静默拦截；私聊放行
+   增加全局串行队列 _reverse_lock（asyncio.Lock），同一时刻仅一个图反推任务访问视觉模型，并发请求排队串行，避免打爆 DeepSeek API
+   AI帮助（ai_chat._generate_ai_help_image 图片 + 文字 fallback）新增「图反推（需开启 AI 功能）」小节，说明指令/别名/用法
 
 ## 2026-10-06
 1.新增「宠物转移」（别名：转移宠物/宠物转生/宠物转型）：消耗 5000 积分，将当前宠物转生为目标种类并继承原宠物全部属性（经验/体力/好感/配饰/昵称等），仅 pet_type 改变，原宠物被替换

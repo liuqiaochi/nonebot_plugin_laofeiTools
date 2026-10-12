@@ -1,8 +1,8 @@
 """
-图反推提示词（超管专用）
+图反推提示词
 
 调用 DeepSeek 视觉模型，从用户发送/引用的图片反推可用于 NovelAI 的 AI 绘画提示词。
-权限：仅超级管理员可使用。
+权限：普通用户可用，但仅「已开启 AI 功能（ai_chat 模块）」的群生效；私聊不受群开关限制。
 依赖：deepseek_api_key 已配置。
 注意：视觉模型与对话模型（config.deepseek_model）解耦，视觉模型固定使用 VISION_MODEL 常量（DeepSeek-V4.1-Flash，当前官方唯一视觉 ID）。
 """
@@ -15,9 +15,9 @@ from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, MessageEvent, Message, MessageSegment
 from nonebot.log import logger
 from nonebot.matcher import Matcher
-from nonebot.permission import SUPERUSER
 from PIL import Image
 
+from ..config import is_ai_group_enabled
 from .utils import download_image
 from .ai_chat import _get_client
 
@@ -26,6 +26,9 @@ from .ai_chat import _get_client
 # 旧的 deepseek-v4-flash-vision-exp 已于 2026-09-10 退役，仅作兼容别名路由到 4.1-Flash。
 # 故视觉模型固定为 deepseek-flash（当前官方视觉 ID），对话模型即使配 deepseek-chat 纯文本也不影响图反推。
 VISION_MODEL = "deepseek-flash"
+
+# 图反推全局串行队列：同一时刻仅一个任务访问视觉模型，其余并发请求排队（避免打爆 DeepSeek API）
+_reverse_lock = asyncio.Lock()
 
 # 反推提示词的指令：要求输出 Danbooru 风格、逗号分隔的英文标签，覆盖关键维度
 REVERSE_PROMPT_INSTRUCTION = (
@@ -39,7 +42,6 @@ REVERSE_PROMPT_INSTRUCTION = (
 reverse_prompt_cmd = on_command(
     "图反推",
     aliases={"反推提示词", "图片反推", "提示词反推"},
-    permission=SUPERUSER,
     priority=5,
     block=True,
     force_whitespace=True,
@@ -52,7 +54,14 @@ async def handle_reverse_prompt(
     bot: Bot,
     event: MessageEvent,
 ):
-    """超管专用：从消息内或引用消息中的图片反推 AI 绘画提示词"""
+    """从消息内或引用消息中的图片反推 AI 绘画提示词（仅已开启 AI 功能的群可用）"""
+    # 0. 群聊开关守卫：仅「已开启 AI 功能（ai_chat 模块）」的群可用；私聊放行
+    gid = getattr(event, "group_id", None)
+    if gid is not None and not is_ai_group_enabled(str(gid)):
+        # 统一开关层约定：模块关闭时静默拦截，不回复
+        await matcher.finish()
+        return
+
     # 1. 提取图片（优先消息内图片，其次引用图片）
     image_url = _extract_image_url(event)
     if not image_url:
@@ -61,89 +70,91 @@ async def handle_reverse_prompt(
 
     await matcher.send("正在反推提示词，请稍候...")
 
-    # 2. 下载图片
-    try:
-        image_data = await download_image(bot, image_url)
-    except Exception as e:
-        logger.error(f"图反推图片下载失败: {e}")
-        await matcher.finish("图片下载失败，请重试")
-        return
-
-    if not image_data:
-        await matcher.finish("图片下载失败，请重试")
-        return
-
-    # 统一转码为 PNG（DeepSeek 明确支持的格式），并校验字节确为可解码图片
-    try:
-        image_data = _normalize_image(image_data)
-    except Exception as e:
-        logger.error(f"图反推图片解码失败: {e}")
-        await matcher.finish("图片无法解码，请换一张图重试")
-        return
-
-    # 3. 调用 DeepSeek 视觉模型反推提示词
-    try:
-        client = _get_client()
-        data_url = f"data:image/png;base64,{base64.b64encode(image_data).decode()}"
-        # 注意：OpenAI SDK 的 chat.completions.create 是**同步阻塞**调用，
-        # 必须放进线程池（asyncio.to_thread）以免冻结整个事件循环；
-        # 视觉请求比纯文本慢，且不设 timeout 会永久挂起，故显式 timeout=60。
-        # 关键：DeepSeek 视觉模型（deepseek-flash = V4.1-Flash）默认开启“思考模式”，
-        # 会把整段 max_tokens 预算花在 reasoning_content 上，
-        # 导致最终 content 为空（finish_reason=length）。显式关闭思考模式，
-        # 确保直接输出提示词（已确认是官方视觉模型的已知行为，非本插件问题）。
-        response = await asyncio.to_thread(
-            client.chat.completions.create,
-            model=VISION_MODEL,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": REVERSE_PROMPT_INSTRUCTION},
-                        {"type": "image_url", "image_url": {"url": data_url}},
-                    ],
-                }
-            ],
-            temperature=0.5,
-            max_tokens=800,
-            timeout=60,
-            extra_body={"thinking": {"type": "disabled"}},
-        )
-        prompt = (response.choices[0].message.content or "").strip()
-    except ValueError as e:
-        # DeepSeek API Key 未配置
-        await matcher.finish(f"图反推配置错误：{e}")
-        return
-    except Exception as e:
-        logger.error(f"图反推调用 DeepSeek 失败: {e}")
-        # 超管自用，直接回显异常类型与信息便于排查，而非一律“请稍后再试”
-        await matcher.finish(f"反推失败：{type(e).__name__} - {e}")
-        return
-
-    if not prompt:
-        # 诊断：记录并向超管回显 finish_reason / 思考模式状态，便于排查
+    # 进入队列：同一时刻仅一个图反推任务访问视觉模型，其余并发请求排队串行
+    async with _reverse_lock:
+        # 2. 下载图片
         try:
-            choice = response.choices[0]
-            fr = getattr(choice, "finish_reason", None)
-            has_reason = bool(getattr(choice.message, "reasoning_content", None))
-            logger.warning(
-                f"图反推返回空内容: model={VISION_MODEL}, finish_reason={fr}, "
-                f"有reasoning_content={has_reason}（多为视觉模型思考模式耗尽预算）"
-            )
-            detail = f"（finish_reason={fr}，思考模式={has_reason}）"
-        except Exception:
-            detail = ""
-        await matcher.finish(f"未能反推出提示词，请换一张图重试{detail}")
-        return
+            image_data = await download_image(bot, image_url)
+        except Exception as e:
+            logger.error(f"图反推图片下载失败: {e}")
+            await matcher.finish("图片下载失败，请重试")
+            return
 
-    # 4. 返回结果（超管自用，直接返回文本便于复制）
-    msg = Message()
-    if getattr(event, "message_id", None):
-        msg.append(MessageSegment.reply(event.message_id))
-    msg.append(
-        MessageSegment.text(f"以下为反推提示词（可直接用于 NovelAI）：\n\n{prompt}")
-    )
-    await matcher.finish(msg)
+        if not image_data:
+            await matcher.finish("图片下载失败，请重试")
+            return
+
+        # 统一转码为 PNG（DeepSeek 明确支持的格式），并校验字节确为可解码图片
+        try:
+            image_data = _normalize_image(image_data)
+        except Exception as e:
+            logger.error(f"图反推图片解码失败: {e}")
+            await matcher.finish("图片无法解码，请换一张图重试")
+            return
+
+        # 3. 调用 DeepSeek 视觉模型反推提示词
+        try:
+            client = _get_client()
+            data_url = f"data:image/png;base64,{base64.b64encode(image_data).decode()}"
+            # 注意：OpenAI SDK 的 chat.completions.create 是**同步阻塞**调用，
+            # 必须放进线程池（asyncio.to_thread）以免冻结整个事件循环；
+            # 视觉请求比纯文本慢，且不设 timeout 会永久挂起，故显式 timeout=60。
+            # 关键：DeepSeek 视觉模型（deepseek-flash = V4.1-Flash）默认开启“思考模式”，
+            # 会把整段 max_tokens 预算花在 reasoning_content 上，
+            # 导致最终 content 为空（finish_reason=length）。显式关闭思考模式，
+            # 确保直接输出提示词（已确认是官方视觉模型的已知行为，非本插件问题）。
+            response = await asyncio.to_thread(
+                client.chat.completions.create,
+                model=VISION_MODEL,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": REVERSE_PROMPT_INSTRUCTION},
+                            {"type": "image_url", "image_url": {"url": data_url}},
+                        ],
+                    }
+                ],
+                temperature=0.5,
+                max_tokens=800,
+                timeout=60,
+                extra_body={"thinking": {"type": "disabled"}},
+            )
+            prompt = (response.choices[0].message.content or "").strip()
+        except ValueError as e:
+            # DeepSeek API Key 未配置
+            await matcher.finish(f"图反推配置错误：{e}")
+            return
+        except Exception as e:
+            logger.error(f"图反推调用 DeepSeek 失败: {e}")
+            # 直接回显异常类型与信息便于排查，而非一律“请稍后再试”
+            await matcher.finish(f"反推失败：{type(e).__name__} - {e}")
+            return
+
+        if not prompt:
+            # 诊断：记录并向用户回显 finish_reason / 思考模式状态，便于排查
+            try:
+                choice = response.choices[0]
+                fr = getattr(choice, "finish_reason", None)
+                has_reason = bool(getattr(choice.message, "reasoning_content", None))
+                logger.warning(
+                    f"图反推返回空内容: model={VISION_MODEL}, finish_reason={fr}, "
+                    f"有reasoning_content={has_reason}（多为视觉模型思考模式耗尽预算）"
+                )
+                detail = f"（finish_reason={fr}，思考模式={has_reason}）"
+            except Exception:
+                detail = ""
+            await matcher.finish(f"未能反推出提示词，请换一张图重试{detail}")
+            return
+
+        # 4. 返回结果（直接返回文本便于复制）
+        msg = Message()
+        if getattr(event, "message_id", None):
+            msg.append(MessageSegment.reply(event.message_id))
+        msg.append(
+            MessageSegment.text(f"以下为反推提示词（可直接用于 NovelAI）：\n\n{prompt}")
+        )
+        await matcher.finish(msg)
 
 
 def _extract_image_url(event: MessageEvent) -> str:

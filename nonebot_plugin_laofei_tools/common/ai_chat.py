@@ -801,6 +801,10 @@ def _generate_ai_help_image() -> str:
             ("ai图删除 <序号>", "超管：删除配图（支持 1 3 5 或 1-3）"),
             ("ai图重置", "超管：恢复内置基础图"),
         ], True),
+        ("图反推（需开启 AI 功能）", [
+            ("图反推", "发图片后发送，反推 NovelAI 提示词（别名 反推提示词/图片反推/提示词反推）"),
+            ("用法", "直接附带或引用图片；需本群已开启 AI 功能；结果可直接复制到 NovelAI"),
+        ], False),
     ]
 
     total_height = padding + header_height
@@ -862,7 +866,8 @@ async def handle_ai_help(matcher: Matcher) -> None:
             "· @机器人 + 问题（群聊需开启，私聊直用）\n"
             "· lg清记忆（清除对话历史）\n"
             "· 管理（超管）：开启AI / 关闭AI / AI拉黑 / AI解除\n"
-            "· 配图：ai图添加 / ai图列表 / ai图删除 <序号> / ai图重置"
+            "· 配图：ai图添加 / ai图列表 / ai图删除 <序号> / ai图重置\n"
+            "· 图反推：发送图片后发送「图反推」，反推 NovelAI 提示词（需本群开启 AI 功能）"
         )
     await matcher.finish(MessageSegment.image(f"base64://{img_b64}"))
 
