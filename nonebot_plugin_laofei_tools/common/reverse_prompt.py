@@ -78,6 +78,10 @@ async def handle_reverse_prompt(
         client = _get_client()
         model = _get_model()
         data_url = f"data:image/png;base64,{base64.b64encode(image_data).decode()}"
+        # 关键：DeepSeek 视觉模型（deepseek-v4-flash-vision-exp / V4.1-Flash 视觉变体）
+        # 默认开启“思考模式”，会把整段 max_tokens 预算花在 reasoning_content 上，
+        # 导致最终 content 为空（finish_reason=length）。显式关闭思考模式，
+        # 确保直接输出提示词（已确认是官方视觉模型的已知行为，非本插件问题）。
         response = client.chat.completions.create(
             model=model,
             messages=[
@@ -91,6 +95,7 @@ async def handle_reverse_prompt(
             ],
             temperature=0.5,
             max_tokens=800,
+            extra_body={"thinking": {"type": "disabled"}},
         )
         prompt = (response.choices[0].message.content or "").strip()
     except ValueError as e:
@@ -103,6 +108,17 @@ async def handle_reverse_prompt(
         return
 
     if not prompt:
+        # 诊断：记录 finish_reason 与是否产生了 reasoning_content，便于后续排查
+        try:
+            choice = response.choices[0]
+            fr = getattr(choice, "finish_reason", None)
+            has_reason = bool(getattr(choice.message, "reasoning_content", None))
+            logger.warning(
+                f"图反推返回空内容: model={model}, finish_reason={fr}, "
+                f"有reasoning_content={has_reason}（多为视觉模型思考模式耗尽预算）"
+            )
+        except Exception:
+            pass
         await matcher.finish("未能反推出提示词，请换一张图重试")
         return
 
