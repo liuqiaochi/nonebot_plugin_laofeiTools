@@ -8,6 +8,9 @@
 3.图反推新增 DS 文本模型优化（先跑通，群开关后续再加）：消息文本段含「优化/美化/优化一下/润色」时，视觉模型反推出的词再调一次 config.deepseek_model（与 AI 聊天同模型）做润色整理
    复用 _get_client，异步 to_thread + timeout=60，仍在串行锁内；目标为去重/修正/按维度排序，保留英文 Danbooru tag 不臆造；优化失败回退原始反推词并提示；结果文案带「（已用 DeepSeek 润色）」
    AI帮助文案补充优化关键字用法
+4.图反推润色新增按群开关「开启图反推润色 / 关闭图反推润色」（超管，群聊，别名 开启/关闭图反推优化、开启/关闭图反推美化），默认关闭
+   存储独立 JSON reverse_polish_groups.json（enabled_groups），config 新增 is/en/disable_reverse_polish；开启后该群图反推自动润色，关键字仍可作临时触发
+   on_message 的图反推触发规则排除「开启图反推/关闭图反推」文本，避免与管理指令互相触发
 
 
 ## 2026-10-12

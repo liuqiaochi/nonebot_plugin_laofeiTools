@@ -11,14 +11,27 @@ import asyncio
 import base64
 from io import BytesIO
 
-from nonebot import on_message
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent, Message, MessageSegment
+from nonebot import on_message, on_command
+from nonebot.adapters.onebot.v11 import (
+    Bot,
+    MessageEvent,
+    Message,
+    MessageSegment,
+    PrivateMessageEvent,
+)
 from nonebot.log import logger
 from nonebot.matcher import Matcher
+from nonebot.permission import SUPERUSER
 from nonebot.rule import Rule
 from PIL import Image
 
-from ..config import is_ai_group_enabled, deepseek_model
+from ..config import (
+    is_ai_group_enabled,
+    deepseek_model,
+    is_reverse_polish_enabled,
+    enable_reverse_polish,
+    disable_reverse_polish,
+)
 from .utils import download_image
 from .ai_chat import _get_client
 
@@ -62,11 +75,15 @@ async def _is_reverse_request(event: MessageEvent) -> bool:
     不用 on_command 的原因：on_command 要求命令位于消息开头且 force_whitespace，
     导致「@群友 图反推」或「图反推@群友」（At 段不在首位/无空白）匹配失败；
     改用 on_message + 本规则，关键字可在任意位置触发，图片/@群友 提取在 handler 内完成。
+    注意：需排除管理指令「开启图反推润色 / 关闭图反推润色」（文本含「图反推」），
+    否则会和同 priority 的开关指令互相触发。
     """
     for seg in event.message:
         if seg.type == "text":
             text = seg.data.get("text", "") or ""
             if any(kw in text for kw in REVERSE_KEYWORDS):
+                if "开启图反推" in text or "关闭图反推" in text:
+                    continue
                 return True
     return False
 
@@ -100,8 +117,10 @@ async def handle_reverse_prompt(
         )
         return
 
-    # 检测是否要求 DS 文本模型优化（消息任意文本段含优化关键字）
+    # 检测是否要求 DS 文本模型优化：消息含优化关键字，或本群已开启图反推润色开关（默认关）
     need_optimize = any(kw in _message_text(event) for kw in OPTIMIZE_KEYWORDS)
+    if gid is not None and is_reverse_polish_enabled(str(gid)):
+        need_optimize = True
 
     await matcher.send("正在反推提示词，请稍候...")
 
@@ -316,3 +335,56 @@ def _normalize_image(data: bytes, max_side: int = 1280) -> bytes:
     out = BytesIO()
     img.save(out, format="PNG")
     return out.getvalue()
+
+
+# ========== 开启图反推润色 / 关闭图反推润色（超级用户，按群）==========
+# 与「开启AI / 关闭AI」同构：仅超管可在群聊中开关，按群记录到 reverse_polish_groups.json。
+# 开启后该群图反推自动用 DeepSeek 文本模型润色（默认关；关键字「优化」仍可作临时触发）。
+
+enable_polish_cmd = on_command(
+    "开启图反推润色",
+    aliases={"开启图反推优化", "开启图反推美化"},
+    permission=SUPERUSER,
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+@enable_polish_cmd.handle()
+async def handle_enable_polish(matcher: Matcher, event: MessageEvent):
+    """超级用户开启本群图反推自动润色"""
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish("请在群聊中发送此指令。")
+    gid = str(event.group_id)
+    if is_reverse_polish_enabled(gid):
+        await matcher.finish("本群图反推润色已经开启。")
+    enable_reverse_polish(gid)
+    await matcher.finish(
+        "✅ 已开启本群图反推润色：图反推将自动用 DeepSeek 润色提示词"
+        "（未开启的群仍可用「优化/美化」关键字临时触发）。"
+    )
+
+
+disable_polish_cmd = on_command(
+    "关闭图反推润色",
+    aliases={"关闭图反推优化", "关闭图反推美化"},
+    permission=SUPERUSER,
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+@disable_polish_cmd.handle()
+async def handle_disable_polish(matcher: Matcher, event: MessageEvent):
+    """超级用户关闭本群图反推自动润色"""
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish("请在群聊中发送此指令。")
+    gid = str(event.group_id)
+    if not is_reverse_polish_enabled(gid):
+        await matcher.finish("本群图反推润色已经关闭。")
+    disable_reverse_polish(gid)
+    await matcher.finish(
+        "❌ 已关闭本群图反推润色（仍可用「优化/美化」关键字临时触发）。"
+    )

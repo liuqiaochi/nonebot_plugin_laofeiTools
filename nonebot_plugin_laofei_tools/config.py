@@ -211,6 +211,49 @@ _novelai_enabled_groups = _load_novelai_enabled_groups()
 # 由统一模块开关层（ai_draw 模块）集中管理。此处保留旧文件的加载函数供迁移使用。
 
 
+# ========== 图反推润色群聊开关（默认关闭） ==========
+# 与 AI 功能群开关（ai_enabled_groups.json）同构，独立 JSON 文件，按群记录是否自动润色。
+# 默认关闭；开启后该群图反推会自动用 DeepSeek 文本模型润色（关键字「优化」仍可作为临时触发）。
+
+REVERSE_POLISH_FILE = DATA_DIR / "reverse_polish_groups.json"
+
+_reverse_polish_groups: Set[str] = set()
+
+
+def _load_reverse_polish_groups() -> Set[str]:
+    _ensure_data_dir()
+    if REVERSE_POLISH_FILE.exists():
+        try:
+            with open(REVERSE_POLISH_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return set(data.get("enabled_groups", []))
+        except Exception:
+            return set()
+    return set()
+
+
+def _save_reverse_polish_groups(groups: Set[str]):
+    safe_json_save(REVERSE_POLISH_FILE, {"enabled_groups": list(groups)})
+
+
+_reverse_polish_groups = _load_reverse_polish_groups()
+
+
+def is_reverse_polish_enabled(group_id: str) -> bool:
+    """本群是否开启图反推自动润色（默认关）"""
+    return group_id in _reverse_polish_groups
+
+
+def enable_reverse_polish(group_id: str) -> None:
+    _reverse_polish_groups.add(group_id)
+    _save_reverse_polish_groups(_reverse_polish_groups)
+
+
+def disable_reverse_polish(group_id: str) -> None:
+    _reverse_polish_groups.discard(group_id)
+    _save_reverse_polish_groups(_reverse_polish_groups)
+
+
 # ========== NovelAI 画图模型（群级，默认回退到 config.novelai_model） ==========
 
 NOVELAI_MODEL_FILE = DATA_DIR / "novelai_model_groups.json"
