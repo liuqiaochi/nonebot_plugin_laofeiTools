@@ -1,7 +1,7 @@
 """
 图反推提示词
 
-调用 DeepSeek 视觉模型，从用户发送/引用的图片反推可用于 NovelAI 的 AI 绘画提示词。
+调用 DeepSeek 视觉模型，从用户发送/引用的图片，或 @群友 的头像反推可用于 NovelAI 的 AI 绘画提示词。
 权限：普通用户可用，但仅「已开启 AI 功能（ai_chat 模块）」的群生效；私聊不受群开关限制。
 依赖：deepseek_api_key 已配置。
 注意：视觉模型与对话模型（config.deepseek_model）解耦，视觉模型固定使用 VISION_MODEL 常量（DeepSeek-V4.1-Flash，当前官方唯一视觉 ID）。
@@ -54,7 +54,7 @@ async def handle_reverse_prompt(
     bot: Bot,
     event: MessageEvent,
 ):
-    """从消息内或引用消息中的图片反推 AI 绘画提示词（仅已开启 AI 功能的群可用）"""
+    """从消息内/引用图片，或 @群友 头像反推 AI 绘画提示词（仅已开启 AI 功能的群可用）"""
     # 0. 群聊开关守卫：仅「已开启 AI 功能（ai_chat 模块）」的群可用；私聊放行
     gid = getattr(event, "group_id", None)
     if gid is not None and not is_ai_group_enabled(str(gid)):
@@ -62,10 +62,12 @@ async def handle_reverse_prompt(
         await matcher.finish()
         return
 
-    # 1. 提取图片（优先消息内图片，其次引用图片）
-    image_url = _extract_image_url(event)
+    # 1. 提取图片（优先消息内图片，其次引用图片，最后 @群友 头像）
+    image_url, source_desc = _extract_image(event)
     if not image_url:
-        await matcher.finish("请发送一张图片（直接附带或引用图片）后发送「图反推」")
+        await matcher.finish(
+            "请发送一张图片、引用含图片的消息，或 @一位群友后发送「图反推」"
+        )
         return
 
     await matcher.send("正在反推提示词，请稍候...")
@@ -151,29 +153,64 @@ async def handle_reverse_prompt(
         msg = Message()
         if getattr(event, "message_id", None):
             msg.append(MessageSegment.reply(event.message_id))
-        msg.append(
-            MessageSegment.text(f"以下为反推提示词（可直接用于 NovelAI）：\n\n{prompt}")
-        )
+        prefix = "以下为反推提示词（可直接用于 NovelAI）："
+        if source_desc:
+            prefix = f"以下为反推提示词（来自{source_desc}，可直接用于 NovelAI）："
+        msg.append(MessageSegment.text(f"{prefix}\n\n{prompt}"))
         await matcher.finish(msg)
 
 
-def _extract_image_url(event: MessageEvent) -> str:
-    """从消息内或引用消息中提取第一张图片的 url/file 字段"""
-    # 优先消息内图片
-    for seg in event.message:
+def _extract_image(event: MessageEvent):
+    """提取反推目标图片的 url，以及来源说明（用于回复文案）。
+
+    优先级：消息内图片 > 引用消息中的图片 > @群友 头像。
+
+    Returns:
+        (image_url, source_desc)：无图片时两者均为空字符串。
+    """
+    # 1) 消息内图片
+    url = _first_image_url(event.message)
+    if url:
+        return url, ""
+
+    # 2) 引用（回复）消息中的图片
+    reply = getattr(event, "reply", None)
+    if reply and getattr(reply, "message", None):
+        url = _first_image_url(reply.message)
+        if url:
+            return url, "引用的图片"
+
+    # 3) @群友 头像
+    at_qq = _extract_at_qq(event)
+    if at_qq:
+        return _avatar_url(at_qq), f"QQ {at_qq} 的头像"
+
+    return "", ""
+
+
+def _first_image_url(segments) -> str:
+    """从消息段列表中取第一张图片的 url/file 字段"""
+    for seg in segments:
         if seg.type == "image":
             url = seg.data.get("url") or seg.data.get("file")
             if url:
                 return url
-    # 其次引用消息中的图片
-    reply = getattr(event, "reply", None)
-    if reply and getattr(reply, "message", None):
-        for seg in reply.message:
-            if seg.type == "image":
-                url = seg.data.get("url") or seg.data.get("file")
-                if url:
-                    return url
     return ""
+
+
+def _extract_at_qq(event: MessageEvent) -> str:
+    """从消息中提取第一个 @群友 的 QQ 号（忽略 @all）"""
+    for seg in event.message:
+        if seg.type == "at":
+            qq = seg.data.get("qq")
+            if qq and str(qq) != "all":
+                return str(qq)
+    return ""
+
+
+def _avatar_url(qq: str) -> str:
+    """根据 QQ 号构造群友头像 URL（spec=640 取最大可用尺寸）"""
+    return f"https://q.qlogo.cn/headimg_dl?dst_uin={qq}&spec=640&img_type=jpg"
 
 
 def _normalize_image(data: bytes, max_side: int = 1280) -> bytes:

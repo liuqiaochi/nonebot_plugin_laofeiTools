@@ -803,7 +803,7 @@ def _generate_ai_help_image() -> str:
         ], True),
         ("图反推（需开启 AI 功能）", [
             ("图反推", "发图片后发送，反推 NovelAI 提示词（别名 反推提示词/图片反推/提示词反推）"),
-            ("用法", "直接附带或引用图片；需本群已开启 AI 功能；结果可直接复制到 NovelAI"),
+            ("用法", "直接附带图片、引用含图片消息，或 @一位群友取头像；需本群已开启 AI 功能；结果可直接复制到 NovelAI"),
         ], False),
     ]
 
@@ -867,7 +867,7 @@ async def handle_ai_help(matcher: Matcher) -> None:
             "· lg清记忆（清除对话历史）\n"
             "· 管理（超管）：开启AI / 关闭AI / AI拉黑 / AI解除\n"
             "· 配图：ai图添加 / ai图列表 / ai图删除 <序号> / ai图重置\n"
-            "· 图反推：发送图片后发送「图反推」，反推 NovelAI 提示词（需本群开启 AI 功能）"
+            "· 图反推：发送图片 / 引用含图消息 / @一位群友后发送「图反推」，反推 NovelAI 提示词（需本群开启 AI 功能）"
         )
     await matcher.finish(MessageSegment.image(f"base64://{img_b64}"))
 
