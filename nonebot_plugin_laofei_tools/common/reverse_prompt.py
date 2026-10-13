@@ -27,13 +27,12 @@ from PIL import Image
 
 from ..config import (
     is_ai_group_enabled,
-    deepseek_model,
     is_reverse_polish_enabled,
     enable_reverse_polish,
     disable_reverse_polish,
 )
 from .utils import download_image
-from .ai_chat import _get_client
+from .ai_chat import _get_client, _get_model
 
 # 视觉模型固定 slug，与对话模型（config.deepseek_model）分离。
 # DeepSeek-V4.1 起视觉能力已原生并入 deepseek-flash（即 V4.1-Flash），不再有独立 vision slug；
@@ -294,7 +293,7 @@ def _message_text(event: MessageEvent) -> str:
 
 
 async def _optimize_prompt(raw: str) -> str:
-    """用 DS 文本模型（config.deepseek_model）对原始反推词做润色整理。
+    """用 DS 文本模型（_get_model()，即 config.deepseek_model）对原始反推词做润色整理。
 
     复用 _get_client（共用 DEEPSEEK_API_KEY 与 base_url）；同步阻塞调用必须丢进线程池并设 timeout，
     避免冻结事件循环或永久挂起。返回空字符串表示优化失败/空结果。
@@ -302,7 +301,7 @@ async def _optimize_prompt(raw: str) -> str:
     client = _get_client()
     response = await asyncio.to_thread(
         client.chat.completions.create,
-        model=deepseek_model,
+        model=_get_model(),
         messages=[
             {"role": "system", "content": OPTIMIZE_INSTRUCTION},
             {"role": "user", "content": raw},
