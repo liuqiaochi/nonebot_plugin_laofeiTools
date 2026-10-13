@@ -18,7 +18,7 @@ from nonebot.matcher import Matcher
 from nonebot.rule import Rule
 from PIL import Image
 
-from ..config import is_ai_group_enabled
+from ..config import is_ai_group_enabled, deepseek_model
 from .utils import download_image
 from .ai_chat import _get_client
 
@@ -41,6 +41,19 @@ REVERSE_PROMPT_INSTRUCTION = (
 
 # 触发关键字（任意位置出现即可，支持 @群友 前/后、引用等任意消息结构）
 REVERSE_KEYWORDS = ("图反推", "反推提示词", "图片反推", "提示词反推")
+
+# 优化触发关键字：消息文本段含其一即对反推结果再做一次 DS 文本模型润色（先跑通，后续再做群开关）
+OPTIMIZE_KEYWORDS = ("优化", "美化", "优化一下", "润色")
+
+# DS 文本模型（复用 config.deepseek_model，与 AI 聊天同一模型）的润色指令：保留英文 Danbooru tag，只整理不臆造
+OPTIMIZE_INSTRUCTION = (
+    "你是一名 NovelAI 绘画提示词优化助手。下面是一段由视觉模型从图片反推出的 Danbooru 风格英文提示词。"
+    "请在不改变原意与原 tag 的前提下进行润色整理："
+    "1) 去除重复 tag；2) 修正明显拼写/语法错误；"
+    "3) 按「画质tag → 主体/角色 → 外观(发色发型) → 服装配饰 → 表情 → 动作姿势 → 背景场景 → 构图镜头」顺序整理；"
+    "4) 用半角逗号分隔，保持英文小写 tag 风格，不要翻译成中文，不要新增原图未体现的内容；"
+    "5) 如原提示词已较完善则小幅整理即可。只输出优化后的提示词本身，不要任何解释或引号。"
+)
 
 
 async def _is_reverse_request(event: MessageEvent) -> bool:
@@ -86,6 +99,9 @@ async def handle_reverse_prompt(
             "请发送一张图片、引用含图片的消息，或 @一位群友后发送「图反推」"
         )
         return
+
+    # 检测是否要求 DS 文本模型优化（消息任意文本段含优化关键字）
+    need_optimize = any(kw in _message_text(event) for kw in OPTIMIZE_KEYWORDS)
 
     await matcher.send("正在反推提示词，请稍候...")
 
@@ -166,13 +182,32 @@ async def handle_reverse_prompt(
             await matcher.finish(f"未能反推出提示词，请换一张图重试{detail}")
             return
 
+        # 3.5 可选：DS 文本模型润色（消息含优化关键字时触发，仍在串行锁内避免打爆 API）
+        optimized_flag = False
+        if need_optimize:
+            try:
+                optimized = await _optimize_prompt(prompt)
+                if optimized:
+                    prompt = optimized
+                    optimized_flag = True
+                else:
+                    logger.warning("图反推优化返回空，回退原始反推词")
+            except Exception as e:
+                logger.error(f"图反推优化失败: {e}")
+                # 优化失败不阻断主流程，回退原始反推词并提示
+                await matcher.send(f"提示词优化失败（{type(e).__name__}），返回原始反推词")
+
         # 4. 返回结果（直接返回文本便于复制）
         msg = Message()
         if getattr(event, "message_id", None):
             msg.append(MessageSegment.reply(event.message_id))
-        prefix = "以下为反推提示词（可直接用于 NovelAI）："
+        parts = ["以下为反推提示词"]
         if source_desc:
-            prefix = f"以下为反推提示词（来自{source_desc}，可直接用于 NovelAI）："
+            parts.append(f"（来自{source_desc}）")
+        if optimized_flag:
+            parts.append("（已用 DeepSeek 润色）")
+        parts.append("，可直接用于 NovelAI：")
+        prefix = "".join(parts)
         msg.append(MessageSegment.text(f"{prefix}\n\n{prompt}"))
         await matcher.finish(msg)
 
@@ -228,6 +263,36 @@ def _extract_at_qq(event: MessageEvent) -> str:
 def _avatar_url(qq: str) -> str:
     """根据 QQ 号构造群友头像 URL（spec=640 取最大可用尺寸）"""
     return f"https://q.qlogo.cn/headimg_dl?dst_uin={qq}&spec=640&img_type=jpg"
+
+
+def _message_text(event: MessageEvent) -> str:
+    """拼接消息内所有文本段的纯文本（用于关键字检测，忽略图片/At 等）"""
+    return "".join(
+        seg.data.get("text", "")
+        for seg in event.message
+        if seg.type == "text"
+    )
+
+
+async def _optimize_prompt(raw: str) -> str:
+    """用 DS 文本模型（config.deepseek_model）对原始反推词做润色整理。
+
+    复用 _get_client（共用 DEEPSEEK_API_KEY 与 base_url）；同步阻塞调用必须丢进线程池并设 timeout，
+    避免冻结事件循环或永久挂起。返回空字符串表示优化失败/空结果。
+    """
+    client = _get_client()
+    response = await asyncio.to_thread(
+        client.chat.completions.create,
+        model=deepseek_model,
+        messages=[
+            {"role": "system", "content": OPTIMIZE_INSTRUCTION},
+            {"role": "user", "content": raw},
+        ],
+        temperature=0.3,
+        max_tokens=800,
+        timeout=60,
+    )
+    return (response.choices[0].message.content or "").strip()
 
 
 def _normalize_image(data: bytes, max_side: int = 1280) -> bytes:
