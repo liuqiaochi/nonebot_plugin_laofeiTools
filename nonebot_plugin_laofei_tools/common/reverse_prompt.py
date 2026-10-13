@@ -11,7 +11,7 @@ import asyncio
 import base64
 from io import BytesIO
 
-from nonebot import on_message, on_command
+from nonebot import on_message
 from nonebot.adapters.onebot.v11 import (
     Bot,
     MessageEvent,
@@ -340,14 +340,34 @@ def _normalize_image(data: bytes, max_side: int = 1280) -> bytes:
 # ========== 开启图反推润色 / 关闭图反推润色（超级用户，按群）==========
 # 与「开启AI / 关闭AI」同构：仅超管可在群聊中开关，按群记录到 reverse_polish_groups.json。
 # 开启后该群图反推自动用 DeepSeek 文本模型润色（默认关；关键字「优化」仍可作临时触发）。
+# 注意：不用 on_command（否则命令前缀/开头匹配规则导致超管在群里发「开启图反推润色」静默不触发），
+# 改用 on_message + 自定义规则，消息任意文本段含对应短语即触发，与图反推触发方式一致。
 
-enable_polish_cmd = on_command(
-    "开启图反推润色",
-    aliases={"开启图反推优化", "开启图反推美化"},
+async def _is_polish_enable_request(event: MessageEvent) -> bool:
+    """消息文本段含「开启图反推润色/优化/美化」其一即视为开启请求"""
+    text = "".join(
+        seg.data.get("text", "")
+        for seg in event.message
+        if seg.type == "text"
+    )
+    return any(kw in text for kw in ("开启图反推润色", "开启图反推优化", "开启图反推美化"))
+
+
+async def _is_polish_disable_request(event: MessageEvent) -> bool:
+    """消息文本段含「关闭图反推润色/优化/美化」其一即视为关闭请求"""
+    text = "".join(
+        seg.data.get("text", "")
+        for seg in event.message
+        if seg.type == "text"
+    )
+    return any(kw in text for kw in ("关闭图反推润色", "关闭图反推优化", "关闭图反推美化"))
+
+
+enable_polish_cmd = on_message(
+    rule=Rule(_is_polish_enable_request),
     permission=SUPERUSER,
     priority=5,
     block=True,
-    force_whitespace=True,
 )
 
 
@@ -366,13 +386,11 @@ async def handle_enable_polish(matcher: Matcher, event: MessageEvent):
     )
 
 
-disable_polish_cmd = on_command(
-    "关闭图反推润色",
-    aliases={"关闭图反推优化", "关闭图反推美化"},
+disable_polish_cmd = on_message(
+    rule=Rule(_is_polish_disable_request),
     permission=SUPERUSER,
     priority=5,
     block=True,
-    force_whitespace=True,
 )
 
 
