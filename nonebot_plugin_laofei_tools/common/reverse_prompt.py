@@ -11,10 +11,11 @@ import asyncio
 import base64
 from io import BytesIO
 
-from nonebot import on_command
+from nonebot import on_message
 from nonebot.adapters.onebot.v11 import Bot, MessageEvent, Message, MessageSegment
 from nonebot.log import logger
 from nonebot.matcher import Matcher
+from nonebot.rule import Rule
 from PIL import Image
 
 from ..config import is_ai_group_enabled
@@ -38,13 +39,29 @@ REVERSE_PROMPT_INSTRUCTION = (
     "只输出提示词本身，不要任何解释、前缀或引号。"
 )
 
+# 触发关键字（任意位置出现即可，支持 @群友 前/后、引用等任意消息结构）
+REVERSE_KEYWORDS = ("图反推", "反推提示词", "图片反推", "提示词反推")
 
-reverse_prompt_cmd = on_command(
-    "图反推",
-    aliases={"反推提示词", "图片反推", "提示词反推"},
+
+async def _is_reverse_request(event: MessageEvent) -> bool:
+    """自定义规则：消息任意文本段包含反推关键字即触发。
+
+    不用 on_command 的原因：on_command 要求命令位于消息开头且 force_whitespace，
+    导致「@群友 图反推」或「图反推@群友」（At 段不在首位/无空白）匹配失败；
+    改用 on_message + 本规则，关键字可在任意位置触发，图片/@群友 提取在 handler 内完成。
+    """
+    for seg in event.message:
+        if seg.type == "text":
+            text = seg.data.get("text", "") or ""
+            if any(kw in text for kw in REVERSE_KEYWORDS):
+                return True
+    return False
+
+
+reverse_prompt_cmd = on_message(
+    rule=Rule(_is_reverse_request),
     priority=5,
     block=True,
-    force_whitespace=True,
 )
 
 
