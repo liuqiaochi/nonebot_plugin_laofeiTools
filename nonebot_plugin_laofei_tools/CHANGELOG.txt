@@ -1,3 +1,10 @@
+## 2026-10-15
+1.新增「反推AI图」指令：图反推提示词后直接调用 NovelAI 出图，返回与 ai画图 完全一致（合并转发图片）
+   触发方式同图反推（消息内图片 > 引用含图消息 > @群友 头像），关键字 反推AI图/反推ai图/反推生图；仅群聊可用，需本群开启 AI 画图（ai_draw 模块）
+   反推阶段复用图反推的视觉反推 + 串行锁（_reverse_lock）+ 可选润色（优化关键字/本群润色开关，复用 _optimize_prompt）
+   出图阶段复用 novelai_draw 新增导出的 draw_prompt_to_image（封装 ai_draw_lock 并发互斥、模型/用户设置、合并转发发送）；novelai_draw 未改动现有 ai画图 指令
+   AI 帮助（图片与文字 fallback）补充「反推AI图」说明
+
 ## 2026-10-13
 1.图反推新增「@群友」取头像反推：图片来源优先级为「消息内图片 > 引用图片 > @群友头像」
    解析消息内 At 段（忽略 @all）提取 QQ 号，按 https://q.qlogo.cn/headimg_dl?dst_uin={qq}&spec=640&img_type=jpg 构造群友头像 URL（640 最大尺寸）

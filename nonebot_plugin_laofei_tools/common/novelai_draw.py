@@ -548,6 +548,102 @@ async def handle_novelai(matcher: Matcher, bot: Bot, event: MessageEvent, args: 
         await matcher.finish()
 
 
+# ========== 供「反推AI图」复用的核心出图函数 ==========
+async def draw_prompt_to_image(bot, event, matcher, prompt: str):
+    """根据正面提示词直接调用 NovelAI 生成图片并以合并转发形式发送（与 ai画图 完全一致）。
+
+    供 reverse_prompt 的「反推AI图」指令复用：负面用默认、尺寸/模型/用户设置复用 ai画图 逻辑、
+    并发互斥复用 ai_draw_lock、发送方式同为合并转发。参数 prompt 为已反推/润色好的正面提示词。
+    """
+    api_key = _get_api_key()
+    if not api_key:
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("⚠️ NovelAI API Key 未配置，请联系管理员在 .env 中设置 NOVELAI_API_KEY"),
+        ]))
+
+    if ai_draw_lock.locked():
+        await matcher.finish(Message([
+            MessageSegment.reply(event.message_id),
+            MessageSegment.text("⚠️ 当前有 ai画图 任务正在进行，请等待其完成后再试～"),
+        ]))
+
+    async with ai_draw_lock:
+        await matcher.send(Message([MessageSegment.text("🎨 正在调用 NovelAI 生成图片，请稍候…")]))
+        payload = _build_payload(
+            prompt, "", _get_model(str(event.group_id)),
+            DEFAULT_WIDTH, DEFAULT_HEIGHT, get_nai_draw_settings(str(event.user_id)),
+        )
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                resp = await client.post(NOVELAI_ENDPOINT, json=payload, headers=headers)
+        except httpx.HTTPError as e:
+            logger.error(f"NovelAI 请求失败：{e}")
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text(f"❌ 请求 NovelAI 失败：{e}"),
+            ]))
+            return
+        if resp.status_code != 200:
+            try:
+                err = resp.json()
+                msg = err.get("message") or err.get("error") or str(err)
+            except Exception:
+                msg = resp.text[:300]
+            logger.error(f"NovelAI HTTP {resp.status_code}: {msg}")
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text(f"❌ NovelAI 返回错误（HTTP {resp.status_code}）：{msg}"),
+            ]))
+            return
+        try:
+            img_bytes = _extract_image(resp)
+        except RuntimeError as e:
+            logger.error(f"NovelAI 响应解析失败：{e}")
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text(f"❌ {e}"),
+            ]))
+            return
+        if not img_bytes or img_bytes[:4] != b"\x89PNG":
+            await matcher.finish(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("❌ NovelAI 返回内容不是有效的 PNG 图片"),
+            ]))
+            return
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png", prefix="ai_draw_")
+        tmp.write(img_bytes)
+        tmp.close()
+        try:
+            bot_name = "蓝色大肥鱼"
+            try:
+                bot_info = await bot.get_login_info()
+                bot_name = bot_info.get("nickname", "蓝色大肥鱼")
+            except Exception:
+                pass
+            group_id = getattr(event, "group_id", None)
+            forward_msgs = [{
+                "type": "node",
+                "data": {
+                    "name": bot_name,
+                    "uin": bot.self_id,
+                    "content": str(MessageSegment.image(tmp.name)),
+                },
+            }]
+            await bot.call_api("send_group_forward_msg", group_id=group_id, messages=forward_msgs)
+        except Exception as e:
+            logger.error(f"ai画图 合并转发发送失败：{e}")
+            await matcher.send(Message([
+                MessageSegment.reply(event.message_id),
+                MessageSegment.text("❌ 图片发送失败，可能是图片过大或网络异常，请稍后重试。"),
+            ]))
+        await matcher.finish()
+
+
 # ========== 开启 / 关闭 群聊 NovelAI 画图（仅超级用户） ==========
 
 novelai_on_cmd = on_command(

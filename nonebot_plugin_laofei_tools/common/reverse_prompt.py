@@ -28,11 +28,13 @@ from PIL import Image
 from ..config import (
     is_ai_group_enabled,
     is_reverse_polish_enabled,
+    is_novelai_group_enabled,
     enable_reverse_polish,
     disable_reverse_polish,
 )
 from .utils import download_image
 from .ai_chat import _get_client, _get_model
+from .novelai_draw import draw_prompt_to_image
 
 # 视觉模型固定 slug，与对话模型（config.deepseek_model）分离。
 # DeepSeek-V4.1 起视觉能力已原生并入 deepseek-flash（即 V4.1-Flash），不再有独立 vision slug；
@@ -81,7 +83,11 @@ async def _is_reverse_request(event: MessageEvent) -> bool:
         if seg.type == "text":
             text = seg.data.get("text", "") or ""
             if any(kw in text for kw in REVERSE_KEYWORDS):
-                if "开启图反推" in text or "关闭图反推" in text:
+                if (
+                    "开启图反推" in text
+                    or "关闭图反推" in text
+                    or "反推AI图" in text
+                ):
                     continue
                 return True
     return False
@@ -405,3 +411,133 @@ async def handle_disable_polish(matcher: Matcher, event: MessageEvent):
     await matcher.finish(
         "❌ 已关闭本群图反推润色（仍可用「优化/美化」关键字临时触发）。"
     )
+
+
+# ========== 反推AI图（图反推 + AI 画图，普通用户可用，需本群开启 AI 画图）==========
+# 触发方式与图反推完全一致（消息内图片 / 引用含图消息 / @群友 头像），
+# 反推出提示词后再直接调用 NovelAI 出图，返回形式与 ai画图 完全一致（合并转发图片）。
+
+REVERSE_AI_DRAW_KEYWORDS = ("反推AI图", "反推ai图", "反推生图")
+
+
+async def _is_reverse_ai_draw_request(event: MessageEvent) -> bool:
+    """消息任意文本段含「反推AI图」等关键字即触发（与图反推触发方式一致）"""
+    text = "".join(
+        seg.data.get("text", "")
+        for seg in event.message
+        if seg.type == "text"
+    )
+    return any(kw in text for kw in REVERSE_AI_DRAW_KEYWORDS)
+
+
+reverse_ai_draw_cmd = on_message(
+    rule=Rule(_is_reverse_ai_draw_request),
+    priority=5,
+    block=True,
+)
+
+
+@reverse_ai_draw_cmd.handle()
+async def handle_reverse_ai_draw(
+    matcher: Matcher,
+    bot: Bot,
+    event: MessageEvent,
+):
+    """图反推 + AI 画图：从图片反推提示词后直接调 NovelAI 出图（返回与 ai画图 一致）"""
+    # 仅在群聊可用（最终以合并转发形式发图，需 group_id）
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish("⚠️ 反推AI图 仅支持在群聊中使用")
+        return
+
+    # 群聊守卫：需本群开启 AI 画图（ai_draw 模块）；未开启静默拦截（与统一开关层一致）
+    gid = str(event.group_id)
+    if not is_novelai_group_enabled(gid):
+        await matcher.finish()
+        return
+
+    # 1. 提取图片（与图反推同优先级：消息内 > 引用 > @群友 头像）
+    image_url, source_desc = _extract_image(event)
+    if not image_url:
+        await matcher.finish(
+            "请发送一张图片、引用含图片的消息，或 @一位群友后发送「反推AI图」"
+        )
+        return
+
+    # 2. 是否润色（与图反推一致：消息含优化关键字，或本群已开启图反推润色开关）
+    need_optimize = any(kw in _message_text(event) for kw in OPTIMIZE_KEYWORDS)
+    if is_reverse_polish_enabled(gid):
+        need_optimize = True
+
+    await matcher.send("正在反推提示词，请稍候...")
+
+    # 3. 反推 + 可选润色（复用图反推的串行锁，避免并发打爆视觉模型）
+    async with _reverse_lock:
+        try:
+            image_data = await download_image(bot, image_url)
+        except Exception as e:
+            logger.error(f"反推AI图 图片下载失败: {e}")
+            await matcher.finish("图片下载失败，请重试")
+            return
+        if not image_data:
+            await matcher.finish("图片下载失败，请重试")
+            return
+        try:
+            image_data = _normalize_image(image_data)
+        except Exception as e:
+            logger.error(f"反推AI图 图片解码失败: {e}")
+            await matcher.finish("图片无法解码，请换一张图重试")
+            return
+
+        # 3.1 视觉模型反推
+        try:
+            client = _get_client()
+            data_url = f"data:image/png;base64,{base64.b64encode(image_data).decode()}"
+            response = await asyncio.to_thread(
+                client.chat.completions.create,
+                model=VISION_MODEL,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": REVERSE_PROMPT_INSTRUCTION},
+                            {"type": "image_url", "image_url": {"url": data_url}},
+                        ],
+                    }
+                ],
+                temperature=0.5,
+                max_tokens=800,
+                timeout=60,
+                extra_body={"thinking": {"type": "disabled"}},
+            )
+            prompt = (response.choices[0].message.content or "").strip()
+        except ValueError as e:
+            await matcher.finish(f"反推AI图 配置错误：{e}")
+            return
+        except Exception as e:
+            logger.error(f"反推AI图 视觉调用失败: {e}")
+            await matcher.finish(f"反推失败：{type(e).__name__} - {e}")
+            return
+
+        if not prompt:
+            try:
+                choice = response.choices[0]
+                fr = getattr(choice, "finish_reason", None)
+                has_reason = bool(getattr(choice.message, "reasoning_content", None))
+                detail = f"（finish_reason={fr}，思考模式={has_reason}）"
+            except Exception:
+                detail = ""
+            await matcher.finish(f"未能反推出提示词，请换一张图重试{detail}")
+            return
+
+        # 3.2 可选 DS 文本润色（失败不阻断，回退原始反推词）
+        if need_optimize:
+            try:
+                optimized = await _optimize_prompt(prompt)
+                if optimized:
+                    prompt = optimized
+            except Exception as e:
+                logger.error(f"反推AI图 优化失败: {e}")
+                await matcher.send(f"提示词优化失败（{type(e).__name__}），使用原始反推词出图")
+
+    # 4. 调 NovelAI 出图并合并转发发送（与 ai画图 完全一致）
+    await draw_prompt_to_image(bot, event, matcher, prompt)
