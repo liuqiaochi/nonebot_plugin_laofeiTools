@@ -634,7 +634,10 @@ async def draw_prompt_to_image(bot, event, matcher, prompt: str):
                     "content": str(MessageSegment.image(tmp.name)),
                 },
             }]
-            await bot.call_api("send_group_forward_msg", group_id=group_id, messages=forward_msgs)
+            await asyncio.wait_for(
+                bot.call_api("send_group_forward_msg", group_id=group_id, messages=forward_msgs),
+                timeout=60,
+            )
         except Exception as e:
             logger.error(f"ai画图 合并转发发送失败：{e}")
             await matcher.send(Message([

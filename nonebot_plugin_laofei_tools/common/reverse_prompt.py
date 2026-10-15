@@ -162,22 +162,25 @@ async def handle_reverse_prompt(
             # 会把整段 max_tokens 预算花在 reasoning_content 上，
             # 导致最终 content 为空（finish_reason=length）。显式关闭思考模式，
             # 确保直接输出提示词（已确认是官方视觉模型的已知行为，非本插件问题）。
-            response = await asyncio.to_thread(
-                client.chat.completions.create,
-                model=VISION_MODEL,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": REVERSE_PROMPT_INSTRUCTION},
-                            {"type": "image_url", "image_url": {"url": data_url}},
-                        ],
-                    }
-                ],
-                temperature=0.5,
-                max_tokens=800,
-                timeout=60,
-                extra_body={"thinking": {"type": "disabled"}},
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.chat.completions.create,
+                    model=VISION_MODEL,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": REVERSE_PROMPT_INSTRUCTION},
+                                {"type": "image_url", "image_url": {"url": data_url}},
+                            ],
+                        }
+                    ],
+                    temperature=0.5,
+                    max_tokens=800,
+                    timeout=60,
+                    extra_body={"thinking": {"type": "disabled"}},
+                ),
+                timeout=90,
             )
             prompt = (response.choices[0].message.content or "").strip()
         except ValueError as e:
@@ -305,16 +308,19 @@ async def _optimize_prompt(raw: str) -> str:
     避免冻结事件循环或永久挂起。返回空字符串表示优化失败/空结果。
     """
     client = _get_client()
-    response = await asyncio.to_thread(
-        client.chat.completions.create,
-        model=_get_model(),
-        messages=[
-            {"role": "system", "content": OPTIMIZE_INSTRUCTION},
-            {"role": "user", "content": raw},
-        ],
-        temperature=0.3,
-        max_tokens=800,
-        timeout=60,
+    response = await asyncio.wait_for(
+        asyncio.to_thread(
+            client.chat.completions.create,
+            model=_get_model(),
+            messages=[
+                {"role": "system", "content": OPTIMIZE_INSTRUCTION},
+                {"role": "user", "content": raw},
+            ],
+            temperature=0.3,
+            max_tokens=800,
+            timeout=60,
+        ),
+        timeout=90,
     )
     return (response.choices[0].message.content or "").strip()
 
@@ -500,22 +506,25 @@ async def handle_reverse_ai_draw(
         try:
             client = _get_client()
             data_url = f"data:image/png;base64,{base64.b64encode(image_data).decode()}"
-            response = await asyncio.to_thread(
-                client.chat.completions.create,
-                model=VISION_MODEL,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": REVERSE_PROMPT_INSTRUCTION},
-                            {"type": "image_url", "image_url": {"url": data_url}},
-                        ],
-                    }
-                ],
-                temperature=0.5,
-                max_tokens=800,
-                timeout=60,
-                extra_body={"thinking": {"type": "disabled"}},
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.chat.completions.create,
+                    model=VISION_MODEL,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": REVERSE_PROMPT_INSTRUCTION},
+                                {"type": "image_url", "image_url": {"url": data_url}},
+                            ],
+                        }
+                    ],
+                    temperature=0.5,
+                    max_tokens=800,
+                    timeout=60,
+                    extra_body={"thinking": {"type": "disabled"}},
+                ),
+                timeout=90,
             )
             prompt = (response.choices[0].message.content or "").strip()
         except ValueError as e:
@@ -548,4 +557,5 @@ async def handle_reverse_ai_draw(
                 await matcher.send(f"提示词优化失败（{type(e).__name__}），使用原始反推词出图")
 
     # 4. 调 NovelAI 出图并合并转发发送（与 ai画图 完全一致）
+    await matcher.send("✅ 已反推出提示词，正在生成图片…")
     await draw_prompt_to_image(bot, event, matcher, prompt)
