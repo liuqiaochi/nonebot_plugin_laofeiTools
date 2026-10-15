@@ -8,6 +8,8 @@
 3.反推卡死无反馈加固：视觉反推与 DS 润色调用均套 asyncio.wait_for 兜底（即使 SDK timeout 失效也不永久挂）；出图 send_group_forward_msg 套 asyncio.wait_for（避免 NapCat 无响应时 handler 永久挂起、nonebot 仅记日志不回应用户）；反推成功后新增进度提示「✅ 已反推出提示词，正在生成图片…」便于定位卡点
 4.超时参数按实际耗时调整：视觉反推与 DS 润色较快，wait_for 上限由 90 调为 60；AI 生图发送合并转发较慢，send_group_forward_msg 的 wait_for 上限由 60 调为 90；NovelAI 生成本身 httpx timeout=180 为真实生图耗时，保持不动
 5.回退视觉反推/DS 润色的 asyncio.wait_for 外壳：to_thread 在线程池运行，wait_for 超时无法真正中断线程（既防不住永久挂，Python 3.13 下还可能干扰正常返回），疑为图反推无返回的回归点；恢复纯 asyncio.to_thread（依赖 SDK 单次调用 timeout=60），回到 10-12 验证可用状态。另给 OpenAI client 构造加 client 级 timeout=60.0 双保险。send_group_forward_msg 的 wait_for(90) 为 async 调用、可真正取消，予以保留
+6.反推AI图精简交互（覆盖第 3 条新增的进度提示）：仅发一句合并提示「正在反推提示词并使用 NovelAI 生成图片，请稍候...」，替代原三条中间提示（正在反推 / ✅已反推出 / 🎨正在调用 NovelAI）；出错正常回显错误，无错误则下一句即为成功内容
+   成功返回（合并转发）首节点为「提示词：<图反推出的提示词>」，其后节点为生成的图片，即图片与提示词一并返回；draw_prompt_to_image 的发送节点加提示词文本节点（仅反推AI图路径，纯 ai画图 handle_novelai 不受影响）
 
 ## 2026-10-13
 1.图反推新增「@群友」取头像反推：图片来源优先级为「消息内图片 > 引用图片 > @群友头像」

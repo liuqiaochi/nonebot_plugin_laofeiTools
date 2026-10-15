@@ -476,7 +476,7 @@ async def handle_reverse_ai_draw(
     if is_reverse_polish_enabled(gid):
         need_optimize = True
 
-    await matcher.send("正在反推提示词，请稍候...")
+    await matcher.send("正在反推提示词并使用 NovelAI 生成图片，请稍候...")
 
     # 3. 反推 + 可选润色（复用图反推的串行锁，避免并发打爆视觉模型）
     async with _reverse_lock:
@@ -547,6 +547,5 @@ async def handle_reverse_ai_draw(
                 logger.error(f"反推AI图 优化失败: {e}")
                 await matcher.send(f"提示词优化失败（{type(e).__name__}），使用原始反推词出图")
 
-    # 4. 调 NovelAI 出图并合并转发发送（与 ai画图 完全一致）
-    await matcher.send("✅ 已反推出提示词，正在生成图片…")
+    # 4. 调 NovelAI 出图并合并转发发送（与 ai画图 一致，图片 + 提示词一起返回）
     await draw_prompt_to_image(bot, event, matcher, prompt)

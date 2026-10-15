@@ -569,7 +569,6 @@ async def draw_prompt_to_image(bot, event, matcher, prompt: str):
         ]))
 
     async with ai_draw_lock:
-        await matcher.send(Message([MessageSegment.text("🎨 正在调用 NovelAI 生成图片，请稍候…")]))
         payload = _build_payload(
             prompt, "", _get_model(str(event.group_id)),
             DEFAULT_WIDTH, DEFAULT_HEIGHT, get_nai_draw_settings(str(event.user_id)),
@@ -626,14 +625,24 @@ async def draw_prompt_to_image(bot, event, matcher, prompt: str):
             except Exception:
                 pass
             group_id = getattr(event, "group_id", None)
-            forward_msgs = [{
-                "type": "node",
-                "data": {
-                    "name": bot_name,
-                    "uin": bot.self_id,
-                    "content": str(MessageSegment.image(tmp.name)),
+            forward_msgs = [
+                {
+                    "type": "node",
+                    "data": {
+                        "name": bot_name,
+                        "uin": bot.self_id,
+                        "content": str(MessageSegment.text(f"提示词：\n{prompt}")),
+                    },
                 },
-            }]
+                {
+                    "type": "node",
+                    "data": {
+                        "name": bot_name,
+                        "uin": bot.self_id,
+                        "content": str(MessageSegment.image(tmp.name)),
+                    },
+                },
+            ]
             await asyncio.wait_for(
                 bot.call_api("send_group_forward_msg", group_id=group_id, messages=forward_msgs),
                 timeout=90,
