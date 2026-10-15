@@ -413,9 +413,11 @@ async def handle_disable_polish(matcher: Matcher, event: MessageEvent):
     )
 
 
-# ========== 反推AI图（图反推 + AI 画图，普通用户可用，需本群开启 AI 画图）==========
+# ========== 反推AI图（图反推 + AI 画图，普通用户可用，需本群同时开启 AI 功能 + AI 画图）==========
 # 触发方式与图反推完全一致（消息内图片 / 引用含图消息 / @群友 头像），
 # 反推出提示词后再直接调用 NovelAI 出图，返回形式与 ai画图 完全一致（合并转发图片）。
+# 双权限守卫：图反推依赖 AI 功能（ai_chat 模块，DeepSeek 视觉），出图依赖 AI 画图（ai_draw 模块，NovelAI），
+# 两者均需本群开启，未开启按统一开关层约定静默拦截。
 
 REVERSE_AI_DRAW_KEYWORDS = ("反推AI图", "反推ai图", "反推生图")
 
@@ -449,8 +451,14 @@ async def handle_reverse_ai_draw(
         await matcher.finish("⚠️ 反推AI图 仅支持在群聊中使用")
         return
 
-    # 群聊守卫：需本群开启 AI 画图（ai_draw 模块）；未开启静默拦截（与统一开关层一致）
+    # 群聊双权限守卫：
+    # - 图反推阶段依赖 AI 功能（ai_chat 模块，DeepSeek 视觉）；
+    # - 出图阶段依赖 AI 画图（ai_draw 模块，NovelAI）。
+    # 两者均需本群开启，未开启按统一开关层约定静默拦截。
     gid = str(event.group_id)
+    if not is_ai_group_enabled(gid):
+        await matcher.finish()
+        return
     if not is_novelai_group_enabled(gid):
         await matcher.finish()
         return
