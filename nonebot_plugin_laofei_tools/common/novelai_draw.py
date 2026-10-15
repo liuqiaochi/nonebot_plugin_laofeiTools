@@ -631,7 +631,7 @@ async def draw_prompt_to_image(bot, event, matcher, prompt: str):
                     "data": {
                         "name": bot_name,
                         "uin": bot.self_id,
-                        "content": str(MessageSegment.text(f"提示词：\n{prompt}")),
+                        "content": str(MessageSegment.image(tmp.name)),
                     },
                 },
                 {
@@ -639,7 +639,7 @@ async def draw_prompt_to_image(bot, event, matcher, prompt: str):
                     "data": {
                         "name": bot_name,
                         "uin": bot.self_id,
-                        "content": str(MessageSegment.image(tmp.name)),
+                        "content": str(MessageSegment.text(f"提示词：\n{prompt}")),
                     },
                 },
             ]
