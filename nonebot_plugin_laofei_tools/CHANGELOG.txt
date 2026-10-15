@@ -5,7 +5,8 @@
    出图阶段复用 novelai_draw 新增导出的 draw_prompt_to_image（封装 ai_draw_lock 并发互斥、模型/用户设置、合并转发发送）；novelai_draw 未改动现有 ai画图 指令
    AI 帮助（图片与文字 fallback）补充「反推AI图」说明
 2.「反推AI图」补全双权限守卫：原仅判 AI 画图（ai_draw），漏判 AI 功能（ai_chat）；现要求本群同时开启两者（未开启静默拦截，与统一开关层一致）——图反推阶段依赖 DeepSeek 视觉属 AI 功能，出图阶段依赖 NovelAI 属 AI 画图
-3.反推卡死无反馈加固：视觉反推与 DS 润色调用均套 asyncio.wait_for(timeout=90) 兜底（即使 SDK timeout 失效也不永久挂）；出图 send_group_forward_msg 套 asyncio.wait_for(timeout=60)（避免 NapCat 无响应时 handler 永久挂起、nonebot 仅记日志不回应用户）；反推成功后新增进度提示「✅ 已反推出提示词，正在生成图片…」便于定位卡点
+3.反推卡死无反馈加固：视觉反推与 DS 润色调用均套 asyncio.wait_for 兜底（即使 SDK timeout 失效也不永久挂）；出图 send_group_forward_msg 套 asyncio.wait_for（避免 NapCat 无响应时 handler 永久挂起、nonebot 仅记日志不回应用户）；反推成功后新增进度提示「✅ 已反推出提示词，正在生成图片…」便于定位卡点
+4.超时参数按实际耗时调整：视觉反推与 DS 润色较快，wait_for 上限由 90 调为 60；AI 生图发送合并转发较慢，send_group_forward_msg 的 wait_for 上限由 60 调为 90；NovelAI 生成本身 httpx timeout=180 为真实生图耗时，保持不动
 
 ## 2026-10-13
 1.图反推新增「@群友」取头像反推：图片来源优先级为「消息内图片 > 引用图片 > @群友头像」

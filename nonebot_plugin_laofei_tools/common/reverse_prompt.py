@@ -180,7 +180,7 @@ async def handle_reverse_prompt(
                     timeout=60,
                     extra_body={"thinking": {"type": "disabled"}},
                 ),
-                timeout=90,
+                timeout=60,
             )
             prompt = (response.choices[0].message.content or "").strip()
         except ValueError as e:
@@ -320,7 +320,7 @@ async def _optimize_prompt(raw: str) -> str:
             max_tokens=800,
             timeout=60,
         ),
-        timeout=90,
+        timeout=60,
     )
     return (response.choices[0].message.content or "").strip()
 
@@ -524,7 +524,7 @@ async def handle_reverse_ai_draw(
                     timeout=60,
                     extra_body={"thinking": {"type": "disabled"}},
                 ),
-                timeout=90,
+                timeout=60,
             )
             prompt = (response.choices[0].message.content or "").strip()
         except ValueError as e:
