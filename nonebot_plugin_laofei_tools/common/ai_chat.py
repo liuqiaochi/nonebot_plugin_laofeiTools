@@ -145,7 +145,7 @@ def _get_client() -> OpenAI:
         raise ValueError(
             "DeepSeek API Key 未配置！请在 .env 中设置 DEEPSEEK_API_KEY=sk-xxx"
         )
-    return OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+    return OpenAI(api_key=api_key, base_url="https://api.deepseek.com", timeout=60.0)
 
 
 def _get_model() -> str:
