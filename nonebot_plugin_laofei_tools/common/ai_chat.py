@@ -807,6 +807,10 @@ def _generate_ai_help_image() -> str:
             ("优化", "消息加「优化/美化/优化一下/润色」临时触发 DS 润色；超管可用「开启图反推润色/关闭图反推润色」按群默认开启"),
             ("反推AI图", "图反推后直接调 NovelAI 出图（结果同 AI 画图）；需本群开启 AI 画图；支持图片/引用/@群友头像"),
         ], False),
+        ("ai余额（仅超管）", [
+            ("ai余额", "查询当前 DeepSeek API Key 余额，以图片方式返回（可用/赠金/充值/货币）"),
+            ("范围", "仅超级用户可用；群聊需本群已开启 AI 功能，私聊直接可用"),
+        ], False),
     ]
 
     total_height = padding + header_height
@@ -871,7 +875,8 @@ async def handle_ai_help(matcher: Matcher) -> None:
             "· 配图：ai图添加 / ai图列表 / ai图删除 <序号> / ai图重置\n"
             "· 图反推：发送图片 / 引用含图消息 / @一位群友后发送「图反推」，反推 NovelAI 提示词（需本群开启 AI 功能）\n"
             "· 图反推优化：消息加「优化/美化/优化一下/润色」临时触发 DS 润色；超管可用「开启图反推润色/关闭图反推润色」按群默认开启\n"
-            "· 反推AI图：图反推后直接调 NovelAI 出图（结果同 AI 画图，需本群开启 AI 画图）；支持图片/引用/@群友头像"
+            "· 反推AI图：图反推后直接调 NovelAI 出图（结果同 AI 画图，需本群开启 AI 画图）；支持图片/引用/@群友头像\n"
+            "· ai余额：发送「ai余额」查询当前 DeepSeek API Key 余额（图片返回）；仅超管可用，需本群开启 AI 功能或私聊"
         )
     await matcher.finish(MessageSegment.image(f"base64://{img_b64}"))
 

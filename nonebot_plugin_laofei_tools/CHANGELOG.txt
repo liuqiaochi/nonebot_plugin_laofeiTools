@@ -1,3 +1,10 @@
+## 2026-10-16
+1.新增「ai余额」指令：查询当前 DeepSeek API Key 余额并以图片方式返回（调用官方 GET /user/balance）
+   仅超级用户（SUPERUSER）可用；群聊需本群已开启 AI 功能（ai_chat 模块），私聊直接可用；非超管/未开 AI 功能静默拦截
+   余额卡片图用 PIL 绘制（深色卡片 + 可用/赠金/充值/货币 + 是否可调用 + 查询时间），base64 直发（与功能开关图一致）
+   key 取自 get_driver().config.deepseek_api_key；查询失败（超时/非 200/异常）以文字回显原因；成功才出图
+   新增 common/ai_balance.py（on_message + Rule 关键字「ai余额」+ 字体加载复用 module_switch 风格），__init__.py 注册导入，AI 帮助图片与文字补充「ai余额」说明
+
 ## 2026-10-15
 1.新增「反推AI图」指令：图反推提示词后直接调用 NovelAI 出图，返回与 ai画图 完全一致（合并转发图片）
    触发方式同图反推（消息内图片 > 引用含图消息 > @群友 头像），关键字 反推AI图/反推ai图/反推生图；仅群聊可用，需本群开启 AI 画图（ai_draw 模块）
