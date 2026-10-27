@@ -1,3 +1,9 @@
+## 2026-10-27
+1.图反推/反推AI图 新增「先读 NovelAI 嵌入元数据」优先逻辑：下载图片后、转码前先尝试提取 NA 生成图的残留信息（传统 PNG 文本块：Software="NovelAI" / Description=正向提示词 / Comment=JSON 含 uc 负面/seed/steps/scale/sampler）
+   命中则直接采用原图提示词、跳过视觉反推（更准且省一次 DeepSeek 视觉调用）；未命中（如 QQ 转发已重编码剥掉元数据）自动回退原有视觉元素采集链路
+   仅在 _normalize_image 之前、用原始下载字节提取（该函数 convert RGB 会丢弃文本块/alpha）；图反推路径额外回显负面/种子等元数据，反推AI图路径直接拿原提示词出图
+   新增 _extract_nai_metadata / _resolve_metadata_prompt / _format_metadata_extras 三个辅助函数（reverse_prompt.py）；隐写 LSB 格式暂不实现（alpha 在 QQ 重编码必丢、且无法用真图验证）
+
 ## 2026-10-16
 1.新增「ai余额」指令：查询当前 DeepSeek API Key 余额并以图片方式返回（调用官方 GET /user/balance）
    仅超级用户（SUPERUSER）可用；群聊需本群已开启 AI 功能（ai_chat 模块），私聊直接可用；非超管/未开 AI 功能静默拦截

@@ -9,6 +9,7 @@
 
 import asyncio
 import base64
+import json
 from io import BytesIO
 
 from nonebot import on_message
@@ -66,8 +67,73 @@ OPTIMIZE_INSTRUCTION = (
     "1) 去除重复 tag；2) 修正明显拼写/语法错误；"
     "3) 按「画质tag → 主体/角色 → 外观(发色发型) → 服装配饰 → 表情 → 动作姿势 → 背景场景 → 构图镜头」顺序整理；"
     "4) 用半角逗号分隔，保持英文小写 tag 风格，不要翻译成中文，不要新增原图未体现的内容；"
-    "5) 如原提示词已较完善则小幅整理即可。只输出优化后的提示词本身，不要任何解释或引号。"
+    "    5) 如原提示词已较完善则小幅整理即可。只输出优化后的提示词本身，不要任何解释或引号。"
 )
+
+
+# ========== NovelAI 嵌入元数据提取（先读图内自带 prompt/seed，命中则跳过视觉反推）==========
+# 依据：NovelAI 官方 novelai-image-metadata 与社区工具印证，NA 生成图会写入嵌入信息，主要有两类：
+#  1) 传统 PNG 文本块：Software="NovelAI"、Description=正向提示词、Comment=JSON(uc/seed/steps/scale/sampler...)
+#  2) 隐写 LSB：gzip(JSON) 藏进 RGBA alpha 通道最低位（肉眼不可见；QQ 重编码常丢 alpha，暂不实现）
+# 关键：必须在 _normalize_image（convert RGB 会丢弃文本块/alpha）之前、用原始下载字节提取。
+# 注意：QQ 等平台转发多把图重编码为 JPEG/压缩 PNG，会剥掉文本块与 alpha，此时取不到，自动回退视觉反推。
+
+def _extract_nai_metadata(raw: bytes) -> dict | None:
+    """从图片原始字节尝试提取 NovelAI 嵌入元数据（传统 PNG 文本块）。无则返回 None。"""
+    try:
+        im = Image.open(BytesIO(raw))
+        info = im.info or {}
+        software = str(info.get("Software", "")).lower()
+        description = str(info.get("Description", "")).strip()
+        comment = str(info.get("Comment", "")).strip()
+        # 宽松判定：Software 标记为 NovelAI，或 Comment 看起来是 JSON，即视为 NA 图
+        if not (software == "novelai" or (comment.startswith("{") and "}" in comment)):
+            return None
+        meta = {"prompt": description}
+        if comment.startswith("{"):
+            try:
+                cj = json.loads(comment)
+                neg = cj.get("uc") or cj.get("negative_prompt") or ""
+                if neg:
+                    meta["negative"] = neg
+                for k in ("seed", "steps", "scale", "sampler", "noise_schedule", "width", "height", "model"):
+                    if k in cj and cj[k] is not None:
+                        meta[k] = cj[k]
+            except Exception:
+                pass
+        if not meta.get("prompt") and not meta.get("negative"):
+            return None
+        return meta
+    except Exception:
+        return None
+
+
+async def _resolve_metadata_prompt(meta: dict, need_optimize: bool):
+    """对元数据提取到的提示词做可选润色，返回 (prompt, optimized_flag)。无 prompt 返回 (None, False)。"""
+    prompt = (meta.get("prompt") or "").strip()
+    if not prompt:
+        return None, False
+    optimized = False
+    if need_optimize:
+        try:
+            opt = await _optimize_prompt(prompt)
+            if opt:
+                prompt = opt
+                optimized = True
+        except Exception as e:
+            logger.error(f"图反推(元数据)优化失败: {e}")
+    return prompt, optimized
+
+
+def _format_metadata_extras(meta: dict) -> str:
+    """把元数据中的负面/种子等整理成给人看的信息行（不进入提示词本体）。"""
+    lines = []
+    if meta.get("negative"):
+        lines.append(f"负面提示词：{meta['negative']}")
+    for k in ("seed", "steps", "scale", "sampler", "model"):
+        if meta.get(k) is not None:
+            lines.append(f"{k}：{meta[k]}")
+    return "\n".join(lines)
 
 
 async def _is_reverse_request(event: MessageEvent) -> bool:
@@ -142,6 +208,26 @@ async def handle_reverse_prompt(
         if not image_data:
             await matcher.finish("图片下载失败，请重试")
             return
+
+        # 2.5 先尝试读取 NovelAI 嵌入元数据（图片残留信息）；命中则直接采用，跳过视觉反推省一次 API 调用
+        meta = _extract_nai_metadata(image_data)
+        if meta and meta.get("prompt"):
+            prompt, optimized = await _resolve_metadata_prompt(meta, need_optimize)
+            if prompt:
+                msg = Message()
+                if getattr(event, "message_id", None):
+                    msg.append(MessageSegment.reply(event.message_id))
+                head = "以下为从图片元数据提取的提示词（NovelAI 原图残留信息），可直接使用"
+                if optimized:
+                    head += "（已用 DeepSeek 润色）"
+                head += "："
+                body = prompt
+                extras = _format_metadata_extras(meta)
+                if extras:
+                    body += "\n\n" + extras
+                msg.append(MessageSegment.text(f"{head}\n\n{body}"))
+                await matcher.finish(msg)
+                return
 
         # 统一转码为 PNG（DeepSeek 明确支持的格式），并校验字节确为可解码图片
         try:
@@ -489,6 +575,15 @@ async def handle_reverse_ai_draw(
         if not image_data:
             await matcher.finish("图片下载失败，请重试")
             return
+
+        # 3.0 先尝试读取 NovelAI 嵌入元数据；命中则跳过视觉反推，直接拿原图提示词出图
+        meta = _extract_nai_metadata(image_data)
+        if meta and meta.get("prompt"):
+            prompt, _ = await _resolve_metadata_prompt(meta, need_optimize)
+            if prompt:
+                await draw_prompt_to_image(bot, event, matcher, prompt)
+                return
+
         try:
             image_data = _normalize_image(image_data)
         except Exception as e:
