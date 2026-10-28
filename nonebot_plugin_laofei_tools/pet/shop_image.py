@@ -80,10 +80,13 @@ def _get_effect_text(acc_info: dict) -> str:
         effects.append(f"体+{acc_info['stamina']}")
     if acc_info.get("hp", 0) > 0:
         effects.append(f"血+{acc_info['hp']}%")
-    if acc_info.get("special") == "pat_bonus_10":
-        effects.append("摸+10")
-    if acc_info.get("special") == "affection_1.5x":
-        effects.append("好感1.5x")
+    if acc_info.get("bonus_hp", 0) > 0:
+        effects.append(f"血+{acc_info['bonus_hp']}")
+    _special = acc_info.get("special")
+    if _special and _special.startswith("pat_bonus_"):
+        effects.append(f"摸+{_special.split('_')[-1]}")
+    if _special and _special.startswith("affection_"):
+        effects.append(f"好感{_special.split('_')[1]}")
     return " ".join(effects) if effects else "无"
 
 

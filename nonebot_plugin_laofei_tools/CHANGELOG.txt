@@ -1,3 +1,9 @@
+## 2026-10-28
+1.新增 4 个特殊配饰（图1 定义，仅商店购买不可掉落）：车剧星月发冠（体力+50/运气+45/好感获取×1.4，15000）、盈缺的小翅膀（武力+30/体力+40/最大血量+12%/平血量+50，17000）、人机魔法盐铃（武力+50/运气+40/体力+35/抚摸好感额外+45，20000）、大肥鱼的米饭盆（武力+40/运气+40/体力+40/平血量+45/好感获取×1.5，25000）
+   图片对应 image/accessories-crown.png（发冠）、accessories-wing.png（翅膀）、accessories-ling.png（盐铃）、accessories-pen.png（米饭盆），编号 401~404；与既有特殊配饰同列「特殊配饰」区
+   配饰定义新增 bonus_hp 字段（平血量固定值加成），get_pet_max_hp 由「基础血量×(1+hp%)」改为「基础血量×(1+hp%) + bonus_hp」，叠加入 PK 与宠物信息展示
+   抚摸特殊效果改为数据驱动：special 字段支持 pat_bonus_<N>（抚摸好感额外+N）与 affection_<M>x（好感获取×M），do_pat 用正则解析（原草帽 pat_bonus_10、超人披风 affection_1.5x 行为不变）；商店文字版与图片版效果文案同步支持 bonus_hp 及任意 pat_bonus_/affection_ 值
+
 ## 2026-10-27
 1.图反推/反推AI图 新增「先读 NovelAI 嵌入元数据」优先逻辑：下载图片后、转码前先尝试提取 NA 生成图的残留信息（传统 PNG 文本块：Software="NovelAI" / Description=正向提示词 / Comment=JSON 含 uc 负面/seed/steps/scale/sampler）
    命中则直接采用原图提示词、跳过视觉反推（更准且省一次 DeepSeek 视觉调用）；未命中（如 QQ 转发已重编码剥掉元数据）自动回退原有视觉元素采集链路

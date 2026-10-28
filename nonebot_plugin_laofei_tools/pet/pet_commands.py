@@ -844,8 +844,13 @@ async def handle_shop(matcher: Matcher, event: MessageEvent):
                     effects.append(f"体力+{acc_info['stamina']}")
                 if acc_info.get("hp", 0) > 0:
                     effects.append(f"血量+{acc_info['hp']}%")
-                if acc_info.get("special") == "pat_bonus_10":
-                    effects.append("抚摸好感+10")
+                if acc_info.get("bonus_hp", 0) > 0:
+                    effects.append(f"血量+{acc_info['bonus_hp']}")
+                _special = acc_info.get("special")
+                if _special and _special.startswith("pat_bonus_"):
+                    effects.append(f"抚摸好感+{_special.split('_')[-1]}")
+                if _special and _special.startswith("affection_"):
+                    effects.append(f"好感提升{_special.split('_')[1].replace('x', '倍')}")
                 effect_str = "、".join(effects) if effects else "无"
                 msg += f"  {acc_name}（{effect_str}）- {acc_info['price']} 积分\n"
 
@@ -861,8 +866,13 @@ async def handle_shop(matcher: Matcher, event: MessageEvent):
                     effects.append(f"体力+{acc_info['stamina']}")
                 if acc_info.get("hp", 0) > 0:
                     effects.append(f"血量+{acc_info['hp']}%")
-                if acc_info.get("special") == "affection_1.5x":
-                    effects.append("好感提升1.5倍")
+                if acc_info.get("bonus_hp", 0) > 0:
+                    effects.append(f"血量+{acc_info['bonus_hp']}")
+                _special = acc_info.get("special")
+                if _special and _special.startswith("pat_bonus_"):
+                    effects.append(f"抚摸好感+{_special.split('_')[-1]}")
+                if _special and _special.startswith("affection_"):
+                    effects.append(f"好感提升{_special.split('_')[1].replace('x', '倍')}")
                 effect_str = "、".join(effects) if effects else "无"
                 msg += f"  {acc_name}（{effect_str}）- {acc_info['price']} 积分\n"
 

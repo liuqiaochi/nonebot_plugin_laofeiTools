@@ -6,6 +6,7 @@
 
 import json
 import random
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
@@ -113,16 +114,25 @@ FOODS = {
 
 # ========== 配饰定义 ==========
 # hp: 最大血量百分比加成（如 5 表示 +5%）
+# bonus_hp: 最大血量固定值加成（平血量，如 50 表示 +50 点），与 hp 百分比叠加
+# special: 特殊效果标识，由 do_pat 解析：
+#   pat_bonus_<N>   抚摸好感额外 +N
+#   affection_<M>x  好感获取倍率 ×M（如 affection_1.5x 表示 1.5 倍）
 ACCESSORIES = {
-    "小刀": {"force": 10, "luck": 0, "stamina": 0, "hp": 0, "price": 500, "special": None, "droppable": True, "image": "accessories-knife.png", "id": "201"},
-    "短剑": {"force": 5, "luck": 5, "stamina": 0, "hp": 0, "price": 500, "special": None, "droppable": True, "image": "accessories-stiletto.png", "id": "202"},
-    "四叶草": {"force": 0, "luck": 20, "stamina": 0, "hp": 0, "price": 1000, "special": None, "droppable": True, "image": "accessories-four-leafclover.png", "id": "203"},
-    "草帽": {"force": 0, "luck": 0, "stamina": 0, "hp": 0, "price": 1000, "special": "pat_bonus_10", "droppable": True, "image": "accessories-hat.png", "id": "204"},
-    "滑板车": {"force": 0, "luck": 0, "stamina": 30, "hp": 0, "price": 1000, "special": None, "droppable": True, "image": "accessories-scooter.png", "id": "205"},
-    "彩虹戒指": {"force": 0, "luck": 50, "stamina": 0, "hp": 0, "price": 2500, "special": None, "droppable": False, "image": "accessories-ring.png", "id": "301"},
-    "青龙偃月刀": {"force": 30, "luck": 0, "stamina": 0, "hp": 0, "price": 5000, "special": None, "droppable": False, "image": "accessories-dragonBlade.png", "id": "302"},
-    "超人披风": {"force": 20, "luck": 20, "stamina": 20, "hp": 0, "price": 6666, "special": "affection_1.5x", "droppable": False, "image": "accessories-cloak.png", "id": "303"},
-    "宇宙魔方": {"force": 30, "luck": 30, "stamina": 30, "hp": 5, "price": 9999, "special": None, "droppable": False, "image": "accessories-cube.png", "id": "304"},
+    "小刀": {"force": 10, "luck": 0, "stamina": 0, "hp": 0, "bonus_hp": 0, "price": 500, "special": None, "droppable": True, "image": "accessories-knife.png", "id": "201"},
+    "短剑": {"force": 5, "luck": 5, "stamina": 0, "hp": 0, "bonus_hp": 0, "price": 500, "special": None, "droppable": True, "image": "accessories-stiletto.png", "id": "202"},
+    "四叶草": {"force": 0, "luck": 20, "stamina": 0, "hp": 0, "bonus_hp": 0, "price": 1000, "special": None, "droppable": True, "image": "accessories-four-leafclover.png", "id": "203"},
+    "草帽": {"force": 0, "luck": 0, "stamina": 0, "hp": 0, "bonus_hp": 0, "price": 1000, "special": "pat_bonus_10", "droppable": True, "image": "accessories-hat.png", "id": "204"},
+    "滑板车": {"force": 0, "luck": 0, "stamina": 30, "hp": 0, "bonus_hp": 0, "price": 1000, "special": None, "droppable": True, "image": "accessories-scooter.png", "id": "205"},
+    "彩虹戒指": {"force": 0, "luck": 50, "stamina": 0, "hp": 0, "bonus_hp": 0, "price": 2500, "special": None, "droppable": False, "image": "accessories-ring.png", "id": "301"},
+    "青龙偃月刀": {"force": 30, "luck": 0, "stamina": 0, "hp": 0, "bonus_hp": 0, "price": 5000, "special": None, "droppable": False, "image": "accessories-dragonBlade.png", "id": "302"},
+    "超人披风": {"force": 20, "luck": 20, "stamina": 20, "hp": 0, "bonus_hp": 0, "price": 6666, "special": "affection_1.5x", "droppable": False, "image": "accessories-cloak.png", "id": "303"},
+    "宇宙魔方": {"force": 30, "luck": 30, "stamina": 30, "hp": 5, "bonus_hp": 0, "price": 9999, "special": None, "droppable": False, "image": "accessories-cube.png", "id": "304"},
+    # ========== 特殊物品（图1，不可掉落，仅商店购买） ==========
+    "车剧星月发冠": {"force": 0, "luck": 45, "stamina": 50, "hp": 0, "bonus_hp": 0, "price": 15000, "special": "affection_1.4x", "droppable": False, "image": "accessories-crown.png", "id": "401"},
+    "盈缺的小翅膀": {"force": 30, "luck": 0, "stamina": 40, "hp": 12, "bonus_hp": 50, "price": 17000, "special": None, "droppable": False, "image": "accessories-wing.png", "id": "402"},
+    "人机魔法盐铃": {"force": 50, "luck": 40, "stamina": 35, "hp": 0, "bonus_hp": 0, "price": 20000, "special": "pat_bonus_45", "droppable": False, "image": "accessories-ling.png", "id": "403"},
+    "大肥鱼的米饭盆": {"force": 40, "luck": 40, "stamina": 40, "hp": 0, "bonus_hp": 45, "price": 25000, "special": "affection_1.5x", "droppable": False, "image": "accessories-pen.png", "id": "404"},
 }
 
 
@@ -634,14 +644,15 @@ def get_effective_luck(pet: PetData) -> int:
 
 
 def get_pet_max_hp(pet: PetData) -> int:
-    """计算宠物最大血量 = (200 + (等级 - 1) × 100) × (1 + 配饰血量加成百分比)
+    """计算宠物最大血量 = (200 + (等级 - 1) × 100) × (1 + 配饰血量加成百分比) + 配饰平血量加成
 
-    配饰的 hp 字段为百分比加成，如 5 表示 +5%。
+    配饰的 hp 字段为百分比加成，如 5 表示 +5%；bonus_hp 为固定值加成，如 50 表示 +50 点。
     """
     level = get_pet_level(pet.exp)
     base_hp = 200 + (level - 1) * 100
     acc_hp = ACCESSORIES.get(pet.accessory, {}).get("hp", 0) if pet.accessory else 0
-    return int(base_hp * (1 + acc_hp / 100))
+    bonus_hp = ACCESSORIES.get(pet.accessory, {}).get("bonus_hp", 0) if pet.accessory else 0
+    return int(base_hp * (1 + acc_hp / 100)) + bonus_hp
 
 
 def get_display_name(pet: PetData) -> str:
@@ -922,10 +933,15 @@ def do_pat(user_id: str) -> dict:
     base_gain = random.randint(5, 20)
     if pet.pet_type == "doro":
         base_gain = int(base_gain * 1.2)
-    if pet.accessory == "草帽":
-        base_gain += 10
-    if pet.accessory == "超人披风":
-        base_gain = int(base_gain * 1.5)
+    # 配饰特殊效果：pat_bonus_<N> 抚摸好感额外 +N；affection_<M>x 好感获取倍率 ×M
+    acc_special = ACCESSORIES.get(pet.accessory, {}).get("special") if pet.accessory else None
+    if acc_special:
+        m_pat = re.match(r"^pat_bonus_(\d+)$", acc_special)
+        if m_pat:
+            base_gain += int(m_pat.group(1))
+        m_aff = re.match(r"^affection_(\d+(?:\.\d+)?)x$", acc_special)
+        if m_aff:
+            base_gain = int(base_gain * float(m_aff.group(1)))
 
     # 5. 增加好感度
     pet.affection += base_gain
