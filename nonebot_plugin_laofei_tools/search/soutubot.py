@@ -9,6 +9,8 @@ soutubot.moe API 封装（适配 2026-09 站点改版）
   新版 OpenAPI 中无任何 securitySchemes，实测不带 key 直接 200。
 - POST /api/search **同步**返回完整结果，无需再用 result_id 二次查询。
 - GET  /api/results/{id} 可按 result_id 回查，返回结构与 /api/search 完全一致。
+- 响应顶层 status 可能为 "ok"（完整）或 "partial"（部分子搜索引擎仍在进行，但 results 已含可用结果），
+  两者均视为成功；仅当 status 为明确错误值且 results 为空时才判失败（见 search() 内处理）。
 - multipart 字段：file(必填) / factor(默认1.2) / metadata_mode(默认display) / top_k(可选)。
 
 新版响应 -> 统一结构的字段映射（见 _normalize_result）：
@@ -383,8 +385,14 @@ class SoutubotClient:
         resp.raise_for_status()
 
         raw = resp.json()
-        if not isinstance(raw, dict) or raw.get("status") != "ok":
-            raise RuntimeError(f"搜图服务返回异常状态：{str(raw)[:200]}")
+        # 新版 API 在部分子搜索引擎仍在进行时，会返回 status="partial" 但 results 已含可用结果，
+        # 不应据此判失败（旧版是 status="ok"）。仅在明确错误且无结果时抛异常。
+        if not isinstance(raw, dict):
+            raise RuntimeError(f"搜图服务返回格式异常：{str(raw)[:200]}")
+        status = raw.get("status")
+        if status not in (None, "ok", "partial"):
+            if not (raw.get("results") or []):
+                raise RuntimeError(f"搜图服务返回异常状态：{str(raw)[:200]}")
 
         return _normalize_result(raw)
 
