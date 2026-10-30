@@ -25,6 +25,15 @@ from nonebot.matcher import Matcher
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
 
+# matcher.finish() 是靠抛出 FinishedException 来终止 matcher 的。
+# 若 finish 写在 try 块内，宽泛的 except Exception 会把它当成业务异常，
+# 表现为「搜索失败：FinishedException()」这种假报错 —— 必须显式识别并原样透传。
+# nonebot >= 2.2 在 nonebot.exception，更早版本在 nonebot.exceptions。
+try:
+    from nonebot.exception import FinishedException
+except ImportError:  # pragma: no cover
+    from nonebot.exceptions import FinishedException
+
 from ..config import enable_group, is_group_enabled
 from ..common.utils import download_image
 from .soutubot import KIND_DOUJINSHI, get_client
@@ -89,6 +98,8 @@ async def _run_search(matcher: Matcher, bot: Bot, event: MessageEvent, image_url
 
         await send_forward_message(bot, event, result)
 
+    except FinishedException:
+        raise  # finish 的正常终止信号，不能当成错误上报
     except Exception as e:
         logger.exception("搜图失败")
         await matcher.finish(f"搜索失败：{str(e)}")
@@ -161,23 +172,34 @@ async def handle_find_chicken(
         await matcher.finish("请发送一张图片，或引用一张图片后发送「lg找鸡」")
         return
 
-    await matcher.send("正在多引擎反搜，请稍候……")
+    await matcher.send("收到，开始找鸡")
 
+    # 注：matcher.finish 一律放在 try 之外。它通过抛异常终止流程，
+    # 写在 try 内会被下面宽泛的 except 捕获，误报成「搜索失败：FinishedException()」。
     try:
         image_data = await download_image(bot, image_url)
-        if not image_data:
-            await matcher.finish("图片下载失败，请重试")
-            return
+    except Exception as e:
+        logger.exception("[找鸡] 图片下载失败")
+        await matcher.finish(f"图片下载失败：{str(e)}")
+        return
 
-        logger.info(f"[找鸡] 图片下载成功，大小: {len(image_data)} bytes")
+    if not image_data:
+        await matcher.finish("图片下载失败，请重试")
+        return
 
+    logger.info(f"[找鸡] 图片下载成功，大小: {len(image_data)} bytes")
+
+    try:
         text = await reverse_search_all(image_data)
-        # 精简单条结果（只含第一名作者），直接发送，不走合并转发
-        await matcher.finish(text)
-
+    except FinishedException:
+        raise
     except Exception as e:
         logger.exception("找鸡（多引擎反搜）失败")
         await matcher.finish(f"搜索失败：{str(e)}")
+        return
+
+    # 精简单条结果（平台优先的作者），直接发送，不走合并转发
+    await matcher.finish(text)
 
 
 # ========== 开启功能指令（超级用户） ==========

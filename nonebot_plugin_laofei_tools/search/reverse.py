@@ -764,41 +764,57 @@ def fuse(candidates: list, phash_scores: Optional[dict] = None) -> list:
     return [a for a in ranked if a.confidence >= 0.10]
 
 
+# 优先平台：找「鸡」要的是能去关注的社交账号（twitter / ins / 微博 / 小红书）。
+# Pixiv、Danbooru 等图库站不认账（用户明确要求 pixiv 不考虑），
+# 「未知/身份(站内人名)」连平台归属都没有，同样排除。
+_PREFERRED_PLATFORMS = {"X/Twitter", "Instagram", "微博", "小红书"}
+
+
+def _no_result(verdicts: list, yandex_url: str) -> str:
+    """未命中时的文案：区分「压根没候选」与「候选都不是社交账号」。"""
+    if verdicts:
+        detail = "命中了图库/画站或身份不明来源，已忽略（只认社交账号）"
+    else:
+        detail = "换张更清晰的图试试"
+    msg = f"没找到鸡 😢 {detail}"
+    if yandex_url:
+        msg += f"\n人工排查：{yandex_url}"
+    return msg
+
+
 def format_top1(verdicts: list, yandex_url: str = "") -> str:
-    """按用户要求的最简样式，只返回置信度第一名的作者（单条短文本）。
+    """只返回置信度最高的「社交平台」作者，单条短文本。
 
     样式（QQ 文本消息，emoji 走客户端渲染，无 PIL 字体问题）：
-        🎯 **鱼鱼找鸡结果**
+        🎯 **lg找鸡结果**
 
         🌐 平台：Twitter
         👤 名字：aqua_cosplay
         🆔 账号：@aqua_cosplay
         https://x.com/aqua_cosplay
 
-    第一名置信度不足 _STRONG_CONFIDENCE 时视为「没找到」——
-    弱证据多为转发者，直接报账号会误导（与 format_verdicts 同一教训）。
+    两条筛选原则：
+    1) 平台优先 —— 不再是 verdicts[0]，而是在社交平台候选中取置信度最高者；
+       这样 Pixiv 即使分数最高也不会被报出来。
+    2) 置信度低于 _STRONG_CONFIDENCE 视为没找到 ——
+       弱证据多为转发者，直接报账号会误导（与 format_verdicts 同一教训）。
     """
-    if not verdicts:
-        msg = "没找到鸡 😢 换张更清晰的图试试"
-        if yandex_url:
-            msg += f"\n人工排查：{yandex_url}"
-        return msg
+    # verdicts 已按 confidence 降序，过滤保序 => social[0] 即社交平台里最可信的
+    social = [v for v in verdicts if v.platform in _PREFERRED_PLATFORMS]
+    if not social:
+        return _no_result(verdicts, yandex_url)
 
-    v = verdicts[0]
+    v = social[0]
     if v.confidence < _STRONG_CONFIDENCE:
         msg = "没找到鸡 😢 最像的账号可信度不足，不敢乱报"
         if yandex_url:
             msg += f"\n人工排查：{yandex_url}"
         return msg
 
-    platform = v.platform or "未知"
-    if platform == "X/Twitter":
-        platform = "Twitter"
-    elif platform == "未知":
-        platform = "身份(站内人名)"
+    platform = "Twitter" if v.platform == "X/Twitter" else v.platform
 
     lines = [
-        "🎯 **鱼鱼找鸡结果**",
+        "🎯 **lg找鸡结果**",
         "",
         f"🌐 平台：{platform}",
         f"👤 名字：{v.handle}",
