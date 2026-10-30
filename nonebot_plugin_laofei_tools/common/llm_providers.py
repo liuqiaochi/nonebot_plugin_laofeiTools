@@ -89,8 +89,8 @@ def _provider_spec(provider: str) -> dict:
         return {
             "api_key": (getattr(cfg, "grok_api_key", "") or "") if cfg else "",
             "base_url": "https://api.x.ai/v1",
-            "chat_model": (getattr(cfg, "grok_model", "grok-4") or "grok-4") if cfg else "grok-4",
-            "vision_model": (getattr(cfg, "grok_vision_model", "grok-4") or "grok-4") if cfg else "grok-4",
+            "chat_model": (getattr(cfg, "grok_model", "grok-4.7") or "grok-4.7") if cfg else "grok-4.7",
+            "vision_model": (getattr(cfg, "grok_vision_model", "grok-4.7") or "grok-4.7") if cfg else "grok-4.7",
             "thinking_disable": False,
             "label": "Grok (xAI)",
             "key_env": "GROK_API_KEY",

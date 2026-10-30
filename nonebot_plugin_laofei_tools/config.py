@@ -8,9 +8,48 @@ from pathlib import Path
 from typing import Set
 
 from nonebot import get_driver
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
+
+import re
 
 from .common.data_utils import safe_json_save
+
+
+def _coerce_serpapi_keys(v):
+    """把 serpapi_keys 配置规整为「去空、去重」的字符串列表。
+
+    支持多种形式：Python 列表 / JSON 数组字符串 / 逗号或空白分隔字符串 /
+    单个字符串。任何解析异常都回退为空列表，绝不让 bot 启动崩溃。
+    """
+    if v is None:
+        return []
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return []
+        try:
+            parsed = json.loads(s)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, list):
+            items = [str(x).strip() for x in parsed]
+        else:
+            items = re.split(r"[,\s]+", s)
+        out = []
+        for x in items:
+            x = (x or "").strip()
+            if x and x not in out:
+                out.append(x)
+        return out
+    if isinstance(v, (list, tuple, set)):
+        out = []
+        for x in v:
+            x = (x or "").strip()
+            if x and x not in out:
+                out.append(x)
+        return out
+    s = str(v).strip()
+    return [s] if s else []
 
 
 class Config(BaseModel):
@@ -28,21 +67,28 @@ class Config(BaseModel):
 
     # Grok (xAI) AI 配置（可选；启用后可在群内切换对话/图反推到 Grok）
     grok_api_key: str = ""
-    grok_model: str = "grok-4"
-    grok_vision_model: str = "grok-4"
+    grok_model: str = "grok-4.7"
+    grok_vision_model: str = "grok-4.7"
 
     # NovelAI 画图配置
     novelai_api_key: str = ""
     novelai_model: str = "nai-diffusion-4-5-curated"
 
-    # ---- 反向图片搜索（lg找鸡）多引擎配置，均为可选 ----
-    # Yandex 无需任何 key 即可用；其余引擎缺 key/缺 cookie 会自动跳过，不影响其他引擎。
-    longge_reverse_timeout: int = 20        # 单引擎请求超时（秒）
-    longge_reverse_proxy: str = ""          # 访问外网引擎的代理，留空则直连
-    longge_reverse_max_results: int = 5     # 返回的作者候选 / 出处条目数量上限
-    saucenao_api_key: str = ""              # SauceNAO（免费，100 次/天）：直接返回作者与 X 原帖 URL
-    gcv_api_key: str = ""                   # Google Cloud Vision（付费）：webDetection 匹配页
-    ascii2d_cf_clearance: str = ""          # ascii2d 的 cf_clearance cookie（会过期）
+    # ---- 反向图片搜索（lg找鸡）配置，均为可选 ----
+    # 2026-10-30 起只走 Google Lens（经 SerpApi），已移除 Yandex/SauceNAO/ascii2d/GCV。
+    longge_reverse_timeout: int = 25        # 单次请求超时（秒）
+    longge_reverse_max_results: int = 5     # 返回的作者候选数量上限
+    # SerpApi key 数组（https://serpapi.com，免费 100 次/月/key）。
+    # 每 key 每月自动计数，满 100 自动切下一个；当月全部用完则暂停本功能，次月 1 号重置。
+    # 配置方式（.env）：SERPAPI_KEYS=["k1","k2"] 或 逗号分隔 SERPAPI_KEYS=k1,k2
+    # 兼容旧单 key：若 serpapi_keys 为空但 serpapi_key 有值，则视为单元素数组。
+    serpapi_keys: list = []
+    serpapi_key: str = ""                   # 旧单 key 兼容（可留空）
+    lens_proxy: str = ""                    # 访问 Google Lens / 图床的代理；大陆机器直连 Google 多半不通，需填如 http://127.0.0.1:7890
+
+    @validator("serpapi_keys", pre=True)
+    def _norm_serpapi_keys(cls, v):
+        return _coerce_serpapi_keys(v)
 
 
 # 数据文件路径（锚定项目根目录，不依赖运行时 CWD，避免覆盖文件后数据丢失）
