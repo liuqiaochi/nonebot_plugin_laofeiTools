@@ -434,7 +434,7 @@ _FREESPEAK_MAX_CTX = 200
 _FREESPEAK_IMAGE_PROB = 0.15          # 自由发言模式下「偶尔配图」的概率
 
 # ---- 智能相关性触发参数 ----
-_FREESPEAK_REPLY_COOLDOWN = 30        # 同群两次接话最小间隔（秒），防刷屏
+_FREESPEAK_REPLY_COOLDOWN = 10        # 同群两次接话最小间隔（秒），防刷屏
 _FREESPEAK_SILENCE_SEC = 120          # 距上次人类发言超过此值视为「冷场」，倾向接话收尾
 _FREESPEAK_PROB_HIGH = 0.85           # 强信号（被cue/提问/@他人 叠加）时接话概率
 _FREESPEAK_PROB_MID = 0.40            # 单个信号时接话概率
@@ -447,16 +447,6 @@ _FREESPEAK_QUESTION_RE = re.compile(
 _freespeak_buffer: dict = defaultdict(lambda: deque(maxlen=_FREESPEAK_MAX_CTX))
 _freespeak_last_reply_ts: dict = {}   # 群 -> bot 上次接话时间戳（冷却用）
 _freespeak_last_human_ts: dict = {}   # 群 -> 上次人类发言时间戳（冷场判断用）
-
-
-def _freespeak_at_other(event, bot) -> bool:
-    """消息中是否 @ 了「非 bot 本人」的群友（像在群里公开问/聊）"""
-    for seg in getattr(event, "message", []):
-        if seg.type == "at":
-            qq = seg.data.get("qq")
-            if qq is not None and str(qq) != str(getattr(bot, "self_id", "")):
-                return True
-    return False
 
 
 def _freespeak_should_reply(text: str, event, group_id: str, bot) -> tuple:
@@ -476,13 +466,10 @@ def _freespeak_should_reply(text: str, event, group_id: str, bot) -> tuple:
     # 2) 提到 bot 名字
     if any(name in text for name in _FREESPEAK_BOT_NAMES):
         score += 2
-    # 3) @ 了其他群友（疑似在群里公开问/聊）
-    if _freespeak_at_other(event, bot):
-        score += 2
-    # 4) 疑问句式
+    # 3) 疑问句式
     if text.rstrip().endswith(("?", "？")) or _FREESPEAK_QUESTION_RE.search(text):
         score += 1
-    # 5) 冷场：距上次人类发言较久
+    # 4) 冷场：距上次人类发言较久
     last_human = _freespeak_last_human_ts.get(group_id, 0.0)
     if last_human and now - last_human > _FREESPEAK_SILENCE_SEC:
         score += 1
