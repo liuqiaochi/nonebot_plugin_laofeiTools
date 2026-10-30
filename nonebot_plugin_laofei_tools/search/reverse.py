@@ -498,7 +498,7 @@ async def phash_verify_all(
         if c.author_handle:
             handles.add(c.author_handle.lower())
         for m in _DESC_CREDIT_RE.finditer(c.description or ""):
-            h = _clean(m.group(1) or m.group(2))
+            h = _clean(next((g for g in m.groups() if g), ""))
             if h:
                 handles.add(h.lower())
         m = _TITLE_HANDLE_RE.search(c.title) or _X_URL_RE.search(c.page_url)
@@ -562,7 +562,8 @@ _X_URL_RE = re.compile(
 # 强署名：明确 credit 模式（"sc: handle" / "handle's tweet photo/video"）
 _DESC_CREDIT_RE = re.compile(
     r"(?:sc|credit|cr|source|via|cn|photo|drawn\s+by|tw)\s*[:：]\s*@?([A-Za-z0-9_]{2,20})"
-    r"|([A-Za-z0-9_]{2,20})'(?:s|’s)\s+(?:tweet\s+)?(?:photo|video|status|post)"
+    r"|@([A-Za-z0-9_]{2,20})'(?:s|’s)\s+(?:tweet|post)"
+    r"|@([A-Za-z0-9_]{2,20})"
 )
 # 弱证据：裸 @mention（可能是转发者自引用）
 _DESC_MENTION_RE = re.compile(r"@([A-Za-z0-9_]{2,20})")
@@ -666,7 +667,7 @@ def fuse(candidates: list, phash_scores: Optional[dict] = None) -> list:
 
             # 1) description 强署名（credit 模式，原作者）
             for m in _DESC_CREDIT_RE.finditer(c.description or ""):
-                h = _clean(m.group(1) or m.group(2))
+                h = _clean(next((g for g in m.groups() if g), ""))
                 if h:
                     a = _author(h, platform)
                     a.confidence = min(1.0, a.confidence + 0.35)
@@ -835,7 +836,9 @@ def _platform_of(c: PostCandidate) -> str:
         ("urlebird.com", "X/Twitter"),
         ("weibo.com", "微博"),
         ("weibo.cn", "微博"),
+        ("sinaimg.cn", "微博"),
         ("xiaohongshu.com", "小红书"),
+        ("xhscdn.com", "小红书"),
         ("instagram.com", "Instagram"),
         ("pixiv.net", "Pixiv"),
         ("danbooru.donmai.us", "Danbooru"),
