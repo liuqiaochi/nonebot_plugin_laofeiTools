@@ -562,8 +562,7 @@ _X_URL_RE = re.compile(
 # 强署名：明确 credit 模式（"sc: handle" / "handle's tweet photo/video"）
 _DESC_CREDIT_RE = re.compile(
     r"(?:sc|credit|cr|source|via|cn|photo|drawn\s+by|tw)\s*[:：]\s*@?([A-Za-z0-9_]{2,20})"
-    r"|@([A-Za-z0-9_]{2,20})'(?:s|’s)\s+(?:tweet|post)"
-    r"|@([A-Za-z0-9_]{2,20})"
+    r"|([A-Za-z0-9_]{2,20})'(?:s|’s)\s+(?:tweet\s+)?(?:photo|video|status|post)"
 )
 # 弱证据：裸 @mention（可能是转发者自引用）
 _DESC_MENTION_RE = re.compile(r"@([A-Za-z0-9_]{2,20})")
