@@ -254,6 +254,58 @@ def disable_reverse_polish(group_id: str) -> None:
     _save_reverse_polish_groups(_reverse_polish_groups)
 
 
+# ========== AI 自由发言群聊开关（默认关闭，依赖 AI 对话已开启） ==========
+# 与 AI 功能群开关同构，独立 JSON 文件，按群记录是否开启自由发言模式。
+# 自由发言模式下：无需 @，bot 基于最近 200 条群聊上下文自动接话。
+# 仅在「该群已开启 AI 对话」时有效；若 AI 对话被关闭，自由发言随之失效。
+
+AI_FREESPEAK_FILE = DATA_DIR / "ai_freespeak_groups.json"
+
+_ai_freespeak_groups: Set[str] = set()
+
+
+def _load_ai_freespeak_groups() -> Set[str]:
+    _ensure_data_dir()
+    if AI_FREESPEAK_FILE.exists():
+        try:
+            with open(AI_FREESPEAK_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return set(data.get("enabled_groups", []))
+        except Exception:
+            return set()
+    return set()
+
+
+def _save_ai_freespeak_groups(groups: Set[str]):
+    safe_json_save(AI_FREESPEAK_FILE, {"enabled_groups": list(groups)})
+
+
+_ai_freespeak_groups = _load_ai_freespeak_groups()
+
+
+def ai_freespeak_is_on(group_id: str) -> bool:
+    """本群是否记录为已开启自由发言（不检查 AI 对话依赖，用于开关指令判断）"""
+    return str(group_id) in _ai_freespeak_groups
+
+
+def is_ai_freespeak_enabled(group_id: str) -> bool:
+    """本群是否真正可用自由发言：已开启 且 该群已开启 AI 对话（级联依赖）"""
+    gid = str(group_id)
+    if gid not in _ai_freespeak_groups:
+        return False
+    return is_ai_group_enabled(gid)
+
+
+def enable_ai_freespeak(group_id: str) -> None:
+    _ai_freespeak_groups.add(str(group_id))
+    _save_ai_freespeak_groups(_ai_freespeak_groups)
+
+
+def disable_ai_freespeak(group_id: str) -> None:
+    _ai_freespeak_groups.discard(str(group_id))
+    _save_ai_freespeak_groups(_ai_freespeak_groups)
+
+
 # ========== NovelAI 画图模型（群级，默认回退到 config.novelai_model） ==========
 
 NOVELAI_MODEL_FILE = DATA_DIR / "novelai_model_groups.json"
@@ -452,6 +504,9 @@ def enable_ai_group(group_id: str) -> None:
 
 def disable_ai_group(group_id: str) -> None:
     set_module_enabled(group_id, "ai_chat", False)
+    # 关闭 AI 对话时，连带关闭自由发言（其依赖 AI 对话），避免留下失效的开启态
+    if ai_freespeak_is_on(group_id):
+        disable_ai_freespeak(group_id)
 
 def is_novelai_group_enabled(group_id: str) -> bool:
     return is_module_enabled(group_id, "ai_draw")

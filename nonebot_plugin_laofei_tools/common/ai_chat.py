@@ -6,12 +6,13 @@ AI 对话模块 — 基于 DeepSeek API
 黑名单：超级管理员可管理用户黑名单
 """
 
+import asyncio
 import base64
 import random
 import re
 import shutil
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from io import BytesIO
 from pathlib import Path
 from typing import Optional
@@ -42,6 +43,10 @@ from ..config import (
     is_ai_blacklisted,
     add_ai_blacklist,
     remove_ai_blacklist,
+    is_ai_freespeak_enabled,
+    ai_freespeak_is_on,
+    enable_ai_freespeak,
+    disable_ai_freespeak,
     DATA_DIR,
 )
 
@@ -421,6 +426,205 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
             await matcher.send(reply, reply_message=True)
 
 
+# ========== AI 自由发言（群级子开关，依赖 AI 对话已开启） ==========
+# 开启后：群内无需 @bot，bot 基于最近 _FREESPEAK_MAX_CTX 条群聊上下文自动接话。
+# 触发规则：排除 bot 自己的消息、排除 @bot（交给专用逻辑）、排除指令类消息、排除黑名单。
+
+_FREESPEAK_MAX_CTX = 200
+_FREESPEAK_IMAGE_PROB = 0.15          # 自由发言模式下「偶尔配图」的概率
+
+_freespeak_buffer: dict = defaultdict(lambda: deque(maxlen=_FREESPEAK_MAX_CTX))
+
+
+def _freespeak_sender_name(event) -> str:
+    """取消息发送者展示名（群名片优先，回退昵称/QQ）"""
+    sender = getattr(event, "sender", None)
+    if sender is not None:
+        return getattr(sender, "card", None) or getattr(sender, "nickname", None) or str(event.user_id)
+    return str(event.user_id)
+
+
+def _plain_text(event) -> str:
+    """兼容旧版 NoneBot（缺 get_plaintext）的纯文本提取"""
+    try:
+        return event.get_plaintext().strip()
+    except AttributeError:
+        return "".join(
+            seg.data.get("text", "") for seg in event.message if seg.type == "text"
+        ).strip()
+
+
+# ========== 自由发言指令排除词 ==========
+# 避免 AI 对机器人命令刷回复。来源：
+# 1) 各功能模块「使用类」命令首词（来自统一开关层 MODULE_USE_COMMANDS）
+# 2) 其他已知指令首词（AI 对话家族 / 搜图 / 反推 / 表情 / 语录 / 其他插件等）
+_FREESPEAK_SKIP_PREFIXES: set = set()
+try:
+    from ..common.module_switch import MODULE_USE_COMMANDS as _MUC
+    _FREESPEAK_SKIP_PREFIXES |= set(_MUC.keys())
+except Exception:
+    pass
+_FREESPEAK_SKIP_PREFIXES |= {
+    # AI 对话家族
+    "lg清记忆", "lg清空记忆", "lg清除记忆", "lgforget", "forget",
+    "ai图", "ai图添加", "ai图列表", "ai图删除", "ai图重置",
+    "加配图", "添加配图", "配图列表", "删配图", "删除配图", "重置配图",
+    "AI帮助", "ai帮助", "AI指令", "ai指令", "lg", "ai余额",
+    "图反推", "反推", "反推提示词", "图片反推", "提示词反推",
+    "反推AI图", "反推ai图", "反推生图",
+    "AI拉黑", "ai拉黑", "lgai拉黑", "AI解除", "ai解除", "lgai解除", "AI取消拉黑", "ai取消拉黑",
+    "开启AI", "开启ai", "开启lgai", "启用AI", "启用ai",
+    "关闭AI", "关闭ai", "关闭lgai", "禁用AI", "禁用ai",
+    # 搜图 / 生活 / 帮助
+    "lg天气", "lg换算", "lg公告", "lg帮助", "lg休息", "lg深度搜图", "lg搜图",
+    "搜图帮助", "龙哥帮助", "龙哥TV",
+    # 表情 / 语录 / 谁@我
+    "表情", "语录", "谁@我", "谁艾特我", "谁找我",
+    # 其他插件（首词）
+    "jm", "es", "bd2", "everpic", "画图", "ss", "774",
+    "抽老婆", "换老婆", "查看老婆", "老婆图库", "抽群友", "换群友",
+    "YT", "BILI", "FB", "X解析", "论坛", "名词", "解释",
+    "功能开关", "模块开关", "功能列表",
+    "重启", "休息", "更新", "刷新", "重载",
+    # 统一模块开关动词 + 自由发言开关自身（普通聊天极少以此开头）
+    "开启", "打开", "启用", "关闭", "关掉", "禁用",
+    "自由发言开", "自由发言关", "ai自由发言开", "ai自由发言关",
+    "打开自由发言", "开启自由发言", "关闭自由发言", "关掉自由发言",
+}
+
+
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+
+
+def _is_command_message(text: str) -> bool:
+    """判断消息是否像机器人指令（自由发言模式下用于跳过）。
+
+    规则：
+    1) 空格分词后的首词在跳过集合内 -> 指令；
+    2) 否则检测「无空格连写」的命令（如「钓鱼。」/「开启AI」）：若消息以某跳过词开头，
+       且其后为空 / 空白 / 标点（非 CJK），视为指令；紧跟 CJK 视为自然词续写（如「宠物店」）不算。
+    """
+    if not text:
+        return False
+    first = text.split()[0] if text.split() else text
+    if first in _FREESPEAK_SKIP_PREFIXES:
+        return True
+    for key in _FREESPEAK_SKIP_PREFIXES:
+        if text.startswith(key):
+            nxt = text[len(key):len(key) + 1]
+            if nxt == "" or nxt.isspace() or not _CJK_RE.match(nxt):
+                return True
+    return False
+
+
+def _build_freespeak_messages(prev: list, current_text: str) -> list:
+    """用最近群聊记录 + 当前消息构建请求（当前消息作为真正要回复的内容）"""
+    transcript = "\n".join(f"{m['name']}：{m['text']}" for m in prev[-_FREESPEAK_MAX_CTX:])
+    system = (
+        _SYSTEM_PROMPT
+        + "\n\n【当前模式】你正处于本群的自由发言模式：不需要被@，你看到群友在聊就自然接话，"
+          "像群里一个真实成员。下面「最近群聊记录」只是上下文，你只需针对最新的那条消息自然回应，"
+          "不要逐条回复历史记录，也不要说「作为AI」之类的话。"
+    )
+    messages = [{"role": "system", "content": system}]
+    if transcript:
+        messages.append({
+            "role": "user",
+            "content": f"【最近群聊记录（仅作上下文，勿逐条回复）】\n{transcript}",
+        })
+    messages.append({"role": "user", "content": current_text})
+    return messages
+
+
+async def _send_freespeak_reply(matcher: Matcher, reply: str) -> None:
+    """普通发送（不引用）；过长则拆成多条"""
+    if len(reply) <= 1000:
+        await matcher.send(reply)
+        return
+    for chunk in _split_long_message(reply, 1000):
+        await matcher.send(chunk)
+
+
+async def _freespeak_rule(event: MessageEvent) -> bool:
+    if not isinstance(event, GroupMessageEvent):
+        return False
+    return is_ai_freespeak_enabled(str(event.group_id))
+
+
+ai_freespeak_matcher = on_message(rule=Rule(_freespeak_rule), priority=20, block=False)
+
+
+@ai_freespeak_matcher.handle()
+async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent):
+    """自由发言模式：基于最近群聊自动接话（无需 @）"""
+    group_id = str(event.group_id)
+    user_id = str(event.user_id)
+
+    # 跳过 bot 自己的消息（理论不会作为入站事件，保险起见）
+    try:
+        if user_id == str(bot.self_id):
+            return
+    except Exception:
+        pass
+
+    text = _plain_text(event)
+
+    # 先取「当前消息之前」的上下文；再把当前消息写入缓冲（保证后续上下文连续）
+    prev = list(_freespeak_buffer[group_id])
+    if text:
+        _freespeak_buffer[group_id].append({"name": _freespeak_sender_name(event), "text": text})
+
+    # ---- 决策：本次是否需要 AI 接话 ----
+    if is_ai_blacklisted(user_id):
+        return
+    # @bot 消息交给专用 @bot 逻辑处理，避免重复回复
+    is_tome = getattr(event, "is_tome", None)
+    if callable(is_tome) and is_tome():
+        return
+    if not text:
+        return
+    if _is_command_message(text):
+        return
+
+    messages = _build_freespeak_messages(prev, text)
+
+    try:
+        client = _get_client()
+    except ValueError as e:
+        logger.error(f"[自由发言] API Key 未配置: {e}")
+        return
+
+    model = _get_model()
+    try:
+        logger.info(f"[自由发言] group={group_id} user={user_id} prompt={text[:50]}...")
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=model, messages=messages, temperature=0.8, max_tokens=1500,
+        )
+        reply = response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"[自由发言] AI 调用失败: {e}")
+        return
+
+    if not reply:
+        return
+
+    # 记入缓冲（供后续上下文），bot 落款用「蓝色大肥鱼」
+    _freespeak_buffer[group_id].append({"name": "蓝色大肥鱼", "text": reply})
+
+    # 普通发送（不引用）
+    await _send_freespeak_reply(matcher, reply)
+
+    # 偶尔配图，与文字分开发
+    if random.random() < _FREESPEAK_IMAGE_PROB:
+        img_seg = _random_ai_image()
+        if img_seg is not None:
+            try:
+                await matcher.send(img_seg)
+            except Exception as e:
+                logger.warning(f"[自由发言] 配图发送失败: {e}")
+
+
 # ========== lg清记忆 指令 ==========
 
 clear_cmd = on_command(
@@ -489,6 +693,60 @@ async def handle_disable_ai(matcher: Matcher, event: MessageEvent):
         await matcher.finish("AI 功能已经关闭。")
     disable_ai_group(group_id)
     await matcher.finish("❌ 已关闭本群 AI 功能。")
+
+
+# ========== AI 自由发言开关（超级用户，依赖 AI 对话已开启）==========
+
+freespeak_on_cmd = on_command(
+    "打开 ai自由发言",
+    aliases={
+        "开启 ai自由发言", "打开ai自由发言", "开启ai自由发言",
+        "自由发言开", "自由发言 开", "打开自由发言", "开启自由发言",
+        "ai自由发言 开", "ai自由发言开",
+    },
+    permission=SUPERUSER,
+    priority=2,
+    block=True,
+)
+
+
+@freespeak_on_cmd.handle()
+async def handle_freespeak_on(matcher: Matcher, event: MessageEvent):
+    """超级用户开启本群 AI 自由发言模式（需先开启 AI 对话）"""
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish("请在群聊中发送此指令。")
+    group_id = str(event.group_id)
+    if not is_ai_group_enabled(group_id):
+        await matcher.finish("本群尚未开启 AI 对话，请先发送「开启AI」开启 AI 功能后再打开自由发言。")
+    if ai_freespeak_is_on(group_id):
+        await matcher.finish("AI 自由发言已经开启。")
+    enable_ai_freespeak(group_id)
+    await matcher.finish("✅ 已开启本群 AI 自由发言：无需 @，我会基于最近群聊自动接话。")
+
+
+freespeak_off_cmd = on_command(
+    "关闭 ai自由发言",
+    aliases={
+        "关掉 ai自由发言", "关闭ai自由发言", "关掉ai自由发言",
+        "自由发言关", "自由发言 关", "关闭自由发言", "关掉自由发言",
+        "ai自由发言 关", "ai自由发言关",
+    },
+    permission=SUPERUSER,
+    priority=2,
+    block=True,
+)
+
+
+@freespeak_off_cmd.handle()
+async def handle_freespeak_off(matcher: Matcher, event: MessageEvent):
+    """超级用户关闭本群 AI 自由发言模式"""
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish("请在群聊中发送此指令。")
+    group_id = str(event.group_id)
+    if not ai_freespeak_is_on(group_id):
+        await matcher.finish("AI 自由发言已经关闭。")
+    disable_ai_freespeak(group_id)
+    await matcher.finish("❌ 已关闭本群 AI 自由发言。")
 
 
 # ========== AI拉黑（超级用户）==========
@@ -816,6 +1074,7 @@ def _generate_ai_help_image() -> str:
         ("对话", [
             ("@机器人 + 问题", "群聊需先开启，私聊直接用"),
             ("lg清记忆 / lg清空记忆", "清除当前对话历史"),
+            ("打开/关闭 ai自由发言", "超管：开启后无需@，bot 基于最近群聊自动接话（需先开启AI）"),
         ]),
         ("管理（超管）", [
             ("开启AI / 关闭AI", "开启 / 关闭本群 AI 功能"),
@@ -898,6 +1157,7 @@ async def handle_ai_help(matcher: Matcher) -> None:
             "🤖 蓝色大肥鱼 · AI 指令\n"
             "· @机器人 + 问题（群聊需开启，私聊直用）\n"
             "· lg清记忆（清除对话历史）\n"
+            "· 自由发言（超管）：打开/关闭 ai自由发言 — 开启后无需@，bot 基于最近群聊自动接话（需先开启AI）\n"
             "· 管理（超管）：开启AI / 关闭AI / AI拉黑 / AI解除\n"
             "· 配图：ai图添加 / ai图列表 / ai图删除 <序号> / ai图重置\n"
             "· 图反推：发送图片 / 引用含图消息 / @一位群友后发送「图反推」，反推 NovelAI 提示词（需本群开启 AI 功能）\n"
