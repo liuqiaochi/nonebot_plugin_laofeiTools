@@ -1,60 +1,86 @@
 """
-反向图片搜索：多引擎查找图片出处与作者（含 X 原帖）。
+反向图片搜索：Google Lens 反查图片出处与作者（含 X 原帖）。
 
 移植自 astrbot_plugin_bitchfinder，按本插件 NoneBot2 环境改造：
 - 原实现拆成 engines.py / fuse.py / sauce.py 三个文件，此处合并为单模块
-  （sauce.py 的 Yandex 客户端已被 engines.py 取代，仅哈希函数仍有价值）
 - 网络层由 aiohttp 改为 httpx（与插件其余模块 soutubot.py 一致，不新增依赖）
 - 置信度模型、正则提取、融合排序全部保持原实现，一处未改
+
+2026-10-30 改造：删除 Yandex / SauceNAO / ascii2d / Google Cloud Vision
+等其余引擎，只保留 Google Lens（经 SerpApi 代理层）。原因：实测 Yandex
+返回的几乎都是盗图聚合站，而 Lens 才真正给出作者原帖；且 Lens 只需一个
+serpapi_key 即可，免去维护多套 key / cookie。
 
 为什么不用 soutubot：soutubot.moe 是动漫/本子垂直库，
 搜不到 X.com / 微博 / 小红书 等站点；此处走通用搜索引擎。
 
-引擎状态（2026-10 实测，沿用原作者结论）：
-- Yandex (.com/.ru)：可用，无 key，同一 CBIR 后端，双域名互为备份
-- SauceNAO：官方 API，需免费 api_key（100 次/天）；匿名请求当前被 CF 拦
-- ascii2d：全站 Cloudflare 挑战，需 cf_clearance cookie
-- Google Cloud Vision（WEB_DETECTION）：付费，需 GCP key
-缺 key / 被风控的引擎自动跳过，不影响其他引擎。
+Google Lens 链路（经 SerpApi）：
+1. 没有现成公网 URL 时，先把图压到长边 1600 / JPEG，再丢到临时图床
+   （litterbox → uguu → qu.ax 兜底）换一个公网直链（Lens 只认 URL）。
+2. 调 SerpApi engine=google_lens，直连优先（实测 1.5s 可达），直连超时/
+   失败才走 lens_proxy。
+3. 解析 exact_matches / visual_matches，按链接形态与排序位置给证据权重。
+4. 融合评分，只输出社交平台里置信度最高的那位作者。
+
+配置（全部在 nonebot 配置 / .env）：
+- serpapi_keys：必需（serpapi.com 免费 100 次/月/key）。支持填多个 key 组成数组，
+  每月每 key 自动计数，满 100 自动切下一个；当月全部用完则暂停本功能，次月 1 号重置。
+  .env 写法：SERPAPI_KEYS=["k1","k2"] 或 逗号分隔 SERPAPI_KEYS=k1,k2
+- lens_proxy：大陆机器访问 Google 多半不通，填如 http://127.0.0.1:7890
+- longge_reverse_timeout / longge_reverse_max_results：可选
 """
 
 import asyncio
-import base64
+import datetime
+import hashlib
 import io
 import json
 import re
 from dataclasses import dataclass, field
 from typing import Optional
-from urllib.parse import quote, unquote
+from urllib.parse import quote
 
 import httpx
 from PIL import Image
 
 from nonebot import get_driver, logger
 
+from ..config import DATA_DIR
+from ..common.data_utils import safe_json_save
 
-# ========== 配置读取（全部可选） ==========
+
+try:
+    _LANCZOS = Image.Resampling.LANCZOS  # Pillow >= 9.1
+except AttributeError:  # Pillow < 9.1
+    _LANCZOS = Image.LANCZOS
+
+
+# ========== 配置读取 ==========
 
 # 逻辑名 -> (NoneBot 配置项, 默认值)
 _CFG_ATTRS = {
-    "timeout": ("longge_reverse_timeout", 20),
-    "proxy": ("longge_reverse_proxy", ""),
+    "timeout": ("longge_reverse_timeout", 25),
     "max_results": ("longge_reverse_max_results", 5),
-    "saucenao_api_key": ("saucenao_api_key", ""),
-    "gcv_api_key": ("gcv_api_key", ""),
-    "ascii2d_cf_clearance": ("ascii2d_cf_clearance", ""),
+    "serpapi_keys": ("serpapi_keys", []),
+    "serpapi_key_single": ("serpapi_key", ""),  # 旧单 key 兼容
+    # lens_proxy 同时用于 SerpApi 调用与图床上传（都是境外服务，大陆需代理）
+    "proxy": ("lens_proxy", ""),
 }
 
 
 def load_config() -> dict:
-    """从 NoneBot 配置读取反搜参数，缺失回退默认值（每次调用实时读取）。"""
+    """从 NoneBot 配置读取反搜参数，缺失回退默认值（每次调用实时读取）。
+
+    把 serpapi_keys（数组）与旧的 serpapi_key（单值）合并、去空、去重，
+    统一成 cfg["serpapi_keys"] 列表。
+    """
     cfg = {k: default for k, (_, default) in _CFG_ATTRS.items()}
     try:
         driver_config = get_driver().config
     except Exception:
         driver_config = None
     if driver_config is None:
-        return cfg
+        driver_config = _Empty()
     for key, (attr, _) in _CFG_ATTRS.items():
         try:
             val = getattr(driver_config, attr, None)
@@ -62,17 +88,115 @@ def load_config() -> dict:
                 cfg[key] = val
         except Exception:
             pass
+
+    # 规整 serpapi key 数组：优先 serpapi_keys，空则回退旧的 serpapi_key 单值
+    keys = cfg.pop("serpapi_keys") or []
+    single = (cfg.pop("serpapi_key_single") or "").strip()
+    if not keys and single:
+        keys = [single]
+    seen = set()
+    uniq = []
+    for k in keys:
+        k = (k or "").strip()
+        if k and k not in seen:
+            seen.add(k)
+            uniq.append(k)
+    cfg["serpapi_keys"] = uniq
     return cfg
 
 
+class _Empty:
+    """driver 不可用时充当占位，getattr 一律返回 None。"""
+
+    def __getattr__(self, _name):
+        return None
+
+
 def engine_status(cfg: dict) -> list:
-    """返回各引擎可用性清单（启动时打日志用）。"""
-    return [
-        "yandex",
-        "saucenao" if cfg.get("saucenao_api_key") else "-saucenao(无key)",
-        "ascii2d" if cfg.get("ascii2d_cf_clearance") else "-ascii2d(无cookie)",
-        "gcv" if cfg.get("gcv_api_key") else "-gcv(无key)",
-    ]
+    """返回引擎可用性清单（启动时打日志用）。"""
+    keys = cfg.get("serpapi_keys") or []
+    if not keys:
+        return ["-lens(未配置serpapi_keys)"]
+    return [f"lens(已配 {len(keys)} 个 key，每 key 100 次/月)"]
+
+
+# ---------------------------------------------------------------------------
+# SerpApi 免费额度计数：每 key 每月 100 次，满则切下一个；当月全用完则暂停；
+# 月份变化（次月 1 号后首次使用）自动重置。
+#
+# 计数文件存于 DATA_DIR/serpapi_usage.json，按 key 的 sha256 前 16 位做指纹，
+# 不落明文 key。仅在 SerpApi 真正请求成功（HTTP 200）后才保留计数；上传图床
+# 失败等前置异常会退回本次占用，不白白消耗免费次数。
+# ---------------------------------------------------------------------------
+
+_SERPAPI_USAGE_FILE = DATA_DIR / "serpapi_usage.json"
+_SERPAPI_FREE_LIMIT = 100
+_MONTH_FMT = "%Y-%m"
+_usage_lock = asyncio.Lock()
+
+
+def _serpapi_fp(key: str) -> str:
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+def _cur_month() -> str:
+    return datetime.datetime.now().strftime(_MONTH_FMT)
+
+
+def _load_serpapi_usage() -> dict:
+    try:
+        if _SERPAPI_USAGE_FILE.exists():
+            with open(_SERPAPI_USAGE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and "month" in data and isinstance(data.get("counts"), dict):
+                return data
+    except Exception:
+        pass
+    return {"month": _cur_month(), "counts": {}}
+
+
+def _reset_serpapi_if_new_month(usage: dict) -> None:
+    m = _cur_month()
+    if usage.get("month") != m:
+        usage["month"] = m
+        usage["counts"] = {}
+
+
+def _save_serpapi_usage(usage: dict) -> None:
+    safe_json_save(_SERPAPI_USAGE_FILE, usage)
+
+
+async def _acquire_serpapi_key(cfg: dict):
+    """原子地挑一个当月未满 100 次的 key，并把计数 +1。
+
+    返回 (key, fingerprint, remaining)；若当月所有 key 都用完则返回
+    (None, None, 0)。调用方在 SerpApi 真正成功后才保留计数，失败需调
+    _refund_serpapi_key 退回，避免上传图床失败等也白白消耗额度。
+    """
+    keys = cfg.get("serpapi_keys") or []
+    async with _usage_lock:
+        usage = _load_serpapi_usage()
+        _reset_serpapi_if_new_month(usage)
+        for k in keys:
+            fp = _serpapi_fp(k)
+            c = int(usage["counts"].get(fp, 0))
+            if c < _SERPAPI_FREE_LIMIT:
+                usage["counts"][fp] = c + 1
+                _save_serpapi_usage(usage)
+                return k, fp, _SERPAPI_FREE_LIMIT - (c + 1)
+        return None, None, 0
+
+
+async def _refund_serpapi_key(fp: str) -> None:
+    """退回一次额度占用（用于 SerpApi 实际未成功的情况）。"""
+    if not fp:
+        return
+    async with _usage_lock:
+        usage = _load_serpapi_usage()
+        c = int(usage["counts"].get(fp, 0))
+        if c > 0:
+            usage["counts"][fp] = c - 1
+            _save_serpapi_usage(usage)
 
 
 # ========== 统一数据结构 ==========
@@ -81,7 +205,7 @@ def engine_status(cfg: dict) -> list:
 class PostCandidate:
     """一个候选出处：可能带作者、可能带具体帖子 URL。"""
 
-    engine: str            # yandex / saucenao / ascii2d / gcv
+    engine: str            # 固定 "lens"
     page_url: str          # 出处页面（帖子或镜像页）
     title: str = ""
     author_handle: str = ""      # 不含 @
@@ -105,7 +229,7 @@ _UA = (
 def _make_client(timeout: int, proxy: str = "", cookies: Optional[dict] = None) -> httpx.AsyncClient:
     """构造 httpx 客户端。
 
-    verify=False：Yandex 证书链在国内环境偶有不完整（对应原实现 ssl=False）
+    verify=False：境外站点证书链在国内环境偶有不完整（对应原实现 ssl=False）
     trust_env=False：不读系统代理环境变量，统一走显式 proxy 配置
     proxy 参数名在 httpx>=0.28 为 proxy / 旧版为 proxies，两者兼容。
     """
@@ -114,7 +238,7 @@ def _make_client(timeout: int, proxy: str = "", cookies: Optional[dict] = None) 
         headers={"User-Agent": _UA},
         verify=False,
         trust_env=False,
-        follow_redirects=True,  # Yandex / ascii2d 结果页可能 302
+        follow_redirects=True,
     )
     if cookies:
         kwargs["cookies"] = cookies
@@ -127,476 +251,256 @@ def _make_client(timeout: int, proxy: str = "", cookies: Optional[dict] = None) 
 
 
 # ---------------------------------------------------------------------------
-# Yandex（.com 与 .ru 同一 CBIR 后端，双域名互备）
+# 上传前压缩：把图压到长边 1600 / JPEG q88
 # ---------------------------------------------------------------------------
 
-_UPLOAD_REQUEST = json.dumps({"blocks": [{"block": "b-page_type_search-by-image__link"}]})
-_YANDEX_HOSTS = ("yandex.com", "yandex.ru")
-
-
-async def search_yandex(
+def shrink_for_upload(
     image_bytes: bytes,
     *,
-    timeout: int = 20,
-    proxy: str = "",
-    host: str = "yandex.com",
-) -> tuple:
-    """上传图片到 Yandex 并解析相似图结果页。
+    max_side: int = 1600,
+    quality: int = 88,
+) -> bytes:
+    """上传前把图压到长边 1600 / JPEG q88。
 
-    返回 (result_page_url, candidates)。两域名同后端，一个失败自动换另一个。
+    QQ 转来的原图常有 8.8MB，直接传图床/给 Lens 既慢又易超时；缩到 ~400KB
+    后稳定几秒。视觉检索不需要原分辨率，Lens 吃得住。
     """
-    last_err: Optional[Exception] = None
-    hosts = (host,) + tuple(h for h in _YANDEX_HOSTS if h != host)
-    for h in hosts:
-        try:
-            return await _search_yandex_on(image_bytes, h, timeout=timeout, proxy=proxy)
-        except Exception as e:  # noqa: BLE001 - 引擎级降级
-            last_err = e
-    raise EngineError(f"Yandex 双域名均失败: {last_err}")
-
-
-async def _search_yandex_on(image_bytes: bytes, host: str, *, timeout: int, proxy: str) -> tuple:
-    async with _make_client(timeout, proxy) as client:
-        resp = await client.post(
-            f"https://{host}/images/search",
-            params={"rpt": "imageview", "format": "json", "request": _UPLOAD_REQUEST},
-            files={"upfile": ("blob", image_bytes, "image/jpeg")},
-        )
-        resp.raise_for_status()
-        blocks = resp.json().get("blocks") or []
-
-        params = (blocks[0] or {}).get("params", {}) if blocks else {}
-        cbir_id = params.get("cbirId")
-        original_url = params.get("originalImageUrl", "")
-        if not cbir_id:
-            raise EngineError("上传响应中未找到 cbirId")
-
-        result_url = (
-            f"https://{host}/images/search?rpt=imageview&cbir_page=similar&cbir_id="
-            + quote(f"url={original_url}&cbir_id={cbir_id}", safe="=&")
-        )
-        resp2 = await client.get(result_url)
-        resp2.raise_for_status()
-        html = resp2.text
-
-    return result_url, _parse_yandex_html(html)
-
-
-def _parse_yandex_html(html: str) -> list:
-    """从结果页 HTML 中提取 cbirSites JSON 数组（结构变更时返回空列表而非抛异常）。"""
-    txt = html.replace("&quot;", '"').replace("&#39;", "'").replace("&amp;", "&")
-    i = txt.find('"cbirSites":{"sites"')
-    if i == -1:
-        return []
-    j = txt.find("[", i)
-    if j == -1:
-        return []
-
-    depth = 0
-    end = -1
-    for k in range(j, len(txt)):
-        c = txt[k]
-        if c == "[":
-            depth += 1
-        elif c == "]":
-            depth -= 1
-            if depth == 0:
-                end = k
-                break
-    if end == -1:
-        return []
+    if not image_bytes:
+        return image_bytes
     try:
-        raw_list = json.loads(txt[j : end + 1])
-    except json.JSONDecodeError:
-        return []
-
-    out: list = []
-    seen: set = set()
-    for item in raw_list:
-        page_url = re.sub(
-            r"[?&]utm_medium=organic(&|%26|&amp;)?utm_source=yandexsmartcamera.*$",
-            "",
-            item.get("url", ""),
-        ).rstrip("&?")
-        if not page_url or page_url in seen:
-            continue
-        seen.add(page_url)
-        orig = item.get("originalImage", {}) or {}
-        thumb = item.get("thumb", {}) or {}
-        out.append(
-            PostCandidate(
-                engine="yandex",
-                page_url=page_url,
-                title=item.get("title", ""),
-                description=item.get("description", ""),
-                image_url=orig.get("url", "") or thumb.get("url", ""),
+        im = Image.open(io.BytesIO(image_bytes))
+        im.load()
+        w, h = im.size
+        scale = min(1.0, float(max_side) / max(w, h))
+        if scale < 1.0:
+            im = im.resize(
+                (max(1, int(w * scale)), max(1, int(h * scale))),
+                _LANCZOS,
             )
-        )
-    return out
+        if im.mode not in ("RGB", "L"):
+            im = im.convert("RGB")
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=quality, optimize=True)
+        out = buf.getvalue()
+        return out if out else image_bytes
+    except Exception:  # noqa: BLE001 - 缩图失败就用原图，别因此不搜
+        return image_bytes
 
 
 # ---------------------------------------------------------------------------
-# SauceNAO：官方 API，直接返回作者与原帖 URL（X status / Pixiv artwork）
+# 临时图床：Lens 只认公网图片 URL，所以先把字节传到图床换直链
 # ---------------------------------------------------------------------------
 
+_UPLOAD_TARGETS = (
+    ("litterbox", "https://litterbox.catbox.moe/resources/internals/api.php"),
+    ("uguu", "https://uguu.se/upload.php"),
+    ("quax", "https://qu.ax/upload.php"),
+)
 
-async def search_saucenao(
-    image_url: str,
+
+async def upload_image(image_bytes: bytes, *, timeout: int = 20, proxy: str = "") -> str:
+    """把图丢到临时图床，换一个公网直链（Lens 只认 URL，不认字节）。
+
+    图床不能只挂一家——litterbox 偶尔回 500，Lens 就整条哑掉，结论变成
+    "所有引擎均未返回结果"。所以按 litterbox → uguu → qu.ax 依次兜底。
+    """
+    if not image_bytes:
+        raise EngineError("upload: 没有图片数据")
+    errs: list = []
+    for name, api in _UPLOAD_TARGETS:
+        for _ in range(2):
+            try:
+                return await _upload_one(name, api, image_bytes, timeout=timeout, proxy=proxy)
+            except Exception as e:  # noqa: BLE001 - 换下一家
+                errs.append(f"{name}: {type(e).__name__}: {str(e)[:60]}")
+                await asyncio.sleep(0.4)
+    raise EngineError("upload: 全部图床失败 " + " | ".join(errs[-3:]))
+
+
+async def _upload_one(name: str, api: str, image_bytes: bytes, *, timeout: int, proxy: str) -> str:
+    if name == "litterbox":
+        data = {"reqtype": "fileupload", "time": "1h"}
+        files = {"fileToUpload": ("blob.jpg", image_bytes, "image/jpeg")}
+    elif name == "uguu":
+        data = None
+        files = {"files[]": ("blob.jpg", image_bytes, "image/jpeg")}
+    else:
+        data = None
+        files = {"file": ("blob.jpg", image_bytes, "image/jpeg")}
+    async with _make_client(timeout, proxy) as sess:
+        if name == "litterbox":
+            resp = await sess.post(api, data=data, files=files)
+        else:
+            resp = await sess.post(api, files=files)
+        body = (resp.text or "").strip()
+        if resp.status_code != 200:
+            raise EngineError(f"HTTP {resp.status_code} {body[:80]}")
+    if name == "litterbox":
+        if body.startswith("http"):
+            return body
+        raise EngineError(f"无直链 {body[:80]}")
+    try:
+        data = json.loads(body)
+    except Exception as e:  # noqa: BLE001
+        raise EngineError(f"非 JSON {body[:80]}") from e
+    files_list = (data or {}).get("files") or []
+    url = (files_list[0] or {}).get("url") if files_list else ""
+    if data.get("success") and url:
+        return str(url)
+    raise EngineError(f"无直链 {body[:80]}")
+
+
+_FXTWITTER_API = "https://api.fxtwitter.com/"
+
+
+async def fetch_user_name(handle: str, *, timeout: int = 6, proxy: str = "") -> str:
+    """取 X 账号的显示名（fxtwitter，免登录）。
+
+    只在"Lens 只给出转图帖正文 @ 到的账号"时需要：那种情况下标题里的名字是
+    转发者的，真名拿不到。失败一律返回空串，不影响结论。
+    """
+    h = (handle or "").lstrip("@").strip()
+    if not h:
+        return ""
+    for attempt in range(3):
+        try:
+            async with _make_client(timeout, proxy) as sess:
+                resp = await sess.get(f"{_FXTWITTER_API}{h}")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    name = str(((data or {}).get("user") or {}).get("name") or "").strip()
+                    if name:
+                        return name
+        except Exception:  # noqa: BLE001 - 补名失败不算错误
+            pass
+        if attempt < 2:
+            await asyncio.sleep(0.4)
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# Google Lens（经 SerpApi，等价于 Lens 的"包含此图的页面"）
+# ---------------------------------------------------------------------------
+
+_SERPAPI_ENDPOINT = "https://serpapi.com/search.json"
+_LENS_DIRECT_TIMEOUT = 8  # 直连只给 8s，超时立刻改走代理
+_X_STATUS_RE = re.compile(
+    r"(?:x\.com|twitter\.com|sotwe\.com|urlebird\.com)/[^/]+/status/", re.I
+)
+
+
+async def search_lens(
+    image_url: str = "",
     *,
     api_key: str,
+    image_bytes: Optional[bytes] = None,
     timeout: int = 25,
     proxy: str = "",
+    limit: int = 40,
 ) -> list:
-    """调用 SauceNAO API（db=999 全库）。image_url 需为公网可访问 URL。"""
-    if not api_key:
-        raise EngineError("SauceNAO 需要 api_key（saucenao.com 免费注册，100 次/天）")
-    params = {
-        "db": 999,
-        "output_type": 2,
-        "numres": 16,
-        "api_key": api_key,
-        "url": image_url,
-    }
-    async with _make_client(timeout, proxy) as client:
-        resp = await client.get("https://saucenao.com/search.php", params=params)
-        if resp.status_code != 200:
-            raise EngineError(f"SauceNAO HTTP {resp.status_code}（可能被 CF 拦或 key 无效）")
-        data = resp.json()
+    """Google Lens 视觉匹配（SerpApi 代理层）。
 
-    if data.get("header", {}).get("status") not in (0, None):
-        raise EngineError(f"SauceNAO status={data['header'].get('status')}")
-
-    out: list = []
-    for result in data.get("results", []):
-        d = result.get("data", {})
-        ext_urls = d.get("ext_urls", []) or []
-        handle = (
-            d.get("twitter_user_handle")
-            or d.get("author_name")
-            or d.get("member_name")
-            or ""
-        )
-        platform = ""
-        post_url = ""
-        for u in ext_urls:
-            if "twitter.com" in u or "x.com" in u:
-                platform = "X/Twitter"
-                post_url = u
-                break
-            if "pixiv.net" in u:
-                platform = "Pixiv"
-                post_url = u
-        if not platform and ext_urls:
-            post_url = ext_urls[0]
-        out.append(
-            PostCandidate(
-                engine="saucenao",
-                page_url=post_url or (ext_urls[0] if ext_urls else ""),
-                post_url=post_url,
-                title=d.get("title", ""),
-                author_handle=handle.lstrip("@"),
-                author_platform=platform or ("Pixiv" if d.get("pixiv_id") else ""),
-                weight=0.5,
-            )
-        )
-    return out
-
-
-# ---------------------------------------------------------------------------
-# ascii2d：无官方 API，解析彩色搜索结果页；当前被 CF 拦，支持 cf_clearance
-# ---------------------------------------------------------------------------
-
-
-async def search_ascii2d(
-    image_bytes: bytes,
-    *,
-    timeout: int = 30,
-    proxy: str = "",
-    cf_clearance: str = "",
-) -> list:
-    """上传到 ascii2d 并解析彩色结果页中的原帖链接。"""
-    cookies = {"cf_clearance": cf_clearance} if cf_clearance else {}
-    async with _make_client(timeout, proxy, cookies=cookies) as client:
-        resp = await client.post(
-            "https://ascii2d.net/search/file",
-            files={"file": ("blob", image_bytes, "image/jpeg")},
-        )
-        html = resp.text
-        if resp.status_code == 403 or "Just a moment" in html[:2000]:
-            raise EngineError(
-                "ascii2d 被 Cloudflare 拦截：可配置有效的 cf_clearance cookie"
-            )
-        resp.raise_for_status()
-
-    out: list = []
-    seen: set = set()
-    for m in re.finditer(r'<div class="detail-box[^"]*"[^>]*>(.*?)</div>', html, re.S):
-        block = m.group(1)
-        link_m = re.search(r'href="(https?://[^"]+)"[^>]*>', block)
-        if not link_m:
-            continue
-        url = link_m.group(1)
-        if url in seen or "ascii2d" in url:
-            continue
-        seen.add(url)
-        handle = ""
-        platform = ""
-        um = re.search(r"(?:twitter|x)\.com/@?(\w{2,20})(?:/status/(\d+))?", url)
-        if um:
-            handle = um.group(1)
-            platform = "X/Twitter"
-        else:
-            pm = re.search(r"pixiv\.net/(?:artworks/\d+|users/(\d+))", url)
-            if pm:
-                handle = pm.group(1) or ""
-                platform = "Pixiv"
-        title_m = re.search(r"<h4[^>]*>(.*?)</h4>", block, re.S)
-        out.append(
-            PostCandidate(
-                engine="ascii2d",
-                page_url=url,
-                post_url=url if "/status/" in url or "artworks/" in url else "",
-                title=re.sub(r"<[^>]+>", "", title_m.group(1)).strip() if title_m else "",
-                author_handle=handle,
-                author_platform=platform,
-                weight=0.4,
-            )
-        )
-    return out
-
-
-# ---------------------------------------------------------------------------
-# Google Cloud Vision WEB_DETECTION（官方付费）
-# ---------------------------------------------------------------------------
-
-
-async def search_gcv(
-    image_bytes: bytes,
-    *,
-    api_key: str,
-    timeout: int = 30,
-    proxy: str = "",
-) -> list:
-    """Google Cloud Vision API webDetection：返回完全/部分匹配页面。"""
-    if not api_key:
-        raise EngineError("GCV 需要 GCP API key（Vision API，webDetection）")
-    body = {
-        "requests": [
-            {
-                "image": {"content": base64.b64encode(image_bytes).decode()},
-                "features": [{"type": "WEB_DETECTION", "maxResults": 20}],
-            }
-        ]
-    }
-    async with _make_client(timeout, proxy) as client:
-        resp = await client.post(
-            f"https://vision.googleapis.com/v1/images:annotate?key={quote(api_key)}",
-            json=body,
-        )
-        if resp.status_code != 200:
-            raise EngineError(f"GCV HTTP {resp.status_code}: {resp.text[:150]}")
-        data = resp.json()
-
-    wd = data.get("responses", [{}])[0].get("webDetection", {})
-    out: list = []
-    seen: set = set()
-    for section, w in (
-        ("pagesWithMatchingImages", 0.3),
-        ("fullMatchingImages", 0.2),
-        ("partialMatchingImages", 0.15),
-    ):
-        for item in wd.get(section, []) or []:
-            url = item.get("url", "")
-            if not url or url in seen:
-                continue
-            seen.add(url)
-            out.append(PostCandidate(engine="gcv", page_url=url, weight=w))
-    return out
-
-
-# ---------------------------------------------------------------------------
-# 感知哈希：用于「候选原图 == 查询图」的硬确认
-# ---------------------------------------------------------------------------
-
-try:
-    _LANCZOS = Image.Resampling.LANCZOS  # Pillow >= 9.1
-except AttributeError:  # Pillow < 9.1
-    _LANCZOS = Image.LANCZOS
-
-
-def _perceptual_hashes(data: bytes) -> Optional[tuple]:
-    """返回 (aHash64, dHash64)，失败返回 None。"""
-    try:
-        img = Image.open(io.BytesIO(data)).convert("L")
-    except Exception:
-        return None
-
-    # aHash: 8x8 均值哈希
-    small = img.resize((8, 8), _LANCZOS)
-    px: list = list(small.tobytes())
-    avg = sum(px) / 64
-    ahash = 0
-    for bit, v in enumerate(px):
-        if v > avg:
-            ahash |= 1 << bit
-
-    # dHash: 9x8 相邻差分哈希
-    small2 = img.resize((9, 8), _LANCZOS)
-    px2: list = list(small2.tobytes())
-    dhash = 0
-    bit = 0
-    for row in range(8):
-        for col in range(8):
-            if px2[row * 9 + col] > px2[row * 9 + col + 1]:
-                dhash |= 1 << bit
-            bit += 1
-    return ahash, dhash
-
-
-def _hash_similarity(h1: tuple, h2: tuple) -> float:
-    """两组哈希的归一化汉明相似度（0-1）。"""
-
-    def _sim(a: int, b: int) -> float:
-        return 1.0 - bin(a ^ b).count("1") / 64.0
-
-    return (_sim(h1[0], h2[0]) + _sim(h1[1], h2[1])) / 2
-
-
-# 感知哈希确认的资源闸门（原实现无上限，在本插件场景下必须收敛）：
-# 未配 SauceNAO key 时 Yandex 常返回 50+ 个噪声 handle（无关站点标题词），
-# 若无限制会对每个 handle 串行下载至多 3 张候选图，最坏上百次请求，
-# 在 QQ 里直接表现为机器人"卡死"。故设三重闸门。
-_MAX_VERIFY_HANDLES = 12   # 参与确认的 handle 上限（取关联条目最多的前 N 个）
-_VERIFY_IMAGE_TIMEOUT = 10  # 单张候选图下载超时（秒）
-_MAX_VERIFY_BUDGET = 30.0   # 整个确认阶段的总时间预算（秒），超时即用已有结果
-
-
-async def phash_verify_all(
-    candidates: list,
-    query: bytes,
-    proxy: str = "",
-    timeout: int = 20,
-) -> dict:
-    """对所有带原图 URL 的候选按署名分组下载，计算与查询图的相似度。
-
-    覆盖全部引擎（不只 Yandex），同图硬确认的 +20% 置信度加成
-    不会漏掉非 Yandex 引擎命中的作者。
-
-    注意 handle 数量按 _MAX_VERIFY_HANDLES 截断、整体受 _MAX_VERIFY_BUDGET
-    时间约束：宁可少确认几个弱 handle，也不能让机器人无响应。
+    直连优先（实测 1.5s 可达）；直连超时/失败才走 proxy —— 代理只在这一步
+    用，其他时间一律直连。
+    没有现成公网 URL 时自己传图床，不依赖其他引擎。
+    返回的每条是"包含该图的页面"，作者提取交给 fuse。
     """
-    scores: dict = {}
-    qh = _perceptual_hashes(query)
-    if qh is None:
-        return scores
+    if not api_key:
+        raise EngineError("lens: 未配置 serpapi_key")
+    if not image_url:
+        if not image_bytes:
+            raise EngineError("lens: 缺少公网图片 URL")
+        image_url = await upload_image(image_bytes, timeout=min(timeout, 20), proxy=proxy)
 
-    per_handle: dict = {}
-    for c in candidates:
-        if not c.image_url:
+    params = {
+        "engine": "google_lens",
+        "url": image_url,
+        "api_key": api_key,
+        "hl": "zh-CN",
+    }
+
+    attempts = [None]
+    if proxy:
+        attempts.append(proxy)
+
+    last_err: Optional[Exception] = None
+    for px in attempts:
+        budget = timeout if px else min(timeout, _LENS_DIRECT_TIMEOUT)
+        try:
+            async with _make_client(budget, px or "") as sess:
+                resp = await sess.get(_SERPAPI_ENDPOINT, params=params)
+                body = resp.text
+                if resp.status_code != 200:
+                    raise EngineError(f"lens: HTTP {resp.status_code} {body[:160]}")
+                data = json.loads(body)
+        except EngineError as e:
+            last_err = e
             continue
-        handles = set()
-        if c.author_handle:
-            handles.add(c.author_handle.lower())
-        for m in _DESC_CREDIT_RE.finditer(c.description or ""):
-            h = _clean(next((g for g in m.groups() if g), ""))
-            if h:
-                handles.add(h.lower())
-        m = _TITLE_HANDLE_RE.search(c.title) or _X_URL_RE.search(c.page_url)
-        if m:
-            h = _clean(m.group(1))
-            if h:
-                handles.add(h.lower())
-        for h in handles:
-            per_handle.setdefault(h, []).append(c.image_url)
+        except Exception as e:
+            last_err = EngineError(f"lens: {type(e).__name__}: {e}")
+            continue
 
-    if not per_handle:
-        return scores
-
-    # 按关联条目数降序：同一 handle 被引擎命中次数越多越可能是真作者
-    ordered = sorted(per_handle.items(), key=lambda kv: -len(kv[1]))[:_MAX_VERIFY_HANDLES]
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + _MAX_VERIFY_BUDGET
-
-    # 候选图下载用独立的较短超时（timeout 参数是引擎请求超时，此处不宜共用）
-    async with _make_client(_VERIFY_IMAGE_TIMEOUT, proxy) as client:
-        for h, urls in ordered:
-            if loop.time() > deadline:
-                logger.warning(
-                    f"[找鸡] 感知哈希确认超预算({_MAX_VERIFY_BUDGET}s)，"
-                    f"提前结束（剩余 {len(ordered)} 个 handle 未确认）"
-                )
-                break
-            for u in urls[:3]:
-                if loop.time() > deadline:
-                    break
+        out: list = []
+        # exact_matches = 完全相同的图；visual_matches = 视觉相似页。
+        # 权重看链接形态：指向具体 X 帖子的基本就是原帖本身（实测老图第一条
+        # 就是 x.com/<作者>/status/<id>）；只给用户页或第三方站点的弱得多。
+        for key in ("exact_matches", "visual_matches"):
+            for item in (data.get(key) or [])[:limit]:
+                if not isinstance(item, dict):
+                    continue
+                link = (item.get("link") or "").strip()
+                if not link.startswith("http"):
+                    continue
+                # position 是 Lens 的相关度排序：前 3 位基本是同一张图的原帖，
+                # 之后的"视觉相似"往往是别人拍的同类图。靠后的只当弱证据，不进结论。
                 try:
-                    resp = await client.get(u)
-                    if resp.status_code != 200:
-                        continue
-                    ch = _perceptual_hashes(resp.content)
+                    pos = int(item.get("position") or 99)
                 except Exception:
-                    continue
-                if ch is None:
-                    continue
-                sim = _hash_similarity(qh, ch)
-                if sim > scores.get(h, 0.0):
-                    scores[h] = sim
-    return scores
+                    pos = 99
+                title = (item.get("title") or "").strip()
+                # 正文一开口就 @ 人 → 这条不是原帖，是转图/祝福/回复帖。发帖人
+                # 不是作者，但正文里 @ 到的那个账号常常正是作者本人。
+                reply_m = re.search(r"[:：]\s*[\"'“”]?\s*@([A-Za-z0-9_]{3,20})", title)
+                author_hint = reply_m.group(1) if reply_m else ""
+                is_x_post = bool(_X_STATUS_RE.search(link))
+                if is_x_post and pos <= 3 and not author_hint:
+                    weight = 0.88
+                elif is_x_post and pos <= 3 and author_hint:
+                    weight = 0.78
+                elif key == "exact_matches" and not author_hint:
+                    weight = 0.85
+                else:
+                    weight = 0.55
+                out.append(
+                    PostCandidate(
+                        engine="lens",
+                        page_url=link,
+                        title=title,
+                        description=(item.get("source") or "").strip(),
+                        weight=weight,
+                        author_handle=author_hint,
+                    )
+                )
+        return out
+
+    raise last_err or EngineError("lens: 未知失败")
 
 
 # ---------------------------------------------------------------------------
-# 跨引擎证据融合与置信度评分
+# 跨引擎证据融合与置信度评分（此处只有 lens 一种来源）
 #
 # 置信度模型（0-1，封顶）：
-# - description/正文署名（转发者正文注明原作者）：+0.35/次
-# - SauceNAO 返回的作者（官方索引，直接给 status URL）：+0.45
-# - ascii2d 结果作者（链接直达 status/artwork）：+0.30
-# - 标题/URL handle（可能是转发者）：+0.10~0.15/次
-# - 感知哈希同图硬确认（>=0.90）：+0.20（跨>=2 域）或 +0.10（单域）
+# - Lens 完全匹配且指向具体 X 原帖：+0.35
+# - Lens 视觉匹配 / 弱证据页面：+0.20
+# 任何单条都不足以瞎报，故强证据阈值设为 0.30（见 _STRONG_CONFIDENCE）。
 # ---------------------------------------------------------------------------
 
-_TITLE_HANDLE_RE = re.compile(r"@([A-Za-z0-9_]{1,20})")
 _X_URL_RE = re.compile(
     r"(?:x\.com|twitter\.com|sotwe\.com|urlebird\.com)/(?:user/)?@?([A-Za-z0-9_]{2,20})(?:[/?]|$)"
 )
-# 强署名：明确 credit 模式（"sc: handle" / "handle's tweet photo/video"）
-_DESC_CREDIT_RE = re.compile(
-    r"(?:sc|credit|cr|source|via|cn|photo|drawn\s+by|tw)\s*[:：]\s*@?([A-Za-z0-9_]{2,20})"
-    r"|([A-Za-z0-9_]{2,20})'(?:s|’s)\s+(?:tweet\s+)?(?:photo|video|status|post)"
-)
-# 弱证据：裸 @mention（可能是转发者自引用）
-_DESC_MENTION_RE = re.compile(r"@([A-Za-z0-9_]{2,20})")
 _STATUS_RE = re.compile(r"(?:x\.com|twitter\.com)/(\w{2,20})/status/(\d+)")
 
 _STOPWORDS = {"status", "search", "user", "home", "intent", "sunna", "sc", "i", "web"}
-
-# handle 形态：4-20 位字母数字下划线，至少含一个字母（排除纯数字 id/日期）
-_HANDLE_LIKE_RE = re.compile(r"[A-Za-z0-9_]{4,20}")
-_LETTER_RE = re.compile(r"[A-Za-z]")
-
-# 聚合站标题常见通用词，不是人名
-_TITLE_NOISE = {
-    "nude", "leaks", "leaked", "onlyfans", "patreon", "photo", "photos",
-    "video", "videos", "naked", "sexy", "cosplay", "forum", "wall",
-    "free", "top", "best", "girl", "girls", "asian", "japanese",
-    "leakedmodels", "fappening", "fapeza", "fapello", "nudostar",
-    "nudogram", "fapodrop", "tokyomotion", "sotwe", "urlebird",
-    "twitter", "profile", "голая", "фото", "сливы",
-    "page", "pages", "index", "home", "main", "list", "category", "tag",
-    "search", "archive", "post", "posts", "comments", "login", "update",
-    "aliexpress", "imall", "telegra", "telegram", "telegraph", "vikacg",
-    "alibaba", "amazon", "ebay", "reddit", "google", "yandex", "bing",
-    "kitty", "welfare", "silver", "misty", "models", "model",
-}
-
-
-def _is_handle_like(tok: str) -> bool:
-    """判断标题 token 是否像账号名：形态匹配、含字母、非通用词。"""
-    if not _HANDLE_LIKE_RE.fullmatch(tok):
-        return False
-    if not _LETTER_RE.search(tok):
-        return False
-    return tok.lower() not in _TITLE_NOISE
 
 
 def _domain_root(url: str) -> str:
@@ -614,6 +518,27 @@ def _clean(h) -> str:
     return h.lstrip("@").strip()
 
 
+# Lens 标题格式：「<昵称> <平台介词> <平台>: <正文>」，介词随语言变
+# （on / sur / auf / على …），所以只把介词当一个 token 跳过。
+_LENS_PREP = r"(?:on|sur|auf|no|en|на|على|علی|in|de)"
+_LENS_PLAT = (
+    r"(?:X|Twitter|Instagram|Facebook|Threads|YouTube|TikTok|Pinterest|"
+    r"Reddit|Tumblr|Weibo|Bilibili|微博|小红书)"
+)
+_LENS_NAME_RE = re.compile(
+    rf"^(.{{1,40}}?)\s*{_LENS_PREP}\s+{_LENS_PLAT}\s*[:：]"
+)
+
+
+def _lens_name(title: str) -> str:
+    """从 Lens 标题抠显示名：'魔法猫猫王迟迟 على X: "正文"' → '魔法猫猫王迟迟'。"""
+    m = _LENS_NAME_RE.match((title or "").strip())
+    if not m:
+        return ""
+    name = m.group(1).strip(" \"'“”‘’-—·")
+    return name if 1 < len(name) <= 40 else ""
+
+
 @dataclass
 class AuthorVerdict:
     """一个作者的融合判定。"""
@@ -625,11 +550,11 @@ class AuthorVerdict:
     page_url: str = ""  # 证据页面
     evidence: list = field(default_factory=list)  # 人类可读证据链
     domains: set = field(default_factory=set)  # 引用该 handle 的独立域名
+    display_name: str = ""  # Lens 标题里的中文名，优先于 handle 展示
 
 
 def fuse(candidates: list, phash_scores: Optional[dict] = None) -> list:
-    """融合所有引擎候选。phash_scores: handle.lower() -> 相似度。"""
-    phash_scores = phash_scores or {}
+    """融合所有候选。此处只处理 lens 来源。phash_scores 保留接口，固定为空。"""
     authors: dict = {}
 
     def _author(handle: str, platform: str) -> AuthorVerdict:
@@ -640,127 +565,54 @@ def fuse(candidates: list, phash_scores: Optional[dict] = None) -> list:
 
     for c in candidates:
         status_m = _STATUS_RE.search(c.post_url or "") or _STATUS_RE.search(c.page_url or "")
-        pixiv_m = re.search(r"pixiv\.net/artworks/(\d+)", c.post_url or c.page_url or "")
 
-        if c.engine == "saucenao" and c.author_handle:
-            a = _author(c.author_handle, c.author_platform or "X/Twitter")
-            a.confidence = min(1.0, a.confidence + 0.45)
-            a.evidence.append(f"SauceNAO 索引命中: {c.page_url[:70]}")
-            if status_m:
-                a.post_url = status_m.group(0)
-            elif pixiv_m:
-                a.post_url = f"https://www.pixiv.net/artworks/{pixiv_m.group(1)}"
-
-        elif c.engine == "ascii2d" and c.author_handle:
-            a = _author(c.author_handle, c.author_platform or "X/Twitter")
-            a.confidence = min(1.0, a.confidence + 0.30)
-            a.evidence.append(f"ascii2d 结果: {c.page_url[:70]}")
-            if status_m and not a.post_url:
-                a.post_url = status_m.group(0)
-
-        elif c.engine == "yandex":
+        if c.engine == "lens":
+            # Google Lens 给的是"包含这张图的页面"。纪律和 Yandex 一样：
+            # 只认 URL 结构（平台账号页/帖子）和帖子正文里 @ 到的账号，
+            # 绝不拿标题猜人名。
             platform = _platform_of(c)
             domain_root = _domain_root(c.page_url)
-            title_m = _TITLE_HANDLE_RE.search(c.title) or _X_URL_RE.search(c.page_url)
-            title_h = _clean(title_m.group(1)) if title_m else ""
-
-            # 1) description 强署名（credit 模式，原作者）
-            for m in _DESC_CREDIT_RE.finditer(c.description or ""):
-                h = _clean(next((g for g in m.groups() if g), ""))
-                if h:
-                    a = _author(h, platform)
-                    a.confidence = min(1.0, a.confidence + 0.35)
-                    a.domains.add(domain_root)
-                    snippet = c.description[max(0, m.start() - 15) : m.end() + 10]
-                    a.evidence.append(f"转发正文署名: 「…{snippet}…」")
-                    a.page_url = a.page_url or c.page_url
-                    if status_m and not a.post_url:
-                        a.post_url = status_m.group(0)
-
-            # 2) description 裸 @mention：只有与页面标题 handle 不同才算独立弱证据
-            for m in _DESC_MENTION_RE.finditer(c.description or ""):
-                h = _clean(m.group(1))
-                if h and h.lower() != title_h.lower():
-                    a = _author(h, platform)
-                    a.confidence = min(1.0, a.confidence + 0.10)
-                    a.domains.add(domain_root)
-                    a.evidence.append(f"正文提及: @ {h}")
-                    a.page_url = a.page_url or c.page_url
-
-            # 3) 标题/URL handle（转发者）—— 跨域名一致性提权
-            if title_h:
-                a = _author(title_h, platform)
-                if domain_root not in a.domains:
-                    a.confidence = min(1.0, a.confidence + (0.15 if a.domains else 0.10))
-                    a.domains.add(domain_root)
-                else:
-                    a.confidence = min(1.0, a.confidence + 0.05)
-                a.evidence.append(f"站点署名({domain_root}): {c.page_url[:55]}")
-                a.page_url = a.page_url or c.page_url
-
-            # 4) 聚合站标题开头的 handle 形态词（"pon9019 Nude Leaks..."）
-            if not platform:
-                for raw_tok in (c.title or "").split():
-                    tok = raw_tok.strip(",.;:!?()[]").split("-")[0]
-                    if not _is_handle_like(tok):
-                        continue
-                    a = _author(tok, "未知")
-                    if domain_root not in a.domains:
-                        a.domains.add(domain_root)
-                        if len(a.domains) >= 2:
-                            # 第二个独立域名确认后才计分（单域噪声不注册）；
-                            # 封顶 0.30：跨站人名只说明"此人的图在流通"，
-                            # 不能压过正文强署名（0.35，直接指明作者）
-                            a.confidence = min(0.30, a.confidence + 0.10)
-                            a.evidence.append(
-                                f"聚合站人名(跨站一致 x{len(a.domains)}): {c.title[:50]}"
-                            )
-                            a.page_url = a.page_url or c.page_url
-                    else:
-                        a.confidence = min(0.30, a.confidence + 0.05)
-
-                # URL 路径中的 handle 形态段（fappeningbook.com/pon9019-nude/）
-                for seg in c.page_url.split("/")[3:]:
-                    seg = seg.split("?")[0]
-                    m2 = _HANDLE_LIKE_RE.match(seg)
-                    if (
-                        m2
-                        and _is_handle_like(m2.group(0))
-                        and (m2.group(0).lower(), "未知") in authors
-                    ):
-                        a = authors[(m2.group(0).lower(), "未知")]
-                        if domain_root not in a.domains:
-                            a.domains.add(domain_root)
-                            if len(a.domains) >= 2:
-                                a.confidence = min(0.30, a.confidence + 0.10)
-                                a.evidence.append(f"URL 路径含该名({domain_root})")
-
-        elif c.engine == "gcv":
-            m = re.search(r"(?:x\.com|twitter\.com)/(\w{2,20})/?$", c.page_url)
-            h = _clean(m.group(1)) if m else ""
+            url_m = _X_URL_RE.search(c.page_url or "")
+            h = ""
+            via_post = False
+            if c.author_handle:
+                # 转图/祝福帖：作者是正文 @ 的那个人，帖子本身属于转发者，
+                # 所以不能把这条转发帖的链接当作者的原帖。
+                h = _clean(c.author_handle)
+                via_post = True
+            elif url_m:
+                h = _clean(url_m.group(1))
             if h:
-                a = _author(h, "X/Twitter")
-                a.confidence = min(1.0, a.confidence + 0.15)
-                a.evidence.append(f"Google Vision 匹配页: {c.page_url[:70]}")
+                exact = c.weight >= 0.75
+                a = _author(
+                    h,
+                    platform if platform and platform != "未知" else "X/Twitter",
+                )
+                a.confidence = min(1.0, a.confidence + (0.35 if exact else 0.20))
+                a.domains.add(domain_root)
+                if not via_post:
+                    status_m2 = _STATUS_RE.search(c.page_url or "")
+                    if status_m2 and not a.post_url:
+                        a.post_url = status_m2.group(0)
+                if c.title and not a.display_name and not via_post:
+                    nm = _lens_name(c.title)
+                    if nm:
+                        a.display_name = nm
+                a.page_url = a.page_url or c.page_url
+                a.evidence.append(
+                    f"Lens {'完全匹配' if exact else '视觉匹配'}({domain_root}): "
+                    f"{c.page_url[:55]}"
+                )
 
-    # --- 感知哈希加成 ---
-    # 教训：转发页同样含同图，"页面含同图"≠"该页账号是作者"。
-    # 跨域名（>=2 站点引用）的 handle 才给完整作者确认加成；
-    # 单域名命中只给图源页加成（信息量："同图在该账号页面出现过"）。
-    for (h_lower, _), a in authors.items():
-        sim = phash_scores.get(h_lower, 0.0)
-        if sim >= 0.90:
-            if len(a.domains) >= 2:
-                a.confidence = min(1.0, a.confidence + 0.20)
-                a.evidence.append(f"感知哈希同图确认(跨{len(a.domains)}域): {sim:.0%}")
-            else:
-                a.confidence = min(1.0, a.confidence + 0.10)
-                a.evidence.append(f"同图出现在其页面(单域,或为转发): {sim:.0%}")
-        elif sim >= 0.75:
-            a.confidence = min(1.0, a.confidence + 0.05)
-            a.evidence.append(f"感知哈希可疑相似: {sim:.0%}")
-
-    ranked = sorted(authors.values(), key=lambda a: -a.confidence)
+    ranked = sorted(
+        authors.values(),
+        key=lambda a: (
+            -a.confidence,
+            -len(a.domains),
+            0 if a.post_url else 1,
+            a.handle.lower(),
+        ),
+    )
     return [a for a in ranked if a.confidence >= 0.10]
 
 
@@ -769,20 +621,20 @@ def fuse(candidates: list, phash_scores: Optional[dict] = None) -> list:
 # 「未知/身份(站内人名)」连平台归属都没有，同样排除。
 _PREFERRED_PLATFORMS = {"X/Twitter", "Instagram", "微博", "小红书"}
 
+# 强证据阈值：有 Lens 完全匹配 / 具体原帖之一才作为"作者候选"展示
+_STRONG_CONFIDENCE = 0.30
 
-def _no_result(verdicts: list, yandex_url: str) -> str:
+
+def _no_result(verdicts: list) -> str:
     """未命中时的文案：区分「压根没候选」与「候选都不是社交账号」。"""
     if verdicts:
         detail = "命中了图库/画站或身份不明来源，已忽略（只认社交账号）"
     else:
-        detail = "换张更清晰的图试试"
-    msg = f"没找到鸡 😢 {detail}"
-    if yandex_url:
-        msg += f"\n人工排查：{yandex_url}"
-    return msg
+        detail = "换张更清晰的图，或该图全网暂无转载"
+    return f"没找到鸡 😢 {detail}"
 
 
-def format_top1(verdicts: list, yandex_url: str = "") -> str:
+def format_top1(verdicts: list) -> str:
     """只返回置信度最高的「社交平台」作者，单条短文本。
 
     样式（QQ 文本消息，emoji 走客户端渲染，无 PIL 字体问题）：
@@ -794,30 +646,25 @@ def format_top1(verdicts: list, yandex_url: str = "") -> str:
         https://x.com/aqua_cosplay
 
     两条筛选原则：
-    1) 平台优先 —— 不再是 verdicts[0]，而是在社交平台候选中取置信度最高者；
-       这样 Pixiv 即使分数最高也不会被报出来。
-    2) 置信度低于 _STRONG_CONFIDENCE 视为没找到 ——
-       弱证据多为转发者，直接报账号会误导（与 format_verdicts 同一教训）。
+    1) 平台优先 —— 在社交平台候选中取置信度最高者；Pixiv 即使分数最高也不报。
+    2) 置信度低于 _STRONG_CONFIDENCE 视为没找到 —— 弱证据多为转发者，不乱报。
     """
-    # verdicts 已按 confidence 降序，过滤保序 => social[0] 即社交平台里最可信的
     social = [v for v in verdicts if v.platform in _PREFERRED_PLATFORMS]
     if not social:
-        return _no_result(verdicts, yandex_url)
+        return _no_result(verdicts)
 
     v = social[0]
     if v.confidence < _STRONG_CONFIDENCE:
-        msg = "没找到鸡 😢 最像的账号可信度不足，不敢乱报"
-        if yandex_url:
-            msg += f"\n人工排查：{yandex_url}"
-        return msg
+        return "没找到鸡 😢 最像的账号可信度不足，不敢乱报"
 
     platform = "Twitter" if v.platform == "X/Twitter" else v.platform
+    name = v.display_name or v.handle
 
     lines = [
         "🎯 **lg找鸡结果**",
         "",
         f"🌐 平台：{platform}",
-        f"👤 名字：{v.handle}",
+        f"👤 名字：{name}",
         f"🆔 账号：@{v.handle}",
     ]
     url = v.post_url or v.page_url
@@ -850,146 +697,58 @@ def _platform_of(c: PostCandidate) -> str:
     return ""
 
 
-# 强证据阈值：有正文署名/官方引擎命中/同图确认之一才作为"作者候选"展示
-_STRONG_CONFIDENCE = 0.30
-
-
-def format_verdicts(verdicts: list, limit: int = 5) -> str:
-    """格式化融合结果。
-
-    教训：镜像页标题 handle 大多是转发者。仅靠弱证据（+0.10 累加）的作者
-    不允许以"作者候选"名义出现，折叠进明确标注低可信的列表，避免误导。
-    """
-    if not verdicts:
-        return (
-            "未能确定作者候选（各引擎均无署名证据）。\n"
-            "提示：配置 saucenao_api_key 可显著提升原帖命中率。"
-        )
-
-    for v in verdicts:
-        if v.platform == "未知":
-            v.platform = "身份(站内人名)"
-
-    strong = [v for v in verdicts if v.confidence >= _STRONG_CONFIDENCE]
-    weak = [v for v in verdicts if v.confidence < _STRONG_CONFIDENCE]
-
-    lines = []
-    if strong:
-        lines.append(f"作者候选（{len(strong)} 位，按置信度排序）：")
-        for v in strong[:limit]:
-            lines.append(f"  @{v.handle}  [{v.platform}]  置信度 {v.confidence:.2f}")
-            if v.post_url:
-                lines.append(f"      原帖: {v.post_url}")
-            elif v.page_url:
-                lines.append(f"      证据页: {v.page_url}")
-            for ev in v.evidence[:3]:
-                lines.append(f"      · {ev}")
-    else:
-        lines.append("未找到可靠署名证据（无正文 credit、无官方引擎命中、无同图确认）。")
-        lines.append("以下仅为结果页中出现过的账号，多为转发者，低可信：")
-        for v in weak[:limit]:
-            lines.append(f"  ? @{v.handle}  [{v.platform}]  置信度 {v.confidence:.2f}")
-    if strong and weak:
-        lines.append(f"（另有 {len(weak)} 个仅弱证据账号，多为转发者，已折叠）")
-    if not strong:
-        lines.append("提示：配置 saucenao_api_key 可显著提升原帖命中率。")
-
-    # 身份类候选（站内人名，无平台归属）附 X 搜索验证链接
-    for i, line in enumerate(lines):
-        if "[身份(站内人名)]" in line:
-            try:
-                handle = line.split("@")[1].split(" ")[0]
-            except IndexError:
-                continue
-            lines.insert(i + 1, f"      X 搜索验证: https://x.com/search?q={handle}")
-    return "\n".join(lines)
-
-
 # ---------------------------------------------------------------------------
-# 编排：多引擎并行 -> 融合 -> 文本结果
+# 编排：压缩 -> Google Lens -> 融合 -> 文本结果
 # ---------------------------------------------------------------------------
-
-
-def extract_public_url(yandex_result_url: str) -> str:
-    """从 Yandex 结果页 URL 中解出 Yandex 托管的公网原图 URL。
-
-    SauceNAO 需要一个它能抓到的图片 URL；Yandex 的
-    avatars.mds.yandex.net 托管 URL 可公开访问，符合要求。
-    """
-    m = re.search(r"url=(https[^&]+)", yandex_result_url)
-    if m:
-        return unquote(m.group(1))
-    return ""
 
 
 async def reverse_search_all(image_bytes: bytes) -> str:
     """一次完整的反向图片搜索，返回可直接发送的结果文本。
 
-    流程：Yandex 上传（顺带拿到公网 URL）-> 其余引擎并发 -> 感知哈希确认
-    -> 跨源融合 -> 只输出置信度第一名的精简文本（format_top1）。
-    任何引擎失败只记日志，不影响其他引擎。
+    流程：挑选当月未满额的 SerpApi key（计数 +1 已原子完成）-> 压缩原图 ->
+    Google Lens（必要时上传图床）-> 融合评分 -> 只输出置信度第一名的精简文本
+    （format_top1）。仅在 SerpApi 真正请求成功后才保留额度计数；上传图床等
+    前置失败会自动退回，不白白消耗免费次数。任何环节失败只记日志，返回友好
+    文案，不抛出。
     """
     cfg = load_config()
-    timeout = int(cfg.get("timeout", 20))
+    timeout = int(cfg.get("timeout", 25))
     proxy = cfg.get("proxy", "") or ""
+    keys = cfg.get("serpapi_keys") or []
 
-    candidates: list = []
-    yandex_url = ""
-    yandex_error = ""
+    if not keys:
+        return (
+            "未配置 serpapi_keys，Google Lens 无法使用。\n"
+            "在 .env 填入 SERPAPI_KEYS=[\"k1\",\"k2\"]（https://serpapi.com，免费 100 次/月/key）。"
+        )
 
-    # 1) 先做 Yandex 上传，拿到公网可访问的原图 URL（供 SauceNAO 用）
+    # 挑一个当月未满 100 次的 key（计数 +1 已原子完成）；全用完则暂停本功能
+    key, fp, remain = await _acquire_serpapi_key(cfg)
+    if not key:
+        total = len(keys) * _SERPAPI_FREE_LIMIT
+        return (
+            f"本月 SerpApi 免费额度已用完 😢（共 {len(keys)} 个 key，每个 100 次/月，"
+            f"合计 {total} 次）。次月 1 号自动重置，请稍后再试。"
+        )
+
+    up_bytes = shrink_for_upload(image_bytes)
+
     try:
-        yandex_url, yx = await search_yandex(image_bytes, timeout=timeout, proxy=proxy)
-        candidates.extend(yx)
+        candidates = await search_lens(
+            image_bytes=up_bytes,
+            api_key=key,
+            timeout=timeout,
+            proxy=proxy,
+        )
     except Exception as e:
-        yandex_error = str(e)
-        logger.warning(f"[找鸡] Yandex 失败: {e}")
-
-    # 2) 其余引擎并发（SauceNAO 需要公网图片 URL）
-    tasks: dict = {}
-    if cfg.get("saucenao_api_key") and yandex_url:
-        img_public_url = extract_public_url(yandex_url)
-        if img_public_url:
-            tasks["saucenao"] = asyncio.create_task(
-                search_saucenao(
-                    img_public_url,
-                    api_key=cfg["saucenao_api_key"],
-                    timeout=timeout,
-                    proxy=proxy,
-                )
-            )
-    if cfg.get("ascii2d_cf_clearance"):
-        tasks["ascii2d"] = asyncio.create_task(
-            search_ascii2d(
-                image_bytes,
-                timeout=timeout,
-                proxy=proxy,
-                cf_clearance=cfg["ascii2d_cf_clearance"],
-            )
-        )
-    if cfg.get("gcv_api_key"):
-        tasks["gcv"] = asyncio.create_task(
-            search_gcv(image_bytes, api_key=cfg["gcv_api_key"], timeout=timeout, proxy=proxy)
-        )
-
-    if tasks:
-        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
-        for name, res in zip(tasks.keys(), results):
-            if isinstance(res, BaseException):
-                logger.warning(f"[找鸡] {name} 失败: {res}")
-            else:
-                logger.info(f"[找鸡] {name}: {len(res)} 条")
-                candidates.extend(res)
+        # 上传图床 / SerpApi 调用失败：退回刚才占用的额度，本次不计数
+        await _refund_serpapi_key(fp)
+        logger.warning(f"[找鸡] Lens 失败: {e}")
+        return f"搜索失败：{str(e)}"
 
     if not candidates:
-        msg = "所有引擎均未返回结果。"
-        if yandex_error:
-            msg += f" Yandex: {yandex_error}"
-        return msg
+        # SerpApi 已成功返回（只是没匹配到），额度照常消耗
+        return "没找到可靠的出处 😢 换张更清晰的图，或该图全网暂无转载"
 
-    # 3) 候选原图做感知哈希硬确认
-    phash_scores = await phash_verify_all(candidates, image_bytes, proxy, timeout)
-
-    # 4) 融合评分 -> 只输出第一名（用户要求的精简样式，单条文本）
-    verdicts = fuse(candidates, phash_scores)
-    return format_top1(verdicts, yandex_url=yandex_url)
+    verdicts = fuse(candidates, None)
+    return format_top1(verdicts)
