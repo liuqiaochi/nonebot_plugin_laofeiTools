@@ -433,7 +433,66 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
 _FREESPEAK_MAX_CTX = 200
 _FREESPEAK_IMAGE_PROB = 0.15          # 自由发言模式下「偶尔配图」的概率
 
+# ---- 智能相关性触发参数 ----
+_FREESPEAK_REPLY_COOLDOWN = 30        # 同群两次接话最小间隔（秒），防刷屏
+_FREESPEAK_SILENCE_SEC = 120          # 距上次人类发言超过此值视为「冷场」，倾向接话收尾
+_FREESPEAK_PROB_HIGH = 0.85           # 强信号（被cue/提问/@他人 叠加）时接话概率
+_FREESPEAK_PROB_MID = 0.40            # 单个信号时接话概率
+_FREESPEAK_PROB_LOW = 0.12            # 无信号（纯闲聊）时接话概率
+_FREESPEAK_BOT_NAMES = ("蓝色大肥鱼", "大肥鱼", "肥鱼", "蓝鱼")
+_FREESPEAK_QUESTION_RE = re.compile(
+    r"(吗|呢|怎么|为什么|为何|啥|什么|谁|几|哪|如何|怎样|几时|多久|多少|是不是|有没有|还是|对不)"
+)
+
 _freespeak_buffer: dict = defaultdict(lambda: deque(maxlen=_FREESPEAK_MAX_CTX))
+_freespeak_last_reply_ts: dict = {}   # 群 -> bot 上次接话时间戳（冷却用）
+_freespeak_last_human_ts: dict = {}   # 群 -> 上次人类发言时间戳（冷场判断用）
+
+
+def _freespeak_at_other(event, bot) -> bool:
+    """消息中是否 @ 了「非 bot 本人」的群友（像在群里公开问/聊）"""
+    for seg in getattr(event, "message", []):
+        if seg.type == "at":
+            qq = seg.data.get("qq")
+            if qq is not None and str(qq) != str(getattr(bot, "self_id", "")):
+                return True
+    return False
+
+
+def _freespeak_should_reply(text: str, event, group_id: str, bot) -> tuple:
+    """智能相关性判断：本次是否值得 AI 接话。
+
+    返回 (should_reply: bool, reason: str)。
+    信号加权：提到 bot 名 / @他人 / 疑问句式 / 冷场，命中越多接话概率越高；
+    纯闲聊（无信号）仅以低概率偶尔接话。始终受群级冷却约束。
+    """
+    # 1) 群级冷却：避免短时间连续刷屏
+    last = _freespeak_last_reply_ts.get(group_id, 0.0)
+    now = float(getattr(event, "time", time.time()))
+    if now - last < _FREESPEAK_REPLY_COOLDOWN:
+        return False, "cooldown"
+
+    score = 0
+    # 2) 提到 bot 名字
+    if any(name in text for name in _FREESPEAK_BOT_NAMES):
+        score += 2
+    # 3) @ 了其他群友（疑似在群里公开问/聊）
+    if _freespeak_at_other(event, bot):
+        score += 2
+    # 4) 疑问句式
+    if text.rstrip().endswith(("?", "？")) or _FREESPEAK_QUESTION_RE.search(text):
+        score += 1
+    # 5) 冷场：距上次人类发言较久
+    last_human = _freespeak_last_human_ts.get(group_id, 0.0)
+    if last_human and now - last_human > _FREESPEAK_SILENCE_SEC:
+        score += 1
+
+    prob = (_FREESPEAK_PROB_HIGH if score >= 2
+            else _FREESPEAK_PROB_MID if score == 1
+            else _FREESPEAK_PROB_LOW)
+    if random.random() < prob:
+        return True, f"score={score}/prob={prob:.2f}"
+    return False, f"score={score}/prob={prob:.2f}"
 
 
 def _freespeak_sender_name(event) -> str:
@@ -586,6 +645,15 @@ async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent)
     if _is_command_message(text):
         return
 
+    # 智能相关性：仅当命中信号（被cue/提问/@他人/冷场）时高概率接话，纯闲聊低概率
+    should, reason = _freespeak_should_reply(text, event, group_id, bot)
+    if not should:
+        logger.debug(f"[自由发言] 跳过接话 group={group_id} reason={reason} text={text[:30]}")
+        return
+
+    # 更新人类发言时间戳（供冷场判断；放在决策之后，不影响本次判定）
+    _freespeak_last_human_ts[group_id] = float(getattr(event, "time", time.time()))
+
     messages = _build_freespeak_messages(prev, text)
 
     try:
@@ -614,6 +682,8 @@ async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent)
 
     # 普通发送（不引用）
     await _send_freespeak_reply(matcher, reply)
+    # 记录 bot 接话时间（群级冷却用）
+    _freespeak_last_reply_ts[group_id] = time.time()
 
     # 偶尔配图，与文字分开发
     if random.random() < _FREESPEAK_IMAGE_PROB:
