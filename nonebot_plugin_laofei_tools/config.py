@@ -26,6 +26,11 @@ class Config(BaseModel):
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-flash"
 
+    # Grok (xAI) AI 配置（可选；启用后可在群内切换对话/图反推到 Grok）
+    grok_api_key: str = ""
+    grok_model: str = "grok-4"
+    grok_vision_model: str = "grok-4"
+
     # NovelAI 画图配置
     novelai_api_key: str = ""
     novelai_model: str = "nai-diffusion-4-5-curated"

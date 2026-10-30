@@ -50,6 +50,8 @@ from ..config import (
     DATA_DIR,
 )
 
+from . import llm_providers
+
 # ========== 启动时检查 API Key ==========
 
 driver = get_driver()
@@ -66,6 +68,12 @@ async def _check_api_key():
         logger.error("=" * 50)
     else:
         logger.info(f"DeepSeek API Key 已配置 (模型: {getattr(driver.config, 'deepseek_model', 'deepseek-flash')})")
+
+    # 校验各 LLM 服务商 key（Grok 等可选服务商，缺失仅告警不阻断启动）
+    try:
+        llm_providers.check_provider_keys()
+    except Exception as e:
+        logger.warning(f"[LLM] 服务商 key 校验异常（不影响启动）: {e}")
 
 # ========== 聊天记忆 ==========
 
@@ -165,27 +173,14 @@ def _split_long_message(text: str, max_len: int = 4000) -> list[str]:
     return chunks
 
 
-def _get_client() -> OpenAI:
-    """获取 OpenAI 客户端（指向 DeepSeek），如未配置 API Key 则直接报错"""
-    try:
-        driver = get_driver()
-        config = driver.config
-        api_key = getattr(config, "deepseek_api_key", "")
-    except Exception:
-        api_key = ""
-    if not api_key:
-        raise ValueError(
-            "DeepSeek API Key 未配置！请在 .env 中设置 DEEPSEEK_API_KEY=sk-xxx"
-        )
-    return OpenAI(api_key=api_key, base_url="https://api.deepseek.com", timeout=60.0)
+def _get_client(group_id: str = "") -> OpenAI:
+    """[兼容] 按群解析 AI 对话服务商客户端（默认 deepseek）。新代码请直接用 llm_providers.build_client。"""
+    return llm_providers.build_client(group_id or "", "ai_chat")
 
 
-def _get_model() -> str:
-    """返回当前配置的 DeepSeek 对话模型（config.deepseek_model，默认 deepseek-flash）"""
-    try:
-        return getattr(get_driver().config, "deepseek_model", "deepseek-flash")
-    except Exception:
-        return "deepseek-flash"
+def _get_model(group_id: str = "") -> str:
+    """[兼容] 按群解析 AI 对话模型。新代码请直接用 llm_providers.get_chat_model。"""
+    return llm_providers.get_chat_model(group_id or "", "ai_chat")
 
 
 def _extract_at_users(message) -> list[str]:
@@ -339,13 +334,13 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
 
     # 4. 检查 API 是否可用
     try:
-        client = _get_client()
+        client = _get_client(group_id)
     except ValueError as e:
         logger.error(f"AI API Key 未配置: {e}")
-        await matcher.send(f"AI 功能未配置 API Key，请联系管理员。\n请在 .env 中设置 DEEPSEEK_API_KEY", reply_message=True)
+        await matcher.send(f"AI 功能配置错误：{e}（请管理员检查对应服务商的 API Key：DEEPSEEK_API_KEY / GROK_API_KEY）", reply_message=True)
         return
 
-    model = _get_model()
+    model = _get_model(group_id)
 
     # 5. 保存 + 构建消息
     _add_history(user_id, "user", prompt)
@@ -644,12 +639,12 @@ async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent)
     messages = _build_freespeak_messages(prev, text)
 
     try:
-        client = _get_client()
+        client = _get_client(group_id)
     except ValueError as e:
         logger.error(f"[自由发言] API Key 未配置: {e}")
         return
 
-    model = _get_model()
+    model = _get_model(group_id)
     try:
         logger.info(f"[自由发言] group={group_id} user={user_id} prompt={text[:50]}...")
         response = await asyncio.to_thread(

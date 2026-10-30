@@ -299,7 +299,8 @@ function renderDashboard(){
   const naig=D.novelai_enabled_groups?.enabled_groups||[];
   const pdg=D.points_disabled_groups?.disabled_groups||[];
   const sw=D.module_switches?.switches||{};
-  const dmg=D.deepseek_model_groups?.model_groups||{};
+  const lpg=D.llm_provider_groups||{};
+  const PL={'deepseek':'DeepSeek','grok':'Grok (xAI)'};
   const nmg=D.novelai_model_groups?.model_groups||{};
 
   // ============ render ============
@@ -412,7 +413,7 @@ function renderDashboard(){
   const swHead=['群组',...SW_ORDER.map(k=>SW_LABEL[k])];
   const swRows=Object.entries(sw).map(([gid,rec])=>[{v:'#'+gid.slice(-4)}].
     concat(SW_ORDER.map(k=>({v:`<span class="pill ${swEff(rec,k)?'on':'off'}">${swEff(rec,k)?'✅':'❌'}</span>`}))));
-  const dmgRows=Object.entries(dmg).map(([g,m])=>[{v:'#'+g.slice(-4)},{v:m.model||'-'},{v:m.base_url?m.base_url:'<span class="muted">默认</span>'}]);
+  const lpgRows=Object.entries(lpg.groups||{}).map(([g,rec])=>[{v:'#'+g.slice(-4)},{v:PL[rec.ai_chat]||rec.ai_chat||'-'},{v:PL[rec.reverse]||rec.reverse||'-'}]);
   const nmgRows=Object.entries(nmg).map(([g,m])=>[{v:'#'+g.slice(-4)},{v:m}]);
   html+=section('groups','⚙️','群组与功能','功能开关 · AI 模型配置',
     `<div class="grid g-kpi">
@@ -423,7 +424,7 @@ function renderDashboard(){
     </div>
     <div class="grid g-2" style="margin-top:18px">
       ${card('功能开关矩阵',swRows.length?table(swHead,swRows):'<span class="muted">无配置</span>','每行为一个群组的八项功能开关状态')}
-      ${card('DeepSeek 模型分组',dmgRows.length?table(['群组','模型','Base URL'],dmgRows):'<span class="muted">无配置</span>')}
+      ${card('LLM 服务商分组',lpgRows.length?table(['群组','对话','图反推'],lpgRows):'<span class="muted">无配置（均默认 DeepSeek）</span>')}
     </div>
     <div class="grid" style="margin-top:18px">
       ${card('NovelAI 模型分组',nmgRows.length?table(['群组','模型'],nmgRows):'<span class="muted">无配置</span>')}

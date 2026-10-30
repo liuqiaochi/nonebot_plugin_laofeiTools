@@ -71,7 +71,7 @@ STORAGE_FILES = [
     ("novelai_enabled_groups", "novelai_enabled_groups.json"),
     ("points_disabled_groups", "points_disabled_groups.json"),
     ("module_switches", "module_switches.json"),
-    ("deepseek_model_groups", "deepseek_model_groups.json"),
+    ("llm_provider_groups", "llm_provider_groups.json"),
     ("novelai_model_groups", "novelai_model_groups.json"),
     ("novelai_user_settings", "novelai_user_settings.json"),
 ]

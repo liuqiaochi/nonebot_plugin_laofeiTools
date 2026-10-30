@@ -1,10 +1,10 @@
 """
 图反推提示词
 
-调用 DeepSeek 视觉模型，从用户发送/引用的图片，或 @群友 的头像反推可用于 NovelAI 的 AI 绘画提示词。
+调用 LLM 视觉模型（按本群「图反推」配置，默认 DeepSeek），从用户发送/引用的图片，或 @群友 的头像反推可用于 NovelAI 的 AI 绘画提示词。
 权限：普通用户可用，但仅「已开启 AI 功能（ai_chat 模块）」的群生效；私聊不受群开关限制。
-依赖：deepseek_api_key 已配置。
-注意：视觉模型与对话模型（config.deepseek_model）解耦，视觉模型固定使用 VISION_MODEL 常量（DeepSeek-V4.1-Flash，当前官方唯一视觉 ID）。
+依赖：至少一个 LLM 服务商的 API Key（DeepSeek / Grok，按群配置 llm_provider_groups.json）。
+注意：视觉模型与对话模型解耦，由 llm_providers 按本群「图反推」所选服务商动态解析（DeepSeek 视觉固定 deepseek-flash，Grok 取 grok_vision_model）。
 """
 
 import asyncio
@@ -34,14 +34,13 @@ from ..config import (
     disable_reverse_polish,
 )
 from .utils import download_image
-from .ai_chat import _get_client, _get_model
+from . import llm_providers
 from .novelai_draw import draw_prompt_to_image
 
-# 视觉模型固定 slug，与对话模型（config.deepseek_model）分离。
-# DeepSeek-V4.1 起视觉能力已原生并入 deepseek-flash（即 V4.1-Flash），不再有独立 vision slug；
-# 旧的 deepseek-v4-flash-vision-exp 已于 2026-09-10 退役，仅作兼容别名路由到 4.1-Flash。
-# 故视觉模型固定为 deepseek-flash（当前官方视觉 ID），对话模型即使配 deepseek-chat 纯文本也不影响图反推。
-VISION_MODEL = "deepseek-flash"
+# 视觉模型不再硬编码为固定 slug：由 llm_providers 按本群「图反推」所选服务商动态解析
+# （DeepSeek 视觉固定 deepseek-flash；Grok 视觉取 config.grok_vision_model）。
+# 见 llm_providers.get_vision_model / get_vision_extra_body。
+VISION_MODEL = "deepseek-flash"  # 保留作默认值常量（无群配置时的回退）
 
 # 图反推全局串行队列：同一时刻仅一个任务访问视觉模型，其余并发请求排队（避免打爆 DeepSeek API）
 _reverse_lock = asyncio.Lock()
@@ -108,7 +107,7 @@ def _extract_nai_metadata(raw: bytes) -> dict | None:
         return None
 
 
-async def _resolve_metadata_prompt(meta: dict, need_optimize: bool):
+async def _resolve_metadata_prompt(meta: dict, need_optimize: bool, group_id: str = ""):
     """对元数据提取到的提示词做可选润色，返回 (prompt, optimized_flag)。无 prompt 返回 (None, False)。"""
     prompt = (meta.get("prompt") or "").strip()
     if not prompt:
@@ -116,7 +115,7 @@ async def _resolve_metadata_prompt(meta: dict, need_optimize: bool):
     optimized = False
     if need_optimize:
         try:
-            opt = await _optimize_prompt(prompt)
+            opt = await _optimize_prompt(prompt, group_id)
             if opt:
                 prompt = opt
                 optimized = True
@@ -174,8 +173,8 @@ async def handle_reverse_prompt(
 ):
     """从消息内/引用图片，或 @群友 头像反推 AI 绘画提示词（仅已开启 AI 功能的群可用）"""
     # 0. 群聊开关守卫：仅「已开启 AI 功能（ai_chat 模块）」的群可用；私聊放行
-    gid = getattr(event, "group_id", None)
-    if gid is not None and not is_ai_group_enabled(str(gid)):
+    gid = str(event.group_id) if getattr(event, "group_id", None) is not None else ""
+    if gid and not is_ai_group_enabled(gid):
         # 统一开关层约定：模块关闭时静默拦截，不回复
         await matcher.finish()
         return
@@ -190,7 +189,7 @@ async def handle_reverse_prompt(
 
     # 检测是否要求 DS 文本模型优化：消息含优化关键字，或本群已开启图反推润色开关（默认关）
     need_optimize = any(kw in _message_text(event) for kw in OPTIMIZE_KEYWORDS)
-    if gid is not None and is_reverse_polish_enabled(str(gid)):
+    if gid and is_reverse_polish_enabled(gid):
         need_optimize = True
 
     await matcher.send("正在反推提示词，请稍候...")
@@ -212,14 +211,14 @@ async def handle_reverse_prompt(
         # 2.5 先尝试读取 NovelAI 嵌入元数据（图片残留信息）；命中则直接采用，跳过视觉反推省一次 API 调用
         meta = _extract_nai_metadata(image_data)
         if meta and meta.get("prompt"):
-            prompt, optimized = await _resolve_metadata_prompt(meta, need_optimize)
+            prompt, optimized = await _resolve_metadata_prompt(meta, need_optimize, gid)
             if prompt:
                 msg = Message()
                 if getattr(event, "message_id", None):
                     msg.append(MessageSegment.reply(event.message_id))
                 head = "以下为从图片元数据提取的提示词（NovelAI 原图残留信息），可直接使用"
                 if optimized:
-                    head += "（已用 DeepSeek 润色）"
+                    head += "（已润色）"
                 head += "："
                 body = prompt
                 extras = _format_metadata_extras(meta)
@@ -237,20 +236,20 @@ async def handle_reverse_prompt(
             await matcher.finish("图片无法解码，请换一张图重试")
             return
 
-        # 3. 调用 DeepSeek 视觉模型反推提示词
+        # 3. 调用视觉模型反推提示词（服务商按本群「图反推」设置解析）
         try:
-            client = _get_client()
+            client = llm_providers.build_client(gid, "reverse")
+            vision_model = llm_providers.get_vision_model(gid, "reverse")
+            extra_body = llm_providers.get_vision_extra_body(gid, "reverse")
             data_url = f"data:image/png;base64,{base64.b64encode(image_data).decode()}"
             # 注意：OpenAI SDK 的 chat.completions.create 是**同步阻塞**调用，
             # 必须放进线程池（asyncio.to_thread）以免冻结整个事件循环；
             # 视觉请求比纯文本慢，且不设 timeout 会永久挂起，故显式 timeout=60。
-            # 关键：DeepSeek 视觉模型（deepseek-flash = V4.1-Flash）默认开启“思考模式”，
-            # 会把整段 max_tokens 预算花在 reasoning_content 上，
-            # 导致最终 content 为空（finish_reason=length）。显式关闭思考模式，
-            # 确保直接输出提示词（已确认是官方视觉模型的已知行为，非本插件问题）。
-            response = await asyncio.to_thread(
-                client.chat.completions.create,
-                model=VISION_MODEL,
+            # 关键：DeepSeek 视觉模型默认开启“思考模式”，会把整段 max_tokens 预算花在
+            # reasoning_content 上导致 content 为空（finish_reason=length）。llm_providers
+            # 已按服务商决定是否附加 extra_body 关闭思考模式（DeepSeek 关闭，Grok 不带）。
+            create_kwargs = dict(
+                model=vision_model,
                 messages=[
                     {
                         "role": "user",
@@ -263,15 +262,20 @@ async def handle_reverse_prompt(
                 temperature=0.5,
                 max_tokens=800,
                 timeout=60,
-                extra_body={"thinking": {"type": "disabled"}},
+            )
+            if extra_body:
+                create_kwargs["extra_body"] = extra_body
+            response = await asyncio.to_thread(
+                client.chat.completions.create,
+                **create_kwargs,
             )
             prompt = (response.choices[0].message.content or "").strip()
         except ValueError as e:
-            # DeepSeek API Key 未配置
+            # 服务商 API Key 未配置
             await matcher.finish(f"图反推配置错误：{e}")
             return
         except Exception as e:
-            logger.error(f"图反推调用 DeepSeek 失败: {e}")
+            logger.error(f"图反推调用视觉模型失败: {e}")
             # 直接回显异常类型与信息便于排查，而非一律“请稍后再试”
             await matcher.finish(f"反推失败：{type(e).__name__} - {e}")
             return
@@ -283,7 +287,7 @@ async def handle_reverse_prompt(
                 fr = getattr(choice, "finish_reason", None)
                 has_reason = bool(getattr(choice.message, "reasoning_content", None))
                 logger.warning(
-                    f"图反推返回空内容: model={VISION_MODEL}, finish_reason={fr}, "
+                    f"图反推返回空内容: model={vision_model}, finish_reason={fr}, "
                     f"有reasoning_content={has_reason}（多为视觉模型思考模式耗尽预算）"
                 )
                 detail = f"（finish_reason={fr}，思考模式={has_reason}）"
@@ -296,7 +300,7 @@ async def handle_reverse_prompt(
         optimized_flag = False
         if need_optimize:
             try:
-                optimized = await _optimize_prompt(prompt)
+                optimized = await _optimize_prompt(prompt, gid)
                 if optimized:
                     prompt = optimized
                     optimized_flag = True
@@ -384,16 +388,17 @@ def _message_text(event: MessageEvent) -> str:
     )
 
 
-async def _optimize_prompt(raw: str) -> str:
-    """用 DS 文本模型（_get_model()，即 config.deepseek_model）对原始反推词做润色整理。
+async def _optimize_prompt(raw: str, group_id: str = "") -> str:
+    """用本群「图反推」所选服务商的文本模型对原始反推词做润色整理。
 
-    复用 _get_client（共用 DEEPSEEK_API_KEY 与 base_url）；同步阻塞调用必须丢进线程池并设 timeout，
+    按 group_id 经 llm_providers 解析服务商与模型；同步阻塞调用必须丢进线程池并设 timeout，
     避免冻结事件循环或永久挂起。返回空字符串表示优化失败/空结果。
     """
-    client = _get_client()
+    client = llm_providers.build_client(group_id, "reverse")
+    model = llm_providers.get_chat_model(group_id, "reverse")
     response = await asyncio.to_thread(
         client.chat.completions.create,
-        model=_get_model(),
+        model=model,
         messages=[
             {"role": "system", "content": OPTIMIZE_INSTRUCTION},
             {"role": "user", "content": raw},
@@ -579,7 +584,7 @@ async def handle_reverse_ai_draw(
         # 3.0 先尝试读取 NovelAI 嵌入元数据；命中则跳过视觉反推，直接拿原图提示词出图
         meta = _extract_nai_metadata(image_data)
         if meta and meta.get("prompt"):
-            prompt, _ = await _resolve_metadata_prompt(meta, need_optimize)
+            prompt, _ = await _resolve_metadata_prompt(meta, need_optimize, gid)
             if prompt:
                 await draw_prompt_to_image(bot, event, matcher, prompt)
                 return
@@ -591,13 +596,14 @@ async def handle_reverse_ai_draw(
             await matcher.finish("图片无法解码，请换一张图重试")
             return
 
-        # 3.1 视觉模型反推
+        # 3.1 视觉模型反推（服务商按本群「图反推」设置解析）
         try:
-            client = _get_client()
+            client = llm_providers.build_client(gid, "reverse")
+            vision_model = llm_providers.get_vision_model(gid, "reverse")
+            extra_body = llm_providers.get_vision_extra_body(gid, "reverse")
             data_url = f"data:image/png;base64,{base64.b64encode(image_data).decode()}"
-            response = await asyncio.to_thread(
-                client.chat.completions.create,
-                model=VISION_MODEL,
+            create_kwargs = dict(
+                model=vision_model,
                 messages=[
                     {
                         "role": "user",
@@ -610,7 +616,12 @@ async def handle_reverse_ai_draw(
                 temperature=0.5,
                 max_tokens=800,
                 timeout=60,
-                extra_body={"thinking": {"type": "disabled"}},
+            )
+            if extra_body:
+                create_kwargs["extra_body"] = extra_body
+            response = await asyncio.to_thread(
+                client.chat.completions.create,
+                **create_kwargs,
             )
             prompt = (response.choices[0].message.content or "").strip()
         except ValueError as e:
@@ -635,7 +646,7 @@ async def handle_reverse_ai_draw(
         # 3.2 可选 DS 文本润色（失败不阻断，回退原始反推词）
         if need_optimize:
             try:
-                optimized = await _optimize_prompt(prompt)
+                optimized = await _optimize_prompt(prompt, gid)
                 if optimized:
                     prompt = optimized
             except Exception as e:
