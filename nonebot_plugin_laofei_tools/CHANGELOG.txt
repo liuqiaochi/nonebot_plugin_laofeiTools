@@ -9,6 +9,18 @@
    概率：强信号(≥2) 85% / 单信号 40% / 纯闲聊 12%；始终受群级冷却约束（同群 30s 内只接一次，防刷屏）
    新增状态字典 _freespeak_last_reply_ts（冷却用）、_freespeak_last_human_ts（冷场判断用）；handle_freespeak 决策阶段接入、发送成功后写回接话时间
 3.微调自由发言相关性：移除「@其他群友」加权信号（@他人与 bot 无关，不再算作接话依据）；群级冷却由 30s 改为 10s
+4.新增「lg找鸡」反向图片搜索指令（别名 lg找🐔 / 龙哥找鸡 / 这是骚鸡）：移植 astrbot_plugin_bitchfinder 的多引擎后端，找图片出处与作者（含 X 原帖）；与 lg搜图 共用同一搜图模块门禁
+   后端：Yandex（.com/.ru 双域名互备，无需 key）+ SauceNAO（需 key，直出作者与原帖）+ ascii2d（需 cf_clearance）+ Google Vision（需 GCP key），缺 key 的引擎自动跳过、互不影响；流程为 Yandex 上传取公网图 URL → 其余引擎并发 → 感知哈希同图确认 → 跨源置信度融合
+   为何不复用 soutubot：soutubot.moe 只有动漫/本子垂直库，搜不到 x.com / 微博 / 小红书 等站点的图（lg搜图 仍走 soutubot，两条指令定位互补）
+   新增 search/reverse.py（网络层用 httpx，不引入 aiohttp 依赖）；config.py 新增 6 项可选配置：longge_reverse_timeout / longge_reverse_proxy / longge_reverse_max_results / saucenao_api_key / gcv_api_key / ascii2d_cf_clearance
+   健壮性：原实现对每个候选 handle 串行下载至多 3 张图做哈希确认，未配 SauceNAO key 时常有 50+ 噪声 handle，最坏上百次请求在 QQ 里会卡死；新增三重闸门（handle 上限 12 / 单图超时 10s / 总预算 30s）
+   图片输入：lg搜图 与 lg找鸡 均支持「同条消息带图」或「引用图片」（原 lg搜图 仅支持引用），共用公共 _extract_image_url；结果以合并转发文本节点发送（失败回退纯文本）
+   4 个触发词已登记进 module_switch.MODULE_USE_COMMANDS，由统一守卫在搜图模块关闭时静默拦截；搜图帮助图已同步更新（避开 emoji 字形，中文字体缺 emoji 会渲染成方块）
+5.反搜索引擎可用性自检：启动时在日志打印一行「[lg找鸡] 反搜索引擎：yandex, saucenao, ...」，缺 key 的引擎显示成「-引擎名(原因)」，便于确认 .env 里的 saucenao_api_key 是否真的读到（此前 engine_status 只定义未被调用）
+   NoneBot 的 Config 继承 BaseSettings 且 case_sensitive=False，故 .env 中 SAUCENAO_API_KEY 与 saucenao_api_key 均可被读到（与现有大写 NOVELAI_API_KEY 同理）
+6.lg找鸡 结果改为精简样式、只返回置信度第一名：🎯 鱼鱼找鸡结果 + 平台/名字/账号/原帖链接四行，单条文本直接发送（不再合并转发、不再附 Yandex 出处列表）
+   新增 format_top1()（format_verdicts 保留备用）；第一名置信度不足强证据阈值（0.30，多为转发者）时报「没找到鸡」而非乱报账号，无结果时附 Yandex 结果页链接供人工排查
+   删除已无调用者的 send_text_result；reverse_search_all 的 max_results 变量随之移除（longge_reverse_max_results 配置项保留）
 
 ## 2026-10-28
 1.新增 4 个特殊配饰（图1 定义，仅商店购买不可掉落）：车剧星月发冠（体力+50/运气+45/好感获取×1.4，15000）、盈缺的小翅膀（武力+30/体力+40/最大血量+12%/平血量+50，17000）、人机魔法盐铃（武力+50/运气+40/体力+35/抚摸好感额外+45，20000）、大肥鱼的米饭盆（武力+40/运气+40/体力+40/平血量+45/好感获取×1.5，25000）

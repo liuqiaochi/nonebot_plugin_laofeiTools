@@ -30,6 +30,15 @@ class Config(BaseModel):
     novelai_api_key: str = ""
     novelai_model: str = "nai-diffusion-4-5-curated"
 
+    # ---- 反向图片搜索（lg找鸡）多引擎配置，均为可选 ----
+    # Yandex 无需任何 key 即可用；其余引擎缺 key/缺 cookie 会自动跳过，不影响其他引擎。
+    longge_reverse_timeout: int = 20        # 单引擎请求超时（秒）
+    longge_reverse_proxy: str = ""          # 访问外网引擎的代理，留空则直连
+    longge_reverse_max_results: int = 5     # 返回的作者候选 / 出处条目数量上限
+    saucenao_api_key: str = ""              # SauceNAO（免费，100 次/天）：直接返回作者与 X 原帖 URL
+    gcv_api_key: str = ""                   # Google Cloud Vision（付费）：webDetection 匹配页
+    ascii2d_cf_clearance: str = ""          # ascii2d 的 cf_clearance cookie（会过期）
+
 
 # 数据文件路径（锚定项目根目录，不依赖运行时 CWD，避免覆盖文件后数据丢失）
 DATA_DIR = Path("data/laofei_tools")

@@ -2,8 +2,11 @@
 NoneBot 指令处理
 
 指令：
-    lg搜图 - 引用图片进行以图搜图（群聊可用，需先开启）
-    开启lg搜图 - 超级用户开启群聊搜图功能
+    lg搜图 - 以图搜图（后端 soutubot.moe，动漫/本子垂直库），群聊可用、需先开启
+    lg找鸡 - 反向图片搜索（后端 Yandex/SauceNAO/ascii2d/GCV，能搜 x.com 等站点）
+    开启lg搜图 / 关闭lg搜图 - 超级用户管理群聊搜图功能
+
+图片输入：两条指令均支持「同条消息带图」或「引用一条图片消息」。
 """
 
 from typing import List, Optional
@@ -25,6 +28,16 @@ from nonebot.permission import SUPERUSER
 from ..config import enable_group, is_group_enabled
 from ..common.utils import download_image
 from .soutubot import KIND_DOUJINSHI, get_client
+from .reverse import engine_status, load_config as _load_reverse_config, reverse_search_all
+
+
+# 启动时打印一次反搜索引擎可用性，便于确认 key/cookie 是否真的读到
+# （缺哪些 key 会显示成 -引擎名(原因)，不影响其余引擎）
+try:
+    _engines = ", ".join(engine_status(_load_reverse_config()))
+    logger.info(f"[lg找鸡] 反搜索引擎：{_engines}")
+except Exception:
+    logger.exception("[lg找鸡] 反搜索引擎状态读取失败")
 
 
 # ========== 搜图指令 ==========
@@ -36,6 +49,51 @@ search_image = on_command(
 )
 
 
+# ========== 公共搜索逻辑 ==========
+
+def _extract_image_url(event: MessageEvent) -> Optional[str]:
+    """从当前消息或被回复消息中提取第一张图片的 URL（同条带图 / 引用带图均可）。
+
+    优先取当前消息中的图片，其次取被回复消息中的图片；任一命中即返回，
+    都没有返回 None。图片 segment 的 url / file 字段均可作为下载入口。
+    """
+    for seg in event.message:
+        if seg.type == "image":
+            return seg.data.get("url") or seg.data.get("file")
+    if event.reply:
+        for seg in event.reply.message:
+            if seg.type == "image":
+                return seg.data.get("url") or seg.data.get("file")
+    return None
+
+
+async def _run_search(matcher: Matcher, bot: Bot, event: MessageEvent, image_url: str) -> None:
+    """下载图片 -> 调用搜图 API -> 发送合并转发结果（搜图类指令共用）。
+
+    搜索中提示、下载失败、API 异常等均以 finish 文本兜底；成功则由
+    send_forward_message 发出合并转发并自然结束。
+    """
+    await matcher.send("正在搜索中，请稍候...")
+    try:
+        image_data = await download_image(bot, image_url)
+        if not image_data:
+            await matcher.finish("图片下载失败，请重试")
+            return
+
+        logger.info(f"图片下载成功，大小: {len(image_data)} bytes")
+
+        client = await get_client()
+        result = await client.search(image_data)
+
+        logger.info(f"搜图API返回: {result}")
+
+        await send_forward_message(bot, event, result)
+
+    except Exception as e:
+        logger.exception("搜图失败")
+        await matcher.finish(f"搜索失败：{str(e)}")
+
+
 @search_image.handle()
 async def handle_search_image(
     matcher: Matcher,
@@ -43,58 +101,82 @@ async def handle_search_image(
     event: MessageEvent,
     args: Message = CommandArg(),
 ):
-    """处理搜图指令"""
-    
+    """处理搜图指令（同条带图或引用图片均可）"""
     # 1. 私聊不可用
     if isinstance(event, PrivateMessageEvent):
         await matcher.finish("搜图功能仅在群聊可用")
         return
-    
+
     # 2. 检查群聊是否开启了功能
     group_id = str(event.group_id)
     if not is_group_enabled(group_id):
         await matcher.finish()
         return
-    
-    # 3. 检查是否引用了消息
-    if not event.reply:
-        await matcher.finish("请引用一张图片后发送「lg搜图」")
-        return
-    
-    # 4. 获取被引用消息中的图片
-    image_url: Optional[str] = None
-    for seg in event.reply.message:
-        if seg.type == "image":
-            image_url = seg.data.get("url") or seg.data.get("file")
-            break
-    
+
+    # 3. 获取图片（同条消息带图 或 引用图片，与 lg找鸡 输入规则一致）
+    image_url = _extract_image_url(event)
     if not image_url:
-        await matcher.finish("引用的消息中没有图片，请引用一张图片后发送「lg搜图」")
+        await matcher.finish("请发送一张图片，或引用一张图片后发送「lg搜图」")
         return
-    
-    # 5. 发送等待提示
-    await matcher.send("正在搜索中，请稍候...")
-    
+
+    # 4. 复用公共搜索逻辑
+    await _run_search(matcher, bot, event, image_url)
+
+
+# ========== 找鸡指令（lg找鸡 / 别名：lg找🐔、龙哥找鸡、这是骚鸡） ==========
+# 参考 astrbot_plugin_bitchfinder：多引擎反向图片搜索，返回出处与作者（含 X 原帖）。
+# 与 lg搜图 的核心区别：后端不同。
+#   lg搜图 -> soutubot.moe（动漫/本子垂直库）
+#   lg找鸡 -> Yandex / SauceNAO / ascii2d / Google Vision（通用搜索，能搜 x.com 等）
+find_chicken = on_command(
+    "lg找鸡",
+    aliases={"lg找🐔", "龙哥找鸡", "这是骚鸡"},
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+@find_chicken.handle()
+async def handle_find_chicken(
+    matcher: Matcher,
+    bot: Bot,
+    event: MessageEvent,
+):
+    """处理找鸡指令（多引擎反向图片搜索）"""
+    # 1. 私聊不可用
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish("搜图功能仅在群聊可用")
+        return
+
+    # 2. 复用搜图模块门禁（与 lg搜图 同一开关）
+    group_id = str(event.group_id)
+    if not is_group_enabled(group_id):
+        await matcher.finish()
+        return
+
+    # 3. 从当前消息或被回复消息提取图片
+    image_url = _extract_image_url(event)
+    if not image_url:
+        await matcher.finish("请发送一张图片，或引用一张图片后发送「lg找鸡」")
+        return
+
+    await matcher.send("正在多引擎反搜，请稍候……")
+
     try:
-        # 下载图片
         image_data = await download_image(bot, image_url)
         if not image_data:
             await matcher.finish("图片下载失败，请重试")
             return
-        
-        logger.info(f"图片下载成功，大小: {len(image_data)} bytes")
-        
-        # 调用搜图 API
-        client = await get_client()
-        result = await client.search(image_data)
-        
-        logger.info(f"搜图API返回: {result}")
-        
-        # 构建并发送合并转发消息
-        await send_forward_message(bot, event, result)
-        
+
+        logger.info(f"[找鸡] 图片下载成功，大小: {len(image_data)} bytes")
+
+        text = await reverse_search_all(image_data)
+        # 精简单条结果（只含第一名作者），直接发送，不走合并转发
+        await matcher.finish(text)
+
     except Exception as e:
-        logger.exception("搜图失败")
+        logger.exception("找鸡（多引擎反搜）失败")
         await matcher.finish(f"搜索失败：{str(e)}")
 
 
@@ -419,7 +501,8 @@ async def handle_search_help(matcher: Matcher, event: MessageEvent):
     # 内容
     sections = [
         ("搜图指令", [
-            ("lg搜图", "引用图片进行搜索（soutubot）"),
+            ("lg搜图", "动漫/本子反搜（soutubot）"),
+            ("lg找鸡", "全站反搜，找出处与作者"),
         ]),
         ("管理指令", [
             ("开启lg搜图", "开启搜图功能（超管）"),
@@ -428,8 +511,10 @@ async def handle_search_help(matcher: Matcher, event: MessageEvent):
     ]
     tips = [
         "1. 需要超级用户先发送「开启lg搜图」开启功能",
-        "2. 引用一张图片后发送「lg搜图」进行搜索",
-        "3. 搜图功能仅在群聊可用",
+        "2. 两种输入：同条消息带图，或引用一条图片消息",
+        "3. lg搜图=动漫/本子库；lg找鸡=全站找出处与作者",
+        "4. lg找鸡 别名：龙哥找鸡 / 这是骚鸡",
+        "5. 搜图功能仅在群聊可用",
     ]
 
     # 计算高度
