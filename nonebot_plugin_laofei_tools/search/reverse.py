@@ -618,10 +618,8 @@ def fuse(candidates: list, phash_scores: Optional[dict] = None) -> list:
                 h = _clean(url_m.group(1))
             if h:
                 exact = c.weight >= 0.75
-                a = _author(
-                    h,
-                    platform if platform and platform != "未知" else "X/Twitter",
-                )
+                # 平台识别不出时保留「未知」，不再硬算成 X/Twitter（避免误标推特）
+                a = _author(h, platform or "未知")
                 a.confidence = min(1.0, a.confidence + (0.35 if exact else 0.20))
                 a.domains.add(domain_root)
                 if not via_post:
@@ -669,26 +667,26 @@ def _no_result(verdicts: list) -> str:
 
 
 def format_top1(verdicts: list) -> str:
-    """只返回置信度最高的「社交平台」作者，单条短文本。
+    """把融合结果渲染成单条文本，列出所有可信社交作者（弱证据不报）。
 
     样式（QQ 文本消息，emoji 走客户端渲染，无 PIL 字体问题）：
         🎯 **lg找姬结果**
 
+        ——— #1 Twitter ———
         🌐 平台：Twitter
         👤 名字：aqua_cosplay
         🆔 账号：@aqua_cosplay
         https://x.com/aqua_cosplay
 
-    两条筛选原则：
-    1) 平台优先 —— 在社交平台候选中取置信度最高者；Pixiv 即使分数最高也不报。
-    2) 置信度低于 _STRONG_CONFIDENCE 视为没找到 —— 弱证据多为转发者，不乱报。
+    筛选原则：只认社交平台（Pixiv 即使分数最高也不报）；置信度低于
+    _STRONG_CONFIDENCE 的弱证据多为转发者，不列入正式结果。
     """
     items = _verdict_items(verdicts)
     if not items:
         return _no_result(verdicts)
-    if items[0]["weak"]:
+    if all(it["weak"] for it in items):
         return "没找到姬 😢 最像的账号可信度不足，不敢乱报"
-    return _render_one(items[0])
+    return _render_all(items)
 
 
 def _render_one(item: dict) -> str:
@@ -708,6 +706,29 @@ def _render_one(item: dict) -> str:
     return "\n".join(lines)
 
 
+def _render_all(items: list) -> str:
+    """多个候选渲染成单条文本：标题+配图只一次，随后逐段列出（弱证据跳过）。"""
+    show = [it for it in items if not it.get("weak")]
+    if not show:
+        show = list(items)  # 全弱证据时也照列，交由调用方决定是否判没找到
+    lines = [RESULT_TITLE]
+    img = finded_cq()
+    if img:
+        lines.append(img)
+    lines.append("")
+    for i, it in enumerate(show, 1):
+        if len(show) > 1:
+            lines.append(f"——— #{i} {it['platform']} ———")
+        lines += [
+            f"🌐 平台：{it['platform']}",
+            f"👤 名字：{it['name']}",
+            f"🆔 账号：@{it['handle']}",
+        ]
+        if it.get("url"):
+            lines.append(it["url"])
+    return "\n".join(lines)
+
+
 def _verdict_items(verdicts: list) -> list:
     """融合判定 -> 可展示项列表（verdicts 已按置信度降序，此处保持顺序）。
 
@@ -716,11 +737,13 @@ def _verdict_items(verdicts: list) -> list:
     """
     items = []
     for v in verdicts or []:
-        if v.platform not in _PREFERRED_PLATFORMS:
+        # 只认社交平台；识别不出的标「未知平台」也保留（不再冒充推特），弱证据阈值再筛
+        if v.platform not in _PREFERRED_PLATFORMS and v.platform != "未知":
             continue
+        plat = "未知平台" if v.platform == "未知" else v.platform
         items.append(
             {
-                "platform": "Twitter" if v.platform == "X/Twitter" else v.platform,
+                "platform": "Twitter" if v.platform == "X/Twitter" else plat,
                 "name": v.display_name or v.handle,
                 "handle": v.handle,
                 "url": v.post_url or v.page_url,
@@ -832,13 +855,13 @@ async def search_via_sidecar(image_bytes: bytes, cfg: dict) -> dict:
 def format_sidecar(accounts: list) -> str:
     """把 sidecar 返回的账号列表格式化成与 SerpApi 路一致的短文本。
 
-    取平台权重最优（twitter > 微博 > B站 > Instagram）的那个账号，pixiv 忽略。
+    按平台权重升序（twitter > 微博 > B站 > Instagram）全列，pixiv 忽略。
     无可用账号时返回空串，交由调用方决定是"没找到"还是降级重试。
     """
     items = _sidecar_items(accounts)
     if not items:
         return ""
-    return _render_one(items[0])
+    return _render_all(items)
 
 
 def _sidecar_items(accounts: list) -> list:
@@ -880,9 +903,9 @@ def _sidecar_items(accounts: list) -> list:
 
 
 def render_text(detail: dict) -> str:
-    """结构化结果 -> 单条短文本：有结果取第一项，否则用 message。"""
+    """结构化结果 -> 单条文本：有候选就全列（弱证据不报），否则用 message。"""
     if detail.get("ok") and detail.get("items"):
-        return _render_one(detail["items"][0])
+        return _render_all(detail["items"])
     return detail.get("message") or "没找到姬 😢"
 
 
@@ -991,8 +1014,8 @@ async def reverse_search_detail(image_bytes: bytes) -> dict:
     }
     if not items:
         return done(_no_result(verdicts))
-    if items[0]["weak"]:
-        # 弱证据：正式文案判没找到，但 items 照样带回去供调试查看
+    # 没有可信（非弱）候选才判没找到；items 仍带回供调试查看
+    if all(it["weak"] for it in items):
         out.update(source="serpapi", items=items)
         return done("没找到姬 😢 最像的账号可信度不足，不敢乱报")
 
