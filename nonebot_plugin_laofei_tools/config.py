@@ -3,53 +3,13 @@
 """
 
 import json
-import os
 from pathlib import Path
 from typing import Set
 
 from nonebot import get_driver
-from pydantic import BaseModel, validator
-
-import re
+from pydantic import BaseModel
 
 from .common.data_utils import safe_json_save
-
-
-def _coerce_serpapi_keys(v):
-    """把 serpapi_keys 配置规整为「去空、去重」的字符串列表。
-
-    支持多种形式：Python 列表 / JSON 数组字符串 / 逗号或空白分隔字符串 /
-    单个字符串。任何解析异常都回退为空列表，绝不让 bot 启动崩溃。
-    """
-    if v is None:
-        return []
-    if isinstance(v, str):
-        s = v.strip()
-        if not s:
-            return []
-        try:
-            parsed = json.loads(s)
-        except Exception:
-            parsed = None
-        if isinstance(parsed, list):
-            items = [str(x).strip() for x in parsed]
-        else:
-            items = re.split(r"[,\s]+", s)
-        out = []
-        for x in items:
-            x = (x or "").strip()
-            if x and x not in out:
-                out.append(x)
-        return out
-    if isinstance(v, (list, tuple, set)):
-        out = []
-        for x in v:
-            x = (x or "").strip()
-            if x and x not in out:
-                out.append(x)
-        return out
-    s = str(v).strip()
-    return [s] if s else []
 
 
 class Config(BaseModel):
@@ -79,32 +39,22 @@ class Config(BaseModel):
     novelai_model: str = "nai-diffusion-4-5-curated"
 
     # ---- 反向图片搜索（lg找姬）配置，均为可选 ----
-    # 2026-10-30 起只走 Google Lens（经 SerpApi），已移除 Yandex/SauceNAO/ascii2d/GCV。
-    # 2026-10-31 起改为双路：mac 侧浏览器 sidecar 主路 + SerpApi 兜底，见下方注释。
+    # 演进：早期多引擎（Yandex/SauceNAO/ascii2d/GCV）-> 只留 Google Lens 经 SerpApi
+    # -> 2026-10-31 起 SerpApi 也去掉了，只剩 mac 侧浏览器 sidecar 一条路。
     longge_reverse_timeout: int = 25        # 单次请求超时（秒）
-    longge_reverse_max_results: int = 5     # 返回的作者候选数量上限
-    # 调试开关：True 时 lg找姬 结果走「合并转发」分多项展示（标题+图+每个候选+
-    # 调试信息），便于对照判定质量；调完改回 False 即恢复单条短文本。
-    longge_reverse_debug_forward: bool = True
+    longge_reverse_max_results: int = 5     # 向 sidecar 索取的候选数量上限（调试模式会逐条列出）
+    # 全局调试开关：True 时所有 lg找姬 都走「合并转发」分多项展示。
+    # 日常保持 False —— 正式模式只回一条最可信的结论；
+    # 想临时看多项时直接在群里发「lg找姬 调试」，不用改配置。
+    longge_reverse_debug_forward: bool = False
 
-    # ---- 主路：mac 侧浏览器 sidecar（tools/fish_sidecar/server.mjs）----
+    # ---- lg找姬 的唯一引擎：mac 侧浏览器 sidecar（项目根目录 server.mjs）----
     # bot 跑在无 GUI 的 Ubuntu 虚拟机里，直连 Google Lens 需要真实浏览器，
     # 所以把「鱼鱼找鸡」作为独立服务常驻在 mac 上，VM 通过 HTTP 把图片字节
-    # POST 过去取结果。不限 SerpApi 的 100 次/月额度；mac 关机/超时则自动降级。
-    lens_sidecar_url: str = ""              # 例 http://192.168.2.45:8787 ；留空=不启用主路
+    # POST 过去取结果。不限次数、没有 key、没有额度；mac 关机/超时则本功能不可用。
+    lens_sidecar_url: str = ""              # 例 http://192.168.2.45:8787 ；留空=本功能停用
     lens_sidecar_token: str = ""            # 与 sidecar 的 FISH_TOKEN / config.token 一致；留空=不鉴权
     lens_sidecar_timeout: int = 90          # 主路整体超时（秒），浏览器链路比纯 HTTP 慢
-    # SerpApi key 数组（https://serpapi.com，免费 100 次/月/key）。
-    # 每 key 每月自动计数，满 100 自动切下一个；当月全部用完则暂停本功能，次月 1 号重置。
-    # 配置方式（.env）：SERPAPI_KEYS=["k1","k2"] 或 逗号分隔 SERPAPI_KEYS=k1,k2
-    # 兼容旧单 key：若 serpapi_keys 为空但 serpapi_key 有值，则视为单元素数组。
-    serpapi_keys: list = []
-    serpapi_key: str = ""                   # 旧单 key 兼容（可留空）
-    lens_proxy: str = ""                    # 访问 Google Lens / 图床的代理；大陆机器直连 Google 多半不通，需填如 http://127.0.0.1:7890
-
-    @validator("serpapi_keys", pre=True)
-    def _norm_serpapi_keys(cls, v):
-        return _coerce_serpapi_keys(v)
 
 
 # 数据文件路径（锚定项目根目录，不依赖运行时 CWD，避免覆盖文件后数据丢失）

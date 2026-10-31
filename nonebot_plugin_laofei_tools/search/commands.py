@@ -3,7 +3,8 @@ NoneBot 指令处理
 
 指令：
     lg搜图 - 以图搜图（后端 soutubot.moe，动漫/本子垂直库），群聊可用、需先开启
-    lg找姬 - 反向图片搜索（主路=mac 浏览器 sidecar，兜底=Google Lens/SerpApi，能搜 x.com 等站点）
+    lg找姬 - 反向图片搜索（走 mac 侧浏览器 sidecar + Google Lens，能搜 x.com 等站点）
+    lg找姬 调试 - 同上，但结果走合并转发，逐条列出每个候选与调试信息（仅超管）
     开启lg搜图 / 关闭lg搜图 - 超级用户管理群聊搜图功能
 
 图片输入：两条指令均支持「同条消息带图」或「引用一条图片消息」。
@@ -48,13 +49,13 @@ from .reverse import (
 )
 
 
-# 启动时打印一次反搜索引擎可用性，便于确认 key/cookie 是否真的读到
-# （缺哪些 key 会显示成 -引擎名(原因)，不影响其余引擎）
+# 启动时打印一次反搜链路可用性，便于确认 sidecar 地址是否真的读到
+# （没配会显示成 -sidecar(原因)；不影响 lg搜图 等其它功能）
 try:
     _engines = ", ".join(engine_status(_load_reverse_config()))
-    logger.info(f"[lg找姬] 反搜索引擎：{_engines}")
+    logger.info(f"[lg找姬] 反搜引擎：{_engines}")
 except Exception:
-    logger.exception("[lg找姬] 反搜索引擎状态读取失败")
+    logger.exception("[lg找姬] 反搜引擎状态读取失败")
 
 
 # ========== 搜图指令 ==========
@@ -146,9 +147,8 @@ async def handle_search_image(
 # 参考 astrbot_plugin_bitchfinder：反向图片搜索，返回出处与作者（含 X 原帖）。
 # 与 lg搜图 的核心区别：后端不同。
 #   lg搜图 -> soutubot.moe（动漫/本子垂直库）
-#   lg找姬 -> 双路通用搜索（能搜 x.com 等社交站点）：
-#             主路 mac 侧浏览器 sidecar（不限次数），兜底 Google Lens 经 SerpApi
-#             （每 key 100 次/月）。主路不可用自动降级，对调用方透明。
+#   lg找姬 -> mac 侧浏览器 sidecar（真实 Chrome + Google Lens，能搜 x.com 等社交站点）
+#             唯一引擎、不限次数；mac 关机或 sidecar 没跑则本功能不可用（不降级别的源）。
 find_chicken = on_command(
     "lg找姬",
     aliases={"lg找🐔", "龙哥找姬", "这是骚姬"},
@@ -158,19 +158,47 @@ find_chicken = on_command(
 )
 
 
-# 合并转发里标注数据来源（调试用，一眼看出走的是主路还是兜底）
+# 合并转发里标注数据来源（调试用）
 _SOURCE_LABEL = {
-    "sidecar": "mac 浏览器 sidecar（主路）",
-    "serpapi": "SerpApi / Google Lens（兜底）",
+    "sidecar": "mac 浏览器 sidecar（Google Lens）",
 }
 
 
 def _debug_forward_enabled() -> bool:
-    """lg找姬 结果是否走合并转发（调试开关 longge_reverse_debug_forward）。"""
+    """全局调试开关（longge_reverse_debug_forward）：开着时所有调用都走合并转发。
+
+    日常应该关着 —— 正式模式只报一条结论，调试靠指令参数「lg找姬 调试」临时开启。
+    注意：这个开关和「调试」参数一样，**只对超管生效**。
+    """
     try:
-        return bool(_load_reverse_config().get("debug_forward", True))
-    except Exception:  # noqa: BLE001 - 读不到配置就按默认开
-        return True
+        return bool(_load_reverse_config().get("debug_forward", False))
+    except Exception:  # noqa: BLE001 - 读不到配置就按默认关
+        return False
+
+
+# 指令参数里出现这些词就走调试（多项）模式
+_DEBUG_ARGS = ("调试", "debug")
+
+
+def _wants_debug(raw: str) -> bool:
+    """`lg找姬 调试` / `lg找姬 debug` -> True。"""
+    text = str(raw or "").strip().lower()
+    if not text:
+        return False
+    return any(token in text for token in _DEBUG_ARGS)
+
+
+async def _is_operator(bot: Bot, event: MessageEvent) -> bool:
+    """是否超管（.env 的 SUPERUSERS）。
+
+    调试模式（合并转发 + 原始账号 + 调试 JSON）只给超管：里面会露出 sidecar 的
+    全部候选、排名依据和内部报错，普通群员看到只会更乱，也不该看到这些实现细节。
+    """
+    try:
+        return bool(await SUPERUSER(bot, event))
+    except Exception:  # noqa: BLE001 - 判定失败按「不是超管」处理，安全侧
+        logger.warning("[找姬] 超管判定失败，按普通用户处理")
+        return False
 
 
 def _forward_node(bot: Bot, name: str, content: str) -> dict:
@@ -257,8 +285,15 @@ async def handle_find_chicken(
     matcher: Matcher,
     bot: Bot,
     event: MessageEvent,
+    args: Message = CommandArg(),
 ):
-    """处理找姬指令（双路反向图片搜索：sidecar 主路 + SerpApi 兜底）"""
+    """处理找姬指令（mac 侧浏览器 sidecar + Google Lens 反向图片搜索）
+
+    两种模式：
+    - `lg找姬`：只报一条结论（最可信的那位），保持准确率优先。
+    - `lg找姬 调试`：合并转发分多项展示（每个候选 + 原始账号 + 调试信息），**仅超管**；
+      普通群员发这个也只会收到一条结论。
+    """
     # 1. 私聊不可用
     if isinstance(event, PrivateMessageEvent):
         await matcher.finish("搜图功能仅在群聊可用")
@@ -298,7 +333,7 @@ async def handle_find_chicken(
     except FinishedException:
         raise
     except Exception as e:
-        logger.exception("找姬（双路反搜：sidecar 主路 + SerpApi 兜底）失败")
+        logger.exception("找姬（sidecar 反搜）失败")
         await matcher.finish(f"搜索失败：{str(e)}")
         return
 
@@ -306,22 +341,31 @@ async def handle_find_chicken(
         await matcher.finish(detail.get("message") or "没找到姬 😢")
         return
 
-    # 调试模式：拆成多项合并转发（标题+配图 / 每个候选 / 调试信息），
-    # 便于对照判定到底命中了什么；关掉 longge_reverse_debug_forward 即恢复单条文本。
-    if _debug_forward_enabled():
-        sent = False
-        try:
-            await _send_find_forward(bot, event, detail)
-            sent = True
-        except FinishedException:
-            raise
-        except Exception as e:
-            logger.warning(f"[找姬] 合并转发失败，回退单条文本：{e}")
-        if sent:
-            await matcher.finish()
-            return
+    # 调试模式：`lg找姬 调试` 或全局开关 longge_reverse_debug_forward 打开时，
+    # 拆成多项合并转发（标题+配图 / 每个候选 / 原始账号 / 调试信息），
+    # 便于对照到底命中了什么。日常不带参数时只回一条结论。
+    #
+    # 调试**只给超管**：普通群员即使发「lg找姬 调试」也走正式模式（一条结论），
+    # 不提示、不报错 —— 免得在群里刷出「你没权限」这种没意义的消息。
+    debug = _wants_debug(args.extract_plain_text()) or _debug_forward_enabled()
+    if debug:
+        operator = await _is_operator(bot, event)
+        if not operator:
+            logger.info(f"[找姬] 非超管({event.get_user_id()})请求调试模式，已按正式模式回复")
+        else:
+            sent = False
+            try:
+                await _send_find_forward(bot, event, detail)
+                sent = True
+            except FinishedException:
+                raise
+            except Exception as e:
+                logger.warning(f"[找姬] 合并转发失败，回退单条文本：{e}")
+            if sent:
+                await matcher.finish()
+                return
 
-    # 精简单条结果（平台优先的作者），直接发送
+    # 正式模式：只报置信度最高的那一位（弱证据直接判没找到，不硬凑）
     await matcher.finish(render_text(detail))
 
 
@@ -647,11 +691,12 @@ async def handle_search_help(matcher: Matcher, event: MessageEvent):
     sections = [
         ("搜图指令", [
             ("lg搜图", "动漫/本子反搜（soutubot）"),
-            ("lg找姬", "全站反搜，找出处与作者"),
+            ("lg找姬", "全站反搜，只回一条最可信的"),
         ]),
         ("管理指令", [
             ("开启lg搜图", "开启搜图功能（超管）"),
             ("关闭lg搜图", "关闭搜图功能（超管）"),
+            ("lg找姬 调试", "多项合并转发，排查用（超管）"),
         ], True),
     ]
     tips = [
