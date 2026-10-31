@@ -10,6 +10,7 @@
 import asyncio
 import base64
 import json
+import re
 from io import BytesIO
 
 from nonebot import on_message
@@ -68,6 +69,41 @@ OPTIMIZE_INSTRUCTION = (
     "4) 用半角逗号分隔，保持英文小写 tag 风格，不要翻译成中文，不要新增原图未体现的内容；"
     "    5) 如原提示词已较完善则小幅整理即可。只输出优化后的提示词本身，不要任何解释或引号。"
 )
+
+
+def _sanitize_reverse_prompt(text: str) -> str:
+    """清洗视觉模型返回的反推提示词，提升跨服务商可用性。
+
+    不同服务商返回格式差异大：DeepSeek 通常直接给干净 tag；Grok（尤其经代理）
+    常把结果包在 Markdown 代码块、带入 <thinking> 思考链、或用引号整段包裹。
+    这里统一去除这些噪声，但绝不改动真实 tag 内容，确保下游可直接复制到 NovelAI。
+    """
+    if not text:
+        return ""
+    # 1) 去除 Markdown 代码围栏（保留内部内容）
+    text = re.sub(r"```(?:[a-zA-Z]*\n)?(.*?)```", r"\1", text, flags=re.DOTALL)
+    # 2) 去除思考链标签（Grok/xAI 部分模型会把推理写进 content）
+    text = re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    # 2.5) 去除行首引导语（如 "Here is the prompt:" / "以下是提示词：" / "prompt:"）
+    text = re.sub(
+        r"^\s*(?:here is|here's|below is|the following is|the following|sure[,.!]?|"
+        r"certainly[,.!]?|以下是|这是|提示词|prompt)[^:\n]*[:：]\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    # 3) 若整段被一对引号包裹则去外层（仅当内部含逗号，避免误伤单 tag）
+    stripped = text.strip()
+    if (
+        len(stripped) >= 2
+        and stripped[0] in "\"'「『"
+        and stripped[-1] in "\"'」』"
+        and "," in stripped
+    ):
+        stripped = stripped[1:-1].strip()
+    # 4) 折叠多余空行与首尾空白
+    return re.sub(r"\n{2,}", "\n", stripped).strip()
 
 
 # ========== NovelAI 嵌入元数据提取（先读图内自带 prompt/seed，命中则跳过视觉反推）==========
@@ -269,7 +305,13 @@ async def handle_reverse_prompt(
                 client.chat.completions.create,
                 **create_kwargs,
             )
-            prompt = (response.choices[0].message.content or "").strip()
+            raw = response.choices[0].message.content or ""
+            prompt = _sanitize_reverse_prompt(raw)
+            if prompt and prompt != raw.strip():
+                logger.info(
+                    f"[图反推] 视觉模型返回已清洗噪声（如代码块/思考链/引号）："
+                    f"raw前40={raw[:40]!r}"
+                )
         except ValueError as e:
             # 服务商 API Key 未配置
             await matcher.finish(f"图反推配置错误：{e}")
@@ -623,7 +665,13 @@ async def handle_reverse_ai_draw(
                 client.chat.completions.create,
                 **create_kwargs,
             )
-            prompt = (response.choices[0].message.content or "").strip()
+            raw = response.choices[0].message.content or ""
+            prompt = _sanitize_reverse_prompt(raw)
+            if prompt and prompt != raw.strip():
+                logger.info(
+                    f"[图反推] 视觉模型返回已清洗噪声（如代码块/思考链/引号）："
+                    f"raw前40={raw[:40]!r}"
+                )
         except ValueError as e:
             await matcher.finish(f"反推AI图 配置错误：{e}")
             return
