@@ -627,7 +627,7 @@ def fuse(candidates: list, phash_scores: Optional[dict] = None) -> list:
     return [a for a in ranked if a.confidence >= 0.10]
 
 
-# 优先平台：找「鸡」要的是能去关注的社交账号（twitter / ins / 微博 / 小红书）。
+# 优先平台：找「姬」要的是能去关注的社交账号（twitter / ins / 微博 / 小红书）。
 # Pixiv、Danbooru 等图库站不认账（用户明确要求 pixiv 不考虑），
 # 「未知/身份(站内人名)」连平台归属都没有，同样排除。
 _PREFERRED_PLATFORMS = {"X/Twitter", "Instagram", "微博", "小红书"}
@@ -642,14 +642,14 @@ def _no_result(verdicts: list) -> str:
         detail = "命中了图库/画站或身份不明来源，已忽略（只认社交账号）"
     else:
         detail = "换张更清晰的图，或该图全网暂无转载"
-    return f"没找到鸡 😢 {detail}"
+    return f"没找到姬 😢 {detail}"
 
 
 def format_top1(verdicts: list) -> str:
     """只返回置信度最高的「社交平台」作者，单条短文本。
 
     样式（QQ 文本消息，emoji 走客户端渲染，无 PIL 字体问题）：
-        🎯 **lg找鸡结果**
+        🎯 **lg找姬结果**
 
         🌐 平台：Twitter
         👤 名字：aqua_cosplay
@@ -666,13 +666,13 @@ def format_top1(verdicts: list) -> str:
 
     v = social[0]
     if v.confidence < _STRONG_CONFIDENCE:
-        return "没找到鸡 😢 最像的账号可信度不足，不敢乱报"
+        return "没找到姬 😢 最像的账号可信度不足，不敢乱报"
 
     platform = "Twitter" if v.platform == "X/Twitter" else v.platform
     name = v.display_name or v.handle
 
     lines = [
-        "🎯 **lg找鸡结果**",
+        "🎯 **lg找姬结果**",
         "",
         f"🌐 平台：{platform}",
         f"👤 名字：{name}",
@@ -810,7 +810,7 @@ def format_sidecar(accounts: list) -> str:
     display = "Twitter" if platform == "X/Twitter" else platform
     name = author or handle
     lines = [
-        "🎯 **lg找鸡结果**",
+        "🎯 **lg找姬结果**",
         "",
         f"🌐 平台：{display}",
         f"👤 名字：{name}",
@@ -857,10 +857,10 @@ async def reverse_search_all(image_bytes: bytes) -> str:
             # 链路通了但没账号：若 lens 引擎本身失败（captcha / 网络），
             # 值得再让 SerpApi 试一次；否则认定"确实没找到"，省下免费额度。
             if not res["lens_failed"]:
-                return "没找到鸡 😢 换张更清晰的图，或该图全网暂无转载"
-            logger.warning("[找鸡] sidecar 的 lens 引擎失败，降级 SerpApi 重试")
+                return "没找到姬 😢 换张更清晰的图，或该图全网暂无转载"
+            logger.warning("[找姬] sidecar 的 lens 引擎失败，降级 SerpApi 重试")
         else:
-            logger.warning(f"[找鸡] sidecar 不可用，降级 SerpApi：{res['error']}")
+            logger.warning(f"[找姬] sidecar 不可用，降级 SerpApi：{res['error']}")
 
     # ── 兜底：SerpApi（受每 key 100 次/月额度保护）──
     if not keys:
@@ -890,7 +890,7 @@ async def reverse_search_all(image_bytes: bytes) -> str:
     except Exception as e:
         # 上传图床 / SerpApi 调用失败：退回刚才占用的额度，本次不计数
         await _refund_serpapi_key(fp)
-        logger.warning(f"[找鸡] Lens 失败: {e}")
+        logger.warning(f"[找姬] Lens 失败: {e}")
         return f"搜索失败：{str(e)}"
 
     if not candidates:

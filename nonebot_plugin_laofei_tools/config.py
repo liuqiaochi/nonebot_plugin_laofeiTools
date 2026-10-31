@@ -78,7 +78,7 @@ class Config(BaseModel):
     novelai_api_key: str = ""
     novelai_model: str = "nai-diffusion-4-5-curated"
 
-    # ---- 反向图片搜索（lg找鸡）配置，均为可选 ----
+    # ---- 反向图片搜索（lg找姬）配置，均为可选 ----
     # 2026-10-30 起只走 Google Lens（经 SerpApi），已移除 Yandex/SauceNAO/ascii2d/GCV。
     # 2026-10-31 起改为双路：mac 侧浏览器 sidecar 主路 + SerpApi 兜底，见下方注释。
     longge_reverse_timeout: int = 25        # 单次请求超时（秒）

@@ -100,7 +100,7 @@ MODULE_USE_COMMANDS = {
     "钓鱼帮助": "fishing", "鱼帮助": "fishing",
     # 搜图功能（仅使用类）
     "lg搜图": "search",
-    "lg找鸡": "search", "lg找🐔": "search", "龙哥找鸡": "search", "这是骚鸡": "search",
+    "lg找姬": "search", "lg找🐔": "search", "龙哥找姬": "search", "这是骚姬": "search",
     # AI 画图（不含开启/关闭/模型/额度管理）
     "ai画图": "ai_draw", "ai生图": "ai_draw", "ai绘画": "ai_draw", "ai绘图": "ai_draw",
     "ai画图帮助": "ai_draw", "ai生图帮助": "ai_draw", "ai绘画帮助": "ai_draw", "ai绘图帮助": "ai_draw",

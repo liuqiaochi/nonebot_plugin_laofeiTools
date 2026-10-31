@@ -3,7 +3,7 @@ NoneBot 指令处理
 
 指令：
     lg搜图 - 以图搜图（后端 soutubot.moe，动漫/本子垂直库），群聊可用、需先开启
-    lg找鸡 - 反向图片搜索（主路=mac 浏览器 sidecar，兜底=Google Lens/SerpApi，能搜 x.com 等站点）
+    lg找姬 - 反向图片搜索（主路=mac 浏览器 sidecar，兜底=Google Lens/SerpApi，能搜 x.com 等站点）
     开启lg搜图 / 关闭lg搜图 - 超级用户管理群聊搜图功能
 
 图片输入：两条指令均支持「同条消息带图」或「引用一条图片消息」。
@@ -44,9 +44,9 @@ from .reverse import engine_status, load_config as _load_reverse_config, reverse
 # （缺哪些 key 会显示成 -引擎名(原因)，不影响其余引擎）
 try:
     _engines = ", ".join(engine_status(_load_reverse_config()))
-    logger.info(f"[lg找鸡] 反搜索引擎：{_engines}")
+    logger.info(f"[lg找姬] 反搜索引擎：{_engines}")
 except Exception:
-    logger.exception("[lg找鸡] 反搜索引擎状态读取失败")
+    logger.exception("[lg找姬] 反搜索引擎状态读取失败")
 
 
 # ========== 搜图指令 ==========
@@ -124,7 +124,7 @@ async def handle_search_image(
         await matcher.finish()
         return
 
-    # 3. 获取图片（同条消息带图 或 引用图片，与 lg找鸡 输入规则一致）
+    # 3. 获取图片（同条消息带图 或 引用图片，与 lg找姬 输入规则一致）
     image_url = _extract_image_url(event)
     if not image_url:
         await matcher.finish("请发送一张图片，或引用一张图片后发送「lg搜图」")
@@ -134,16 +134,16 @@ async def handle_search_image(
     await _run_search(matcher, bot, event, image_url)
 
 
-# ========== 找鸡指令（lg找鸡 / 别名：lg找🐔、龙哥找鸡、这是骚鸡） ==========
+# ========== 找姬指令（lg找姬 / 别名：lg找🐔、龙哥找姬、这是骚姬） ==========
 # 参考 astrbot_plugin_bitchfinder：反向图片搜索，返回出处与作者（含 X 原帖）。
 # 与 lg搜图 的核心区别：后端不同。
 #   lg搜图 -> soutubot.moe（动漫/本子垂直库）
-#   lg找鸡 -> 双路通用搜索（能搜 x.com 等社交站点）：
+#   lg找姬 -> 双路通用搜索（能搜 x.com 等社交站点）：
 #             主路 mac 侧浏览器 sidecar（不限次数），兜底 Google Lens 经 SerpApi
 #             （每 key 100 次/月）。主路不可用自动降级，对调用方透明。
 find_chicken = on_command(
-    "lg找鸡",
-    aliases={"lg找🐔", "龙哥找鸡", "这是骚鸡"},
+    "lg找姬",
+    aliases={"lg找🐔", "龙哥找姬", "这是骚姬"},
     priority=5,
     block=True,
     force_whitespace=True,
@@ -156,7 +156,7 @@ async def handle_find_chicken(
     bot: Bot,
     event: MessageEvent,
 ):
-    """处理找鸡指令（双路反向图片搜索：sidecar 主路 + SerpApi 兜底）"""
+    """处理找姬指令（双路反向图片搜索：sidecar 主路 + SerpApi 兜底）"""
     # 1. 私聊不可用
     if isinstance(event, PrivateMessageEvent):
         await matcher.finish("搜图功能仅在群聊可用")
@@ -171,17 +171,17 @@ async def handle_find_chicken(
     # 3. 从当前消息或被回复消息提取图片
     image_url = _extract_image_url(event)
     if not image_url:
-        await matcher.finish("请发送一张图片，或引用一张图片后发送「lg找鸡」")
+        await matcher.finish("请发送一张图片，或引用一张图片后发送「lg找姬」")
         return
 
-    await matcher.send("收到，开始找鸡")
+    await matcher.send("收到，开始找姬")
 
     # 注：matcher.finish 一律放在 try 之外。它通过抛异常终止流程，
     # 写在 try 内会被下面宽泛的 except 捕获，误报成「搜索失败：FinishedException()」。
     try:
         image_data = await download_image(bot, image_url)
     except Exception as e:
-        logger.exception("[找鸡] 图片下载失败")
+        logger.exception("[找姬] 图片下载失败")
         await matcher.finish(f"图片下载失败：{str(e)}")
         return
 
@@ -189,14 +189,14 @@ async def handle_find_chicken(
         await matcher.finish("图片下载失败，请重试")
         return
 
-    logger.info(f"[找鸡] 图片下载成功，大小: {len(image_data)} bytes")
+    logger.info(f"[找姬] 图片下载成功，大小: {len(image_data)} bytes")
 
     try:
         text = await reverse_search_all(image_data)
     except FinishedException:
         raise
     except Exception as e:
-        logger.exception("找鸡（多引擎反搜）失败")
+        logger.exception("找姬（双路反搜：sidecar 主路 + SerpApi 兜底）失败")
         await matcher.finish(f"搜索失败：{str(e)}")
         return
 
@@ -526,7 +526,7 @@ async def handle_search_help(matcher: Matcher, event: MessageEvent):
     sections = [
         ("搜图指令", [
             ("lg搜图", "动漫/本子反搜（soutubot）"),
-            ("lg找鸡", "全站反搜，找出处与作者"),
+            ("lg找姬", "全站反搜，找出处与作者"),
         ]),
         ("管理指令", [
             ("开启lg搜图", "开启搜图功能（超管）"),
@@ -536,8 +536,8 @@ async def handle_search_help(matcher: Matcher, event: MessageEvent):
     tips = [
         "1. 需要超级用户先发送「开启lg搜图」开启功能",
         "2. 两种输入：同条消息带图，或引用一条图片消息",
-        "3. lg搜图=动漫/本子库；lg找鸡=全站找出处与作者",
-        "4. lg找鸡 别名：龙哥找鸡 / 这是骚鸡",
+        "3. lg搜图=动漫/本子库；lg找姬=全站找出处与作者",
+        "4. lg找姬 别名：龙哥找姬 / 这是骚姬",
         "5. 搜图功能仅在群聊可用",
     ]
 
