@@ -88,7 +88,7 @@ def _provider_spec(provider: str) -> dict:
     if provider == "grok":
         return {
             "api_key": (getattr(cfg, "grok_api_key", "") or "") if cfg else "",
-            "base_url": "https://api.x.ai/v1",
+            "base_url": (getattr(cfg, "grok_base_url", "https://api.x.ai/v1") or "https://api.x.ai/v1") if cfg else "https://api.x.ai/v1",
             "chat_model": (getattr(cfg, "grok_model", "grok-4.7") or "grok-4.7") if cfg else "grok-4.7",
             "vision_model": (getattr(cfg, "grok_vision_model", "grok-4.7") or "grok-4.7") if cfg else "grok-4.7",
             "thinking_disable": False,
@@ -205,5 +205,5 @@ def check_provider_keys() -> None:
         else:
             logger.info(
                 f"✅ {spec['label']} API Key 已配置"
-                f"（对话: {spec['chat_model']}，视觉: {spec['vision_model']}）"
+                f"（endpoint: {spec['base_url']}，对话: {spec['chat_model']}，视觉: {spec['vision_model']}）"
             )
