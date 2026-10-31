@@ -62,7 +62,7 @@ def finded_cq() -> str:
     if not FINDED_IMAGE.exists():
         return ""
     try:
-        b64 = base64.b64encode(FINED_IMAGE.read_bytes()).decode("ascii")
+        b64 = base64.b64encode(FINDED_IMAGE.read_bytes()).decode("ascii")
         return f"[CQ:image,file=base64://{b64}]"
     except Exception:
         return ""
