@@ -69,6 +69,10 @@ class Config(BaseModel):
     grok_api_key: str = ""
     grok_model: str = "grok-4.7"
     grok_vision_model: str = "grok-4.7"
+    # Grok 接入地址（OpenAI 兼容）。默认官方 api.x.ai。
+    # 若使用第三方代理/中转：其下发的 key 通常以 grok_ 等非 xai- 前缀开头，
+    # 务必把本项改为该代理给出的 base_url，否则官方端点会拒绝 key。
+    grok_base_url: str = "https://api.x.ai/v1"
 
     # NovelAI 画图配置
     novelai_api_key: str = ""
@@ -76,8 +80,17 @@ class Config(BaseModel):
 
     # ---- 反向图片搜索（lg找鸡）配置，均为可选 ----
     # 2026-10-30 起只走 Google Lens（经 SerpApi），已移除 Yandex/SauceNAO/ascii2d/GCV。
+    # 2026-10-31 起改为双路：mac 侧浏览器 sidecar 主路 + SerpApi 兜底，见下方注释。
     longge_reverse_timeout: int = 25        # 单次请求超时（秒）
     longge_reverse_max_results: int = 5     # 返回的作者候选数量上限
+
+    # ---- 主路：mac 侧浏览器 sidecar（tools/fish_sidecar/server.mjs）----
+    # bot 跑在无 GUI 的 Ubuntu 虚拟机里，直连 Google Lens 需要真实浏览器，
+    # 所以把「鱼鱼找鸡」作为独立服务常驻在 mac 上，VM 通过 HTTP 把图片字节
+    # POST 过去取结果。不限 SerpApi 的 100 次/月额度；mac 关机/超时则自动降级。
+    lens_sidecar_url: str = ""              # 例 http://192.168.2.45:8787 ；留空=不启用主路
+    lens_sidecar_token: str = ""            # 与 sidecar 的 FISH_TOKEN / config.token 一致；留空=不鉴权
+    lens_sidecar_timeout: int = 90          # 主路整体超时（秒），浏览器链路比纯 HTTP 慢
     # SerpApi key 数组（https://serpapi.com，免费 100 次/月/key）。
     # 每 key 每月自动计数，满 100 自动切下一个；当月全部用完则暂停本功能，次月 1 号重置。
     # 配置方式（.env）：SERPAPI_KEYS=["k1","k2"] 或 逗号分隔 SERPAPI_KEYS=k1,k2

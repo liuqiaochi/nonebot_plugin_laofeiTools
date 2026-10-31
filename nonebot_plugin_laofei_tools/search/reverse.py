@@ -65,6 +65,10 @@ _CFG_ATTRS = {
     "serpapi_key_single": ("serpapi_key", ""),  # 旧单 key 兼容
     # lens_proxy 同时用于 SerpApi 调用与图床上传（都是境外服务，大陆需代理）
     "proxy": ("lens_proxy", ""),
+    # 主路：mac 侧浏览器 sidecar（tools/fish_sidecar/server.mjs）
+    "sidecar_url": ("lens_sidecar_url", ""),
+    "sidecar_token": ("lens_sidecar_token", ""),
+    "sidecar_timeout": ("lens_sidecar_timeout", 90),
 }
 
 
@@ -113,11 +117,18 @@ class _Empty:
 
 
 def engine_status(cfg: dict) -> list:
-    """返回引擎可用性清单（启动时打日志用）。"""
+    """返回引擎可用性清单（启动时打日志用）：主路 sidecar + 兜底 SerpApi。"""
+    status = []
+    if (cfg.get("sidecar_url") or "").strip():
+        status.append("sidecar(主路,本机浏览器)")
+    else:
+        status.append("-sidecar(未配置lens_sidecar_url)")
     keys = cfg.get("serpapi_keys") or []
-    if not keys:
-        return ["-lens(未配置serpapi_keys)"]
-    return [f"lens(已配 {len(keys)} 个 key，每 key 100 次/月)"]
+    if keys:
+        status.append(f"lens(兜底,{len(keys)} key,每 key 100 次/月)")
+    else:
+        status.append("-lens(未配置serpapi_keys)")
+    return status
 
 
 # ---------------------------------------------------------------------------
@@ -698,6 +709,119 @@ def _platform_of(c: PostCandidate) -> str:
 
 
 # ---------------------------------------------------------------------------
+# 主路：mac 侧浏览器 sidecar（tools/fish_sidecar/server.mjs）
+#
+# bot 跑在无 GUI 的 Ubuntu 虚拟机里，起不了浏览器，也就没法直连 Google Lens；
+# 而 mac 上有真实浏览器、链路已跑通。所以把「鱼鱼找鸡」当独立服务常驻 mac，
+# VM 把图片字节 POST 过去取 JSON 结果。
+#
+# 这么做而不是把 2324 行 JS 移植成 Python：零移植工作量、不污染插件依赖
+# （不引 playwright / 不装 chromium），进程隔离（sidecar 崩了不影响 bot）。
+# 它也不吃 SerpApi 的 100 次/月额度；mac 关机或超时则自动降级到 SerpApi。
+# ---------------------------------------------------------------------------
+
+# Node 侧 matchPlatform 给出的 platform 取值 -> (展示名, 权重)
+# 权重沿用参考插件的 PLATFORM_WEIGHT：twitter 最优先，pixiv 最末。
+_SIDECAR_PLATFORM = {
+    "twitter": ("X/Twitter", 1),
+    "weibo": ("微博", 2),
+    "bilibili": ("B站", 3),
+    "instagram": ("Instagram", 4),
+    "pixiv": ("Pixiv", 9),
+}
+# pixiv 是画师作品号，不是要找的人的社交主页 —— 用户明确要求不考虑。
+_SIDECAR_SKIP = {"pixiv"}
+
+
+async def search_via_sidecar(image_bytes: bytes, cfg: dict) -> dict:
+    """调 mac 侧 sidecar 反查，返回 {"ok","accounts","error","lens_failed"}。
+
+    ok=True 表示链路通了（账号可能为空）；ok=False 表示主路不可用，调用方应
+    降级到 SerpApi。任何异常都在此吞掉并转成 ok=False，不向上抛。
+    """
+    url = (cfg.get("sidecar_url") or "").strip().rstrip("/")
+    token = (cfg.get("sidecar_token") or "").strip()
+    timeout = int(cfg.get("sidecar_timeout") or 90)
+    out = {"ok": False, "accounts": [], "error": "", "lens_failed": False}
+    if not url:
+        out["error"] = "未配置 lens_sidecar_url"
+        return out
+
+    headers = {"Content-Type": "image/jpeg"}
+    if token:
+        headers["x-fish-token"] = token
+    # 过局域网前先压图：QQ 原图常 8MB+，传过去再给浏览器上传会很慢
+    payload = shrink_for_upload(image_bytes)
+
+    try:
+        async with _make_client(timeout, "") as sess:
+            resp = await sess.post(f"{url}/find", content=payload, headers=headers)
+    except Exception as e:  # noqa: BLE001 - 主路不可用时降级，不算致命
+        out["error"] = f"{type(e).__name__}: {str(e)[:80]}"
+        return out
+
+    if resp.status_code != 200:
+        out["error"] = f"HTTP {resp.status_code} {(resp.text or '')[:80]}"
+        return out
+    try:
+        data = resp.json()
+    except Exception as e:  # noqa: BLE001
+        out["error"] = f"非 JSON 响应: {str(e)[:60]}"
+        return out
+    if not data.get("ok"):
+        out["error"] = str(data.get("error") or "sidecar 返回 ok=false")[:120]
+        return out
+
+    out["ok"] = True
+    out["accounts"] = data.get("accounts") or []
+    out["lens_failed"] = any(
+        str((f or {}).get("engine", "")).lower() == "lens"
+        for f in (data.get("failures") or [])
+    )
+    return out
+
+
+def format_sidecar(accounts: list) -> str:
+    """把 sidecar 返回的账号列表格式化成与 SerpApi 路一致的短文本。
+
+    取平台权重最优（twitter > 微博 > B站 > Instagram）的那个账号，pixiv 忽略。
+    无可用账号时返回空串，交由调用方决定是"没找到"还是降级重试。
+    """
+    items = []
+    for a in accounts or []:
+        if not isinstance(a, dict):
+            continue
+        pid = str(a.get("platform") or "").strip().lower()
+        name_weight = _SIDECAR_PLATFORM.get(pid)
+        if not name_weight or pid in _SIDECAR_SKIP:
+            continue
+        platform, weight = name_weight
+        handle = str(a.get("handle") or "").lstrip("@").strip()
+        if not handle:
+            continue
+        items.append(
+            (weight, platform, handle, str(a.get("url") or ""), str(a.get("authorName") or ""))
+        )
+    if not items:
+        return ""
+
+    items.sort(key=lambda x: x[0])
+    _, platform, handle, url, author = items[0]
+    display = "Twitter" if platform == "X/Twitter" else platform
+    name = author or handle
+    lines = [
+        "🎯 **lg找鸡结果**",
+        "",
+        f"🌐 平台：{display}",
+        f"👤 名字：{name}",
+        f"🆔 账号：@{handle}",
+    ]
+    if url:
+        lines.append(url)
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # 编排：压缩 -> Google Lens -> 融合 -> 文本结果
 # ---------------------------------------------------------------------------
 
@@ -705,17 +829,40 @@ def _platform_of(c: PostCandidate) -> str:
 async def reverse_search_all(image_bytes: bytes) -> str:
     """一次完整的反向图片搜索，返回可直接发送的结果文本。
 
-    流程：挑选当月未满额的 SerpApi key（计数 +1 已原子完成）-> 压缩原图 ->
-    Google Lens（必要时上传图床）-> 融合评分 -> 只输出置信度第一名的精简文本
-    （format_top1）。仅在 SerpApi 真正请求成功后才保留额度计数；上传图床等
-    前置失败会自动退回，不白白消耗免费次数。任何环节失败只记日志，返回友好
-    文案，不抛出。
+    双路：
+    1) 主路 —— mac 侧浏览器 sidecar（配了 lens_sidecar_url 才启用）。把压过的
+       图 POST 给常驻 mac 的 Node 服务，拿它解出的账号直接出结论。不吃 SerpApi
+       额度；mac 关机 / 超时 / 报错一律记日志后落到第 2 路。
+    2) 兜底 —— SerpApi（Google Lens）。挑选当月未满额的 key（计数 +1 已原子
+       完成）-> 压缩原图 -> 必要时上传图床 -> 融合评分 -> 只输出置信度第一名
+       的精简文本（format_top1）。
+
+    额度纪律：仅在 SerpApi 真正请求成功后才保留计数；上传图床等前置失败会
+    自动退回，不白白消耗免费次数。主路「通了但没找到账号」时也不会再走兜底，
+    除非是 lens 引擎本身失败（captcha 之类）才值得重试。
+    任何环节失败只记日志，返回友好文案，不抛出。
     """
     cfg = load_config()
     timeout = int(cfg.get("timeout", 25))
     proxy = cfg.get("proxy", "") or ""
     keys = cfg.get("serpapi_keys") or []
 
+    # ── 主路：mac 侧浏览器 sidecar（不消耗 SerpApi 免费额度）──
+    if (cfg.get("sidecar_url") or "").strip():
+        res = await search_via_sidecar(image_bytes, cfg)
+        if res["ok"]:
+            text = format_sidecar(res["accounts"])
+            if text:
+                return text
+            # 链路通了但没账号：若 lens 引擎本身失败（captcha / 网络），
+            # 值得再让 SerpApi 试一次；否则认定"确实没找到"，省下免费额度。
+            if not res["lens_failed"]:
+                return "没找到鸡 😢 换张更清晰的图，或该图全网暂无转载"
+            logger.warning("[找鸡] sidecar 的 lens 引擎失败，降级 SerpApi 重试")
+        else:
+            logger.warning(f"[找鸡] sidecar 不可用，降级 SerpApi：{res['error']}")
+
+    # ── 兜底：SerpApi（受每 key 100 次/月额度保护）──
     if not keys:
         return (
             "未配置 serpapi_keys，Google Lens 无法使用。\n"

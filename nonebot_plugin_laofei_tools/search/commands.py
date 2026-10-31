@@ -3,7 +3,7 @@ NoneBot 指令处理
 
 指令：
     lg搜图 - 以图搜图（后端 soutubot.moe，动漫/本子垂直库），群聊可用、需先开启
-    lg找鸡 - 反向图片搜索（后端 Google Lens，能搜 x.com 等站点）
+    lg找鸡 - 反向图片搜索（主路=mac 浏览器 sidecar，兜底=Google Lens/SerpApi，能搜 x.com 等站点）
     开启lg搜图 / 关闭lg搜图 - 超级用户管理群聊搜图功能
 
 图片输入：两条指令均支持「同条消息带图」或「引用一条图片消息」。
@@ -138,7 +138,9 @@ async def handle_search_image(
 # 参考 astrbot_plugin_bitchfinder：反向图片搜索，返回出处与作者（含 X 原帖）。
 # 与 lg搜图 的核心区别：后端不同。
 #   lg搜图 -> soutubot.moe（动漫/本子垂直库）
-#   lg找鸡 -> Google Lens（经 SerpApi，通用搜索，能搜 x.com 等社交站点）
+#   lg找鸡 -> 双路通用搜索（能搜 x.com 等社交站点）：
+#             主路 mac 侧浏览器 sidecar（不限次数），兜底 Google Lens 经 SerpApi
+#             （每 key 100 次/月）。主路不可用自动降级，对调用方透明。
 find_chicken = on_command(
     "lg找鸡",
     aliases={"lg找🐔", "龙哥找鸡", "这是骚鸡"},
@@ -154,7 +156,7 @@ async def handle_find_chicken(
     bot: Bot,
     event: MessageEvent,
 ):
-    """处理找鸡指令（多引擎反向图片搜索）"""
+    """处理找鸡指令（双路反向图片搜索：sidecar 主路 + SerpApi 兜底）"""
     # 1. 私聊不可用
     if isinstance(event, PrivateMessageEvent):
         await matcher.finish("搜图功能仅在群聊可用")

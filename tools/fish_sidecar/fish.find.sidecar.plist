@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>fish.find.sidecar</string>
+
+    <!-- node 用绝对路径：launchd 不读 shell 的 PATH，别指望 `node` 能被找到 -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/node</string>
+        <string>/Users/xxx/fish-find/server.mjs</string>
+    </array>
+
+    <!-- 必须显式指定：launchd 起的进程没有可靠 cwd，不写会在 node 启动阶段
+         报 EPERM uv_cwd（process.cwd failed）直接崩掉 -->
+    <key>WorkingDirectory</key>
+    <string>/Users/xxx/fish-find</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>FISH_HOST</key>
+        <string>0.0.0.0</string>
+        <key>FISH_PORT</key>
+        <string>8787</string>
+        <key>FISH_TOKEN</key>
+        <string>换成你自己的token</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/fish-sidecar.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/fish-sidecar.err</string>
+</dict>
+</plist>
