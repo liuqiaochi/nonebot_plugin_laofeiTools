@@ -55,8 +55,9 @@ def finded_cq() -> str:
 
     用 base64:// 内联而不是 file:// 本地路径：实测 file:// 在部分 NapCat 部署下
     会被当成纯文本/链接、图片传不出来；base64 由 OneBot 接口直接透传给 NapCat
-    上传，不依赖它能读到 bot 本机绝对路径。finded.png 仅 ~440KB，base64 后约
-    590KB，单条消息体积可控、不会撑爆（项目内 lg搜图 预览早已用同款 base64 发图）。
+    上传，不依赖它能读到 bot 本机绝对路径。finded.png 已从 442KB 压到 ~53KB
+    （300×333 调色板 PNG），base64 后约 71KB，单条消息体积可控、不会撑爆
+    NapCat 上传超时（项目内 lg搜图 预览早已用同款 base64 发图）。
     文件缺失或异常时返回空串，不影响结果本身。
     """
     if not FINDED_IMAGE.exists():
