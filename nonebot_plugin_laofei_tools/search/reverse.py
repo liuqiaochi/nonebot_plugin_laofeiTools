@@ -36,7 +36,9 @@ import hashlib
 import io
 import json
 import re
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
@@ -55,6 +57,25 @@ except AttributeError:  # Pillow < 9.1
     _LANCZOS = Image.LANCZOS
 
 
+# ========== 结果标题与配图 ==========
+
+_IMAGE_DIR = Path(__file__).resolve().parent.parent / "image"
+FINDED_IMAGE = _IMAGE_DIR / "finded.png"
+
+RESULT_TITLE = "🎯 **lg找姬结果**"
+
+
+def finded_cq() -> str:
+    """结果标题下方固定带的配图 CQ 码（image/finded.png）。
+
+    用 file:// 本地路径而不是 base64：base64 大图会把整条消息撑爆（AI 配图
+    1.6MB 那次就是这么失败的）。文件缺失时返回空串，不影响结果本身。
+    """
+    if not FINDED_IMAGE.exists():
+        return ""
+    return f"[CQ:image,file=file://{FINDED_IMAGE.as_posix()}]"
+
+
 # ========== 配置读取 ==========
 
 # 逻辑名 -> (NoneBot 配置项, 默认值)
@@ -69,6 +90,8 @@ _CFG_ATTRS = {
     "sidecar_url": ("lens_sidecar_url", ""),
     "sidecar_token": ("lens_sidecar_token", ""),
     "sidecar_timeout": ("lens_sidecar_timeout", 90),
+    # 调试：结果走合并转发展示多项
+    "debug_forward": ("longge_reverse_debug_forward", True),
 }
 
 
@@ -660,28 +683,53 @@ def format_top1(verdicts: list) -> str:
     1) 平台优先 —— 在社交平台候选中取置信度最高者；Pixiv 即使分数最高也不报。
     2) 置信度低于 _STRONG_CONFIDENCE 视为没找到 —— 弱证据多为转发者，不乱报。
     """
-    social = [v for v in verdicts if v.platform in _PREFERRED_PLATFORMS]
-    if not social:
+    items = _verdict_items(verdicts)
+    if not items:
         return _no_result(verdicts)
-
-    v = social[0]
-    if v.confidence < _STRONG_CONFIDENCE:
+    if items[0]["weak"]:
         return "没找到姬 😢 最像的账号可信度不足，不敢乱报"
+    return _render_one(items[0])
 
-    platform = "Twitter" if v.platform == "X/Twitter" else v.platform
-    name = v.display_name or v.handle
 
-    lines = [
-        "🎯 **lg找姬结果**",
+def _render_one(item: dict) -> str:
+    """单个结果渲染成短文本：标题下紧跟 finded.png，再列平台/名字/账号。"""
+    lines = [RESULT_TITLE]
+    img = finded_cq()
+    if img:
+        lines.append(img)
+    lines += [
         "",
-        f"🌐 平台：{platform}",
-        f"👤 名字：{name}",
-        f"🆔 账号：@{v.handle}",
+        f"🌐 平台：{item['platform']}",
+        f"👤 名字：{item['name']}",
+        f"🆔 账号：@{item['handle']}",
     ]
-    url = v.post_url or v.page_url
-    if url:
-        lines.append(url)
+    if item.get("url"):
+        lines.append(item["url"])
     return "\n".join(lines)
+
+
+def _verdict_items(verdicts: list) -> list:
+    """融合判定 -> 可展示项列表（verdicts 已按置信度降序，此处保持顺序）。
+
+    只保留社交平台；低于强证据阈值的标 weak=True —— 单条文本会直接判没找到，
+    但调试用的合并转发会照样列出来，方便看清楚到底命中了什么。
+    """
+    items = []
+    for v in verdicts or []:
+        if v.platform not in _PREFERRED_PLATFORMS:
+            continue
+        items.append(
+            {
+                "platform": "Twitter" if v.platform == "X/Twitter" else v.platform,
+                "name": v.display_name or v.handle,
+                "handle": v.handle,
+                "url": v.post_url or v.page_url,
+                "score": round(float(v.confidence), 3),
+                "weak": v.confidence < _STRONG_CONFIDENCE,
+                "evidence": list(v.evidence)[:3],
+            }
+        )
+    return items
 
 
 def _platform_of(c: PostCandidate) -> str:
@@ -787,7 +835,15 @@ def format_sidecar(accounts: list) -> str:
     取平台权重最优（twitter > 微博 > B站 > Instagram）的那个账号，pixiv 忽略。
     无可用账号时返回空串，交由调用方决定是"没找到"还是降级重试。
     """
-    items = []
+    items = _sidecar_items(accounts)
+    if not items:
+        return ""
+    return _render_one(items[0])
+
+
+def _sidecar_items(accounts: list) -> list:
+    """sidecar 账号 -> 可展示项，按平台权重升序（twitter 最优先），pixiv 忽略。"""
+    packed = []
     for a in accounts or []:
         if not isinstance(a, dict):
             continue
@@ -799,26 +855,23 @@ def format_sidecar(accounts: list) -> str:
         handle = str(a.get("handle") or "").lstrip("@").strip()
         if not handle:
             continue
-        items.append(
-            (weight, platform, handle, str(a.get("url") or ""), str(a.get("authorName") or ""))
+        author = str(a.get("authorName") or "").strip()
+        packed.append(
+            (
+                weight,
+                {
+                    "platform": "Twitter" if platform == "X/Twitter" else platform,
+                    "name": author or handle,
+                    "handle": handle,
+                    "url": str(a.get("url") or ""),
+                    "score": None,  # sidecar 不给置信度，只给平台优先级
+                    "weak": False,
+                    "evidence": [],
+                },
+            )
         )
-    if not items:
-        return ""
-
-    items.sort(key=lambda x: x[0])
-    _, platform, handle, url, author = items[0]
-    display = "Twitter" if platform == "X/Twitter" else platform
-    name = author or handle
-    lines = [
-        "🎯 **lg找姬结果**",
-        "",
-        f"🌐 平台：{display}",
-        f"👤 名字：{name}",
-        f"🆔 账号：@{handle}",
-    ]
-    if url:
-        lines.append(url)
-    return "\n".join(lines)
+    packed.sort(key=lambda x: x[0])
+    return [item for _, item in packed]
 
 
 # ---------------------------------------------------------------------------
@@ -826,45 +879,77 @@ def format_sidecar(accounts: list) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def reverse_search_all(image_bytes: bytes) -> str:
-    """一次完整的反向图片搜索，返回可直接发送的结果文本。
+def render_text(detail: dict) -> str:
+    """结构化结果 -> 单条短文本：有结果取第一项，否则用 message。"""
+    if detail.get("ok") and detail.get("items"):
+        return _render_one(detail["items"][0])
+    return detail.get("message") or "没找到姬 😢"
+
+
+async def reverse_search_detail(image_bytes: bytes) -> dict:
+    """一次完整的反向图片搜索，返回结构化结果（不拼文本）。
+
+    返回：
+        {
+          "ok": bool,          # 是否够格判为「找到了」（弱证据时为 False）
+          "source": str,       # "sidecar" / "serpapi" / ""
+          "items": [...],      # 已按优先级排序；每项 platform/name/handle/url/
+                               # score/weak/evidence。弱证据也会列出来供调试
+          "message": str,      # ok=False 时的文案
+          "debug": {...},      # 引擎、耗时、候选数、sidecar 报错等
+        }
 
     双路：
     1) 主路 —— mac 侧浏览器 sidecar（配了 lens_sidecar_url 才启用）。把压过的
        图 POST 给常驻 mac 的 Node 服务，拿它解出的账号直接出结论。不吃 SerpApi
        额度；mac 关机 / 超时 / 报错一律记日志后落到第 2 路。
     2) 兜底 —— SerpApi（Google Lens）。挑选当月未满额的 key（计数 +1 已原子
-       完成）-> 压缩原图 -> 必要时上传图床 -> 融合评分 -> 只输出置信度第一名
-       的精简文本（format_top1）。
+       完成）-> 压缩原图 -> 必要时上传图床 -> 融合评分。
 
     额度纪律：仅在 SerpApi 真正请求成功后才保留计数；上传图床等前置失败会
-    自动退回，不白白消耗免费次数。主路「通了但没找到账号」时也不会再走兜底，
+    自动退回，不白白消耗免费次数。主路「通了但没找到账号」时也不再走兜底，
     除非是 lens 引擎本身失败（captcha 之类）才值得重试。
-    任何环节失败只记日志，返回友好文案，不抛出。
+    任何环节失败只记日志，不抛出。
     """
+    started = time.time()
     cfg = load_config()
     timeout = int(cfg.get("timeout", 25))
     proxy = cfg.get("proxy", "") or ""
     keys = cfg.get("serpapi_keys") or []
+    out = {"ok": False, "source": "", "items": [], "message": "", "debug": {}}
+
+    def done(message: str = "") -> dict:
+        out["debug"]["elapsed"] = round(time.time() - started, 2)
+        if message:
+            out["message"] = message
+        return out
 
     # ── 主路：mac 侧浏览器 sidecar（不消耗 SerpApi 免费额度）──
     if (cfg.get("sidecar_url") or "").strip():
         res = await search_via_sidecar(image_bytes, cfg)
+        out["debug"]["sidecar"] = {
+            "ok": res["ok"],
+            "error": res["error"],
+            "lens_failed": res["lens_failed"],
+            "raw_accounts": len(res["accounts"] or []),
+            "raw": res["accounts"],
+        }
         if res["ok"]:
-            text = format_sidecar(res["accounts"])
-            if text:
-                return text
+            items = _sidecar_items(res["accounts"])
+            if items:
+                out.update(ok=True, source="sidecar", items=items)
+                return done()
             # 链路通了但没账号：若 lens 引擎本身失败（captcha / 网络），
             # 值得再让 SerpApi 试一次；否则认定"确实没找到"，省下免费额度。
             if not res["lens_failed"]:
-                return "没找到姬 😢 换张更清晰的图，或该图全网暂无转载"
+                return done("没找到姬 😢 换张更清晰的图，或该图全网暂无转载")
             logger.warning("[找姬] sidecar 的 lens 引擎失败，降级 SerpApi 重试")
         else:
             logger.warning(f"[找姬] sidecar 不可用，降级 SerpApi：{res['error']}")
 
     # ── 兜底：SerpApi（受每 key 100 次/月额度保护）──
     if not keys:
-        return (
+        return done(
             "未配置 serpapi_keys，Google Lens 无法使用。\n"
             "在 .env 填入 SERPAPI_KEYS=[\"k1\",\"k2\"]（https://serpapi.com，免费 100 次/月/key）。"
         )
@@ -873,7 +958,7 @@ async def reverse_search_all(image_bytes: bytes) -> str:
     key, fp, remain = await _acquire_serpapi_key(cfg)
     if not key:
         total = len(keys) * _SERPAPI_FREE_LIMIT
-        return (
+        return done(
             f"本月 SerpApi 免费额度已用完 😢（共 {len(keys)} 个 key，每个 100 次/月，"
             f"合计 {total} 次）。次月 1 号自动重置，请稍后再试。"
         )
@@ -891,11 +976,34 @@ async def reverse_search_all(image_bytes: bytes) -> str:
         # 上传图床 / SerpApi 调用失败：退回刚才占用的额度，本次不计数
         await _refund_serpapi_key(fp)
         logger.warning(f"[找姬] Lens 失败: {e}")
-        return f"搜索失败：{str(e)}"
+        return done(f"搜索失败：{str(e)}")
 
     if not candidates:
         # SerpApi 已成功返回（只是没匹配到），额度照常消耗
-        return "没找到可靠的出处 😢 换张更清晰的图，或该图全网暂无转载"
+        return done("没找到可靠的出处 😢 换张更清晰的图，或该图全网暂无转载")
 
     verdicts = fuse(candidates, None)
-    return format_top1(verdicts)
+    items = _verdict_items(verdicts)
+    out["debug"]["serpapi"] = {
+        "candidates": len(candidates),
+        "verdicts": len(verdicts),
+        "remaining": remain,
+    }
+    if not items:
+        return done(_no_result(verdicts))
+    if items[0]["weak"]:
+        # 弱证据：正式文案判没找到，但 items 照样带回去供调试查看
+        out.update(source="serpapi", items=items)
+        return done("没找到姬 😢 最像的账号可信度不足，不敢乱报")
+
+    out.update(ok=True, source="serpapi", items=items)
+    return done()
+
+
+async def reverse_search_all(image_bytes: bytes) -> str:
+    """一次完整的反向图片搜索，返回可直接发送的单条文本。
+
+    与 reverse_search_detail 的区别：那个给结构化数据（合并转发展示多项用），
+    这个只给拼好的单条短文本。两者共用同一套编排与额度逻辑。
+    """
+    return render_text(await reverse_search_detail(image_bytes))

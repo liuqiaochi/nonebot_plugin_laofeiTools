@@ -9,6 +9,7 @@ NoneBot 指令处理
 图片输入：两条指令均支持「同条消息带图」或「引用一条图片消息」。
 """
 
+import json
 from typing import List, Optional
 
 from nonebot import on_command
@@ -37,7 +38,14 @@ except ImportError:  # pragma: no cover
 from ..config import enable_group, is_group_enabled
 from ..common.utils import download_image
 from .soutubot import KIND_DOUJINSHI, get_client
-from .reverse import engine_status, load_config as _load_reverse_config, reverse_search_all
+from .reverse import (
+    RESULT_TITLE,
+    engine_status,
+    finded_cq,
+    load_config as _load_reverse_config,
+    render_text,
+    reverse_search_detail,
+)
 
 
 # 启动时打印一次反搜索引擎可用性，便于确认 key/cookie 是否真的读到
@@ -150,6 +158,100 @@ find_chicken = on_command(
 )
 
 
+# 合并转发里标注数据来源（调试用，一眼看出走的是主路还是兜底）
+_SOURCE_LABEL = {
+    "sidecar": "mac 浏览器 sidecar（主路）",
+    "serpapi": "SerpApi / Google Lens（兜底）",
+}
+
+
+def _debug_forward_enabled() -> bool:
+    """lg找姬 结果是否走合并转发（调试开关 longge_reverse_debug_forward）。"""
+    try:
+        return bool(_load_reverse_config().get("debug_forward", True))
+    except Exception:  # noqa: BLE001 - 读不到配置就按默认开
+        return True
+
+
+def _forward_node(bot: Bot, name: str, content: str) -> dict:
+    return {
+        "type": "node",
+        "data": {"name": name, "uin": str(bot.self_id), "content": content},
+    }
+
+
+async def _send_find_forward(bot: Bot, event: MessageEvent, detail: dict) -> None:
+    """把找姬结果拆成多项合并转发（调试用）。
+
+    节点 1 = 标题 + finded.png + 来源/耗时；节点 2..N = 每个候选账号（弱证据也
+    列出来，标 ⚠️）；随后 = sidecar 原始账号；末节点 = 调试信息 JSON。
+    """
+    items = detail.get("items") or []
+    debug = dict(detail.get("debug") or {})
+    # sidecar 的原始账号嵌套在 debug["sidecar"]["raw"]，摘出来单独成节点，
+    # 免得整个塞进调试 JSON 里刷屏
+    sidecar_debug = dict(debug.get("sidecar") or {})
+    raw_accounts = sidecar_debug.pop("raw", None)
+    if sidecar_debug:
+        debug["sidecar"] = sidecar_debug
+    nodes = []
+
+    head = [RESULT_TITLE]
+    img = finded_cq()
+    if img:
+        head.append(img)
+    head += [
+        "",
+        f"🔧 调试模式：合并转发（共 {len(items)} 项候选）",
+        f"📡 来源：{_SOURCE_LABEL.get(detail.get('source') or '', detail.get('source') or '未知')}",
+    ]
+    if debug.get("elapsed") is not None:
+        head.append(f"⏱ 耗时：{debug['elapsed']}s")
+    if not detail.get("ok"):
+        head.append("⚠️ " + (detail.get("message") or "证据不足，正式模式会判没找到"))
+    nodes.append(_forward_node(bot, "找姬结果", "\n".join(x for x in head if x)))
+
+    for i, it in enumerate(items, 1):
+        tag = "⚠️弱证据" if it.get("weak") else "✅"
+        lines = [
+            f"#{i} {tag} {it['platform']}",
+            f"👤 名字：{it['name']}",
+            f"🆔 账号：@{it['handle']}",
+        ]
+        if it.get("url"):
+            lines.append(it["url"])
+        if it.get("score") is not None:
+            lines.append(f"📊 置信度：{it['score']}")
+        for ev in it.get("evidence") or []:
+            lines.append(f"· {ev}")
+        nodes.append(_forward_node(bot, f"候选{i}·{it['platform']}", "\n".join(lines)))
+
+    if raw_accounts:
+        lines = [f"sidecar 原始账号 {len(raw_accounts)} 条："]
+        for a in raw_accounts[:10]:
+            if isinstance(a, dict):
+                lines.append(
+                    f"- {a.get('platform')} / @{a.get('handle')} / "
+                    f"{a.get('authorName') or '-'} / {a.get('url') or '-'}"
+                )
+        nodes.append(_forward_node(bot, "原始账号", "\n".join(lines)))
+
+    nodes.append(
+        _forward_node(
+            bot,
+            "调试信息",
+            json.dumps(debug, ensure_ascii=False, default=str)[:1200],
+        )
+    )
+
+    await bot.call_api(
+        "send_group_forward_msg",
+        group_id=event.group_id,
+        messages=nodes,
+    )
+    logger.info(f"[找姬] 合并转发已发送，共 {len(nodes)} 个节点")
+
+
 @find_chicken.handle()
 async def handle_find_chicken(
     matcher: Matcher,
@@ -192,7 +294,7 @@ async def handle_find_chicken(
     logger.info(f"[找姬] 图片下载成功，大小: {len(image_data)} bytes")
 
     try:
-        text = await reverse_search_all(image_data)
+        detail = await reverse_search_detail(image_data)
     except FinishedException:
         raise
     except Exception as e:
@@ -200,8 +302,27 @@ async def handle_find_chicken(
         await matcher.finish(f"搜索失败：{str(e)}")
         return
 
-    # 精简单条结果（平台优先的作者），直接发送，不走合并转发
-    await matcher.finish(text)
+    if not (detail.get("items") or []):
+        await matcher.finish(detail.get("message") or "没找到姬 😢")
+        return
+
+    # 调试模式：拆成多项合并转发（标题+配图 / 每个候选 / 调试信息），
+    # 便于对照判定到底命中了什么；关掉 longge_reverse_debug_forward 即恢复单条文本。
+    if _debug_forward_enabled():
+        sent = False
+        try:
+            await _send_find_forward(bot, event, detail)
+            sent = True
+        except FinishedException:
+            raise
+        except Exception as e:
+            logger.warning(f"[找姬] 合并转发失败，回退单条文本：{e}")
+        if sent:
+            await matcher.finish()
+            return
+
+    # 精简单条结果（平台优先的作者），直接发送
+    await matcher.finish(render_text(detail))
 
 
 # ========== 开启功能指令（超级用户） ==========

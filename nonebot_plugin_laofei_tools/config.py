@@ -83,6 +83,9 @@ class Config(BaseModel):
     # 2026-10-31 起改为双路：mac 侧浏览器 sidecar 主路 + SerpApi 兜底，见下方注释。
     longge_reverse_timeout: int = 25        # 单次请求超时（秒）
     longge_reverse_max_results: int = 5     # 返回的作者候选数量上限
+    # 调试开关：True 时 lg找姬 结果走「合并转发」分多项展示（标题+图+每个候选+
+    # 调试信息），便于对照判定质量；调完改回 False 即恢复单条短文本。
+    longge_reverse_debug_forward: bool = True
 
     # ---- 主路：mac 侧浏览器 sidecar（tools/fish_sidecar/server.mjs）----
     # bot 跑在无 GUI 的 Ubuntu 虚拟机里，直连 Google Lens 需要真实浏览器，
