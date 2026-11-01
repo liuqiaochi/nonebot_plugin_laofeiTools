@@ -184,6 +184,21 @@ def _get_model(group_id: str = "") -> str:
     return llm_providers.get_chat_model(group_id or "", "ai_chat")
 
 
+def _web_mode(group_id: str) -> str:
+    """本群 AI 对话的「联网」方式：
+
+    - "":        未开启联网（纯 DS / 当前模型自身知识，绝不联网）
+    - "grok":    已开启联网 且 本群对话模型切到了 Grok → 走 Grok 原生 Live Search
+                 （在 chat 调用里带 search_parameters，由 Grok 自己判断何时检索，不调用 DS 搜索 API）
+    - "ds":      已开启联网 且 走 DeepSeek（或默认）→ 走 DeepSeek 搜索 API 两阶段（先答后判）
+    """
+    if not ds_websearch.is_enabled(group_id):
+        return ""
+    if llm_providers.resolve_provider(group_id, "ai_chat") == "grok":
+        return "grok"
+    return "ds"
+
+
 def _extract_at_users(message) -> list[str]:
     """提取消息中 @ 的 QQ 号列表"""
     at_users = []
@@ -343,25 +358,25 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
 
     model = _get_model(group_id)
 
-    # 5. 联网搜索（按需自动判断）：仅当本群开启「联网」时生效。
-    #    流程：先让 DS 不联网正常回答 → 若 DS 自判需要联网（回答带标记）→ 再检索并二次回答。
-    web_on = ds_websearch.is_enabled(group_id)
+    # 5. 联网方式：未开启="" ；开启且对话切到 Grok="grok"（用 Grok 原生 Live Search，不走 DS 搜索 API）；
+    #    否则="ds"（DeepSeek 搜索 API 两阶段：先答后判）。
+    web_mode = _web_mode(group_id)
     _add_history(user_id, "user", prompt)
 
-    # 第一轮：不注入搜索上下文；若开启联网，引导 DS 自判是否需要联网
+    # 构造首轮消息 + 调用参数
     messages = _build_messages(user_id, prompt)
-    if web_on:
-        messages = messages + [{"role": "system", "content": ds_websearch.NEED_WEB_HINT}]
+    create_kwargs = {"model": model, "messages": messages, "temperature": 0.7, "max_tokens": 2000}
+    if web_mode == "ds":
+        # 引导 DS 自判是否需要联网（回答结尾带标记），命中后再检索
+        messages.append({"role": "system", "content": ds_websearch.NEED_WEB_HINT})
+    elif web_mode == "grok":
+        # Grok 原生实时联网：交给 Grok 自己判断何时检索（auto），无需我们做任何检索
+        create_kwargs["extra_body"] = {"search_parameters": {"mode": "auto"}}
 
     # 6. 调用 API（第一轮）
     try:
-        logger.info(f"AI @bot: user={user_id} group={group_id}, prompt={prompt[:50]}...")
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=0.7,
-            max_tokens=2000,
-        )
+        logger.info(f"AI @bot: user={user_id} group={group_id}, prompt={prompt[:50]}..., web={web_mode}")
+        response = client.chat.completions.create(**create_kwargs)
         reply = response.choices[0].message.content.strip()
         logger.info(f"AI 回复: {reply[:50]}...")
     except Exception as e:
@@ -369,8 +384,8 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
         await matcher.send(f"AI 暂时无法回复，请稍后再试。", reply_message=True)
         return
 
-    # 7. 按需联网二次回答（只有开启联网且 DS 判断需要时才走）
-    if web_on and ds_websearch.needs_web_search(reply):
+    # 7. DeepSeek 路线：命中标记则检索并二次回答（Grok 原生路线已完成，无需处理）
+    if web_mode == "ds" and ds_websearch.needs_web_search(reply):
         clean = ds_websearch.strip_web_marker(reply)
         ctx = await ds_websearch.search_web(prompt, count=5)
         if ctx:
@@ -382,10 +397,7 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
             try:
                 logger.info(f"[联网二次回答] group={group_id} prompt={prompt[:50]}...")
                 response2 = client.chat.completions.create(
-                    model=model,
-                    messages=messages2,
-                    temperature=0.7,
-                    max_tokens=2000,
+                    model=model, messages=messages2, temperature=0.7, max_tokens=2000,
                 )
                 reply2 = response2.choices[0].message.content.strip()
                 reply = reply2 or clean
@@ -394,7 +406,7 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
                 reply = clean
         else:
             reply = clean
-    elif web_on:
+    elif web_mode == "ds":
         # 开启了联网但 DS 判断不需要：去掉可能残留的标记
         reply = ds_websearch.strip_web_marker(reply)
 
@@ -672,11 +684,12 @@ async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent)
     # 更新人类发言时间戳（供冷场判断；放在决策之后，不影响本次判定）
     _freespeak_last_human_ts[group_id] = float(getattr(event, "time", time.time()))
 
-    # 联网搜索（仅本群开启时；按需自动判断）：先不联网正常回答，DS 自判需要再检索二次回答
-    web_on = ds_websearch.is_enabled(group_id)
+    # 联网方式：未开启="" ；开启且对话切 Grok=用 Grok 原生 Live Search；否则=DS 搜索 API 两阶段
+    web_mode = _web_mode(group_id)
     messages = _build_freespeak_messages(prev, text)
-    if web_on:
+    if web_mode == "ds":
         messages = messages + [{"role": "system", "content": ds_websearch.NEED_WEB_HINT}]
+    grok_search = {"search_parameters": {"mode": "auto"}} if web_mode == "grok" else None
 
     try:
         client = _get_client(group_id)
@@ -686,18 +699,18 @@ async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent)
 
     model = _get_model(group_id)
     try:
-        logger.info(f"[自由发言] group={group_id} user={user_id} prompt={text[:50]}...")
-        response = await asyncio.to_thread(
-            client.chat.completions.create,
-            model=model, messages=messages, temperature=0.8, max_tokens=1500,
-        )
+        logger.info(f"[自由发言] group={group_id} user={user_id} prompt={text[:50]}..., web={web_mode}")
+        fs_kwargs = {"model": model, "messages": messages, "temperature": 0.8, "max_tokens": 1500}
+        if grok_search:
+            fs_kwargs["extra_body"] = grok_search
+        response = await asyncio.to_thread(client.chat.completions.create, **fs_kwargs)
         reply = response.choices[0].message.content.strip()
     except Exception as e:
         logger.error(f"[自由发言] AI 调用失败: {e}")
         return
 
-    # 按需联网二次回答（仅本群开启联网且 DS 自判需要）
-    if web_on and ds_websearch.needs_web_search(reply):
+    # 按需联网二次回答（仅 DS 路线；Grok 原生路线已完成）
+    if web_mode == "ds" and ds_websearch.needs_web_search(reply):
         clean = ds_websearch.strip_web_marker(reply)
         ctx = await ds_websearch.search_web(text, count=5)
         if ctx:
@@ -719,7 +732,7 @@ async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent)
                 reply = clean
         else:
             reply = clean
-    elif web_on:
+    elif web_mode == "ds":
         reply = ds_websearch.strip_web_marker(reply)
 
     if not reply:
