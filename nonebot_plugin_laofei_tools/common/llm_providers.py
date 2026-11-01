@@ -284,3 +284,20 @@ def check_provider_keys() -> None:
                 f"✅ {spec['label']} API Key 已配置"
                 f"（endpoint: {spec['base_url']}，对话: {spec['chat_model']}，视觉: {spec['vision_model']}{effort_note}）"
             )
+
+    # 联网能力自检：Grok 联网主通道依赖 Responses API（openai >= 1.66）
+    try:
+        import openai as _openai_mod
+        from openai import OpenAI as _OAI
+
+        _ver = getattr(_openai_mod, "__version__", "?")
+        if hasattr(_OAI, "responses"):
+            logger.info(f"✅ openai SDK {_ver}：支持 Responses API（Grok 联网主通道可用）")
+        else:
+            logger.warning(
+                f"⚠️ openai SDK {_ver} 不支持 Responses API（需 >= 1.66），"
+                "Grok 联网将自动改走「DeepSeek 检索 + Grok 作答」兜底通道；"
+                "建议在 bot 环境执行：pip install -U openai"
+            )
+    except Exception as e:
+        logger.warning(f"⚠️ openai SDK 联网能力自检失败: {e}")

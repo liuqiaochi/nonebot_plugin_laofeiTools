@@ -201,6 +201,73 @@ def _web_mode(group_id: str) -> str:
     return "ds"
 
 
+async def _grok_web_reply(
+    client,
+    model: str,
+    messages: list,
+    query: str,
+    grok_extra: dict,
+    plain_kwargs: dict,
+    tag: str = "",
+) -> str:
+    """Grok + 联网的三级链路，保证「一定联网、且绝不让用户看到失败」。
+
+    通道 A：Responses API + 服务端 ``web_search`` 工具（xAI 官方推荐，最完整）。
+    通道 B：DeepSeek 搜索 API 取资料 → 注入上下文 → Grok 作答（不依赖新 SDK）。
+    通道 C：彻底不联网，用模型自身知识正常回答（保底，绝不让对话失败）。
+    """
+    effort = (grok_extra or {}).get("reasoning_effort", "")
+
+    # ---- 通道 A：Responses API + web_search ----
+    if grok_web.responses_available(client):
+        try:
+            reply = (
+                await asyncio.to_thread(
+                    grok_web.web_answer, client, model, messages, effort
+                )
+            ).strip()
+            if reply and not grok_web.looks_ungrounded(reply):
+                logger.info(f"[Grok联网{tag}] 通道A(Responses+web_search) 成功")
+                return reply
+            if reply:
+                logger.warning(
+                    f"[Grok联网{tag}] 通道A 返回疑似未联网内容，升级通道B：{reply[:60]}..."
+                )
+            else:
+                logger.warning(f"[Grok联网{tag}] 通道A 返回空文本，升级通道B")
+        except Exception as e:
+            logger.warning(f"[Grok联网{tag}] 通道A 失败: {type(e).__name__}: {e}")
+    else:
+        logger.warning(
+            f"[Grok联网{tag}] 当前 openai SDK 不支持 Responses API（需 >=1.66），改用通道B"
+        )
+
+    # ---- 通道 B：DS 检索 + Grok 作答 ----
+    try:
+        ctx = await ds_websearch.search_web(query, count=5)
+        if ctx:
+            reply = (
+                await asyncio.to_thread(
+                    grok_web.answer_with_context, client, model, messages, ctx, grok_extra
+                )
+            ).strip()
+            if reply:
+                logger.info(f"[Grok联网{tag}] 通道B(DS检索+Grok作答) 成功")
+                return reply
+            logger.warning(f"[Grok联网{tag}] 通道B 返回空文本")
+        else:
+            logger.warning(
+                f"[Grok联网{tag}] 通道B 检索为空（DEEPSEEK_API_KEY 未配置或搜索失败）"
+            )
+    except Exception as e:
+        logger.warning(f"[Grok联网{tag}] 通道B 失败: {type(e).__name__}: {e}")
+
+    # ---- 通道 C：不联网保底 ----
+    logger.warning(f"[Grok联网{tag}] 联网通道全部不可用，降级为不联网回答")
+    resp = await asyncio.to_thread(client.chat.completions.create, **plain_kwargs)
+    return (resp.choices[0].message.content or "").strip()
+
+
 def _extract_at_users(message) -> list[str]:
     """提取消息中 @ 的 QQ 号列表"""
     at_users = []
@@ -403,6 +470,9 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
         # DeepSeek 视觉模型需关闭思考模式，否则 max_tokens 被 reasoning 吃光
         if use_vision:
             extra_body.update(llm_providers.get_vision_extra_body(group_id, "ai_chat"))
+    elif web_mode == "grok":
+        # 逼 Grok 真的调用 web_search，而不是凭旧知识回一句「不知道」
+        messages.append({"role": "system", "content": grok_web.WEB_HINT})
     # Grok 思考强度（提速）：与「联网」开关无关，只要本群对话服务商是 Grok 就生效。
     # grok-4.7/4.6/4.5 无法关闭思考，只能调低强度（默认 high → 配置 low 明显更快）；
     # 非推理模型（grok-4.1-fast / 4.20）由 llm_providers 自动跳过，避免 400。
@@ -418,21 +488,11 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
             f"web={web_mode}, vision={use_vision}, model={model}"
         )
         if web_mode == "grok":
-            # xAI 已下线 chat.completions 的 search_parameters（会直接报错），
-            # 联网改走 Responses API + 服务端 web_search 工具。
-            # 该通道任何异常都降级为「不联网正常回答」，绝不让用户看到失败提示。
-            try:
-                reply = await asyncio.to_thread(
-                    grok_web.web_answer,
-                    client,
-                    model,
-                    messages,
-                    grok_extra.get("reasoning_effort", ""),
-                )
-            except Exception as e:
-                logger.warning(f"[Grok联网] web_search 调用失败，降级为不联网回答: {e}")
-                response = await asyncio.to_thread(client.chat.completions.create, **create_kwargs)
-                reply = (response.choices[0].message.content or "").strip()
+            # 旧版 search_parameters 已被 xAI 下线（会 400）；
+            # 走「Responses API + web_search → DS 检索兜底 → 不联网保底」三级链路。
+            reply = await _grok_web_reply(
+                client, model, messages, prompt, grok_extra, create_kwargs
+            )
         else:
             response = await asyncio.to_thread(client.chat.completions.create, **create_kwargs)
             reply = (response.choices[0].message.content or "").strip()
@@ -749,6 +809,8 @@ async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent)
     messages = _build_freespeak_messages(prev, text)
     if web_mode == "ds":
         messages = messages + [{"role": "system", "content": ds_websearch.NEED_WEB_HINT}]
+    elif web_mode == "grok":
+        messages = messages + [{"role": "system", "content": grok_web.WEB_HINT}]
 
     try:
         client = _get_client(group_id)
@@ -765,19 +827,10 @@ async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent)
         if fs_extra:
             fs_kwargs["extra_body"] = fs_extra
         if web_mode == "grok":
-            # Responses API + web_search；失败则降级为不联网回答
-            try:
-                reply = await asyncio.to_thread(
-                    grok_web.web_answer,
-                    client,
-                    model,
-                    messages,
-                    fs_extra.get("reasoning_effort", ""),
-                )
-            except Exception as e:
-                logger.warning(f"[自由发言·Grok联网] web_search 失败，降级为不联网回答: {e}")
-                response = await asyncio.to_thread(client.chat.completions.create, **fs_kwargs)
-                reply = (response.choices[0].message.content or "").strip()
+            # 三级链路：Responses+web_search → DS 检索兜底 → 不联网保底
+            reply = await _grok_web_reply(
+                client, model, messages, text, fs_extra, fs_kwargs, tag="·自由发言"
+            )
         else:
             response = await asyncio.to_thread(client.chat.completions.create, **fs_kwargs)
             reply = (response.choices[0].message.content or "").strip()

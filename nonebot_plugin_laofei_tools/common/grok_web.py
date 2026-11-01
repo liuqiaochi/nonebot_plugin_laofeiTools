@@ -80,6 +80,69 @@ def extract_text(resp) -> str:
     return "".join(chunks).strip()
 
 
+def responses_available(client) -> bool:
+    """当前 openai SDK 是否支持 Responses API（需 openai >= 1.66）。"""
+    try:
+        res = getattr(client, "responses", None)
+        return res is not None and callable(getattr(res, "create", None))
+    except Exception:
+        return False
+
+
+# 开启「联网」且对话模型为 Grok 时注入的系统提示：
+# 引导它真的去用 web_search，而不是凭旧知识回一句「不知道」。
+WEB_HINT = (
+    "本群已开启联网搜索。凡涉及时效性信息（天气、新闻、价格、股价、赛事、"
+    "新版本发布、近期事件等），你必须先使用 web_search 工具检索核实后再作答，"
+    "并在回答中标注来源链接；不要仅凭训练数据猜测，也不要用「不知道」或"
+    "让对方自己去查的方式推脱。"
+)
+
+# 通道 B（DS 检索 + Grok 作答）注入的系统提示
+CONTEXT_SYSTEM = (
+    "以下是刚刚为你实时联网检索到的最新资料，请优先依据这些资料回答用户问题；"
+    "资料与问题无关的部分请忽略。回答末尾用「来源：<标题> <链接>」列出你实际引用的条目。"
+)
+
+
+def answer_with_context(
+    client: OpenAI,
+    model: str,
+    messages,
+    ctx: str,
+    extra: dict = None,
+    temperature: float = 0.7,
+    max_tokens: int = 2000,
+) -> str:
+    """兜底通道：把外部检索到的资料注入上下文，让 Grok 据此作答（不依赖 Responses API）。
+
+    :param extra: 需并入 extra_body 的额外参数（如 reasoning_effort 提速）。
+    """
+    msgs = list(messages or []) + [
+        {"role": "system", "content": f"{CONTEXT_SYSTEM}\n\n{ctx}"}
+    ]
+    kwargs = dict(model=model, messages=msgs, temperature=temperature, max_tokens=max_tokens)
+    if extra:
+        kwargs["extra_body"] = dict(extra)
+    resp = client.chat.completions.create(**kwargs)
+    return (resp.choices[0].message.content or "").strip()
+
+
+def looks_ungrounded(reply: str) -> bool:
+    """粗略判断回答是否「没拿到联网资料」而推脱（用于自动升级到通道 B）。
+
+    判定：既没有任何链接，又出现典型的「查不到/不知道」措辞。
+    """
+    text = reply or ""
+    if "http" in text or "www." in text:
+        return False
+    cues = (
+        "不知道", "无法确定", "无法获取", "无法查询", "查不到", "没有实时",
+        "不能获取", "无法知道", "不清楚", "暂无实时", "无法为你",
+    )
+    return any(c in text for c in cues)
+
+
 def web_answer(
     client: OpenAI,
     model: str,
