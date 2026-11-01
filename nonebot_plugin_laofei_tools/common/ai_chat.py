@@ -343,17 +343,17 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
 
     model = _get_model(group_id)
 
-    # 5. 联网搜索增强（DeepSeek Search API；失败静默降级，绝不阻断对话）
-    search_ctx = ""
-    if ds_websearch.should_search(group_id, prompt):
-        search_ctx = await ds_websearch.search_web(prompt, count=5)
-    api_prompt = f"{search_ctx}\n\n用户问题：{prompt}" if search_ctx else prompt
-
-    # 6. 保存 + 构建消息（历史用原始 prompt，避免搜索上下文污染后续轮次）
+    # 5. 联网搜索（按需自动判断）：仅当本群开启「联网」时生效。
+    #    流程：先让 DS 不联网正常回答 → 若 DS 自判需要联网（回答带标记）→ 再检索并二次回答。
+    web_on = ds_websearch.is_enabled(group_id)
     _add_history(user_id, "user", prompt)
-    messages = _build_messages(user_id, api_prompt)
 
-    # 6. 调用 API
+    # 第一轮：不注入搜索上下文；若开启联网，引导 DS 自判是否需要联网
+    messages = _build_messages(user_id, prompt)
+    if web_on:
+        messages = messages + [{"role": "system", "content": ds_websearch.NEED_WEB_HINT}]
+
+    # 6. 调用 API（第一轮）
     try:
         logger.info(f"AI @bot: user={user_id} group={group_id}, prompt={prompt[:50]}...")
         response = client.chat.completions.create(
@@ -368,6 +368,35 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
         logger.error(f"AI 调用失败: {e}")
         await matcher.send(f"AI 暂时无法回复，请稍后再试。", reply_message=True)
         return
+
+    # 7. 按需联网二次回答（只有开启联网且 DS 判断需要时才走）
+    if web_on and ds_websearch.needs_web_search(reply):
+        clean = ds_websearch.strip_web_marker(reply)
+        ctx = await ds_websearch.search_web(prompt, count=5)
+        if ctx:
+            base = _build_messages(user_id, prompt)
+            messages2 = base[:-1] + [
+                {"role": "assistant", "content": clean},
+                {"role": "user", "content": f"{ctx}\n\n用户问题：{prompt}"},
+            ]
+            try:
+                logger.info(f"[联网二次回答] group={group_id} prompt={prompt[:50]}...")
+                response2 = client.chat.completions.create(
+                    model=model,
+                    messages=messages2,
+                    temperature=0.7,
+                    max_tokens=2000,
+                )
+                reply2 = response2.choices[0].message.content.strip()
+                reply = reply2 or clean
+            except Exception as e:
+                logger.error(f"[联网二次回答] 失败: {e}")
+                reply = clean
+        else:
+            reply = clean
+    elif web_on:
+        # 开启了联网但 DS 判断不需要：去掉可能残留的标记
+        reply = ds_websearch.strip_web_marker(reply)
 
     _add_history(user_id, "assistant", reply)
 
@@ -643,12 +672,11 @@ async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent)
     # 更新人类发言时间戳（供冷场判断；放在决策之后，不影响本次判定）
     _freespeak_last_human_ts[group_id] = float(getattr(event, "time", time.time()))
 
-    # 联网搜索增强（仅本群显式开启时；失败静默降级）
-    fs_search_ctx = ""
-    if ds_websearch.is_enabled(group_id):
-        fs_search_ctx = await ds_websearch.search_web(text, count=5)
-    fs_text = f"{fs_search_ctx}\n\n当前群聊内容：{text}" if fs_search_ctx else text
-    messages = _build_freespeak_messages(prev, fs_text)
+    # 联网搜索（仅本群开启时；按需自动判断）：先不联网正常回答，DS 自判需要再检索二次回答
+    web_on = ds_websearch.is_enabled(group_id)
+    messages = _build_freespeak_messages(prev, text)
+    if web_on:
+        messages = messages + [{"role": "system", "content": ds_websearch.NEED_WEB_HINT}]
 
     try:
         client = _get_client(group_id)
@@ -667,6 +695,32 @@ async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent)
     except Exception as e:
         logger.error(f"[自由发言] AI 调用失败: {e}")
         return
+
+    # 按需联网二次回答（仅本群开启联网且 DS 自判需要）
+    if web_on and ds_websearch.needs_web_search(reply):
+        clean = ds_websearch.strip_web_marker(reply)
+        ctx = await ds_websearch.search_web(text, count=5)
+        if ctx:
+            base = _build_freespeak_messages(prev, text)
+            messages2 = base[:-1] + [
+                {"role": "assistant", "content": clean},
+                {"role": "user", "content": f"{ctx}\n\n当前群聊内容：{text}"},
+            ]
+            try:
+                logger.info(f"[自由发言·联网二次回答] group={group_id} text={text[:50]}...")
+                response2 = await asyncio.to_thread(
+                    client.chat.completions.create,
+                    model=model, messages=messages2, temperature=0.8, max_tokens=1500,
+                )
+                reply2 = response2.choices[0].message.content.strip()
+                reply = reply2 or clean
+            except Exception as e:
+                logger.error(f"[自由发言·联网二次回答] 失败: {e}")
+                reply = clean
+        else:
+            reply = clean
+    elif web_on:
+        reply = ds_websearch.strip_web_marker(reply)
 
     if not reply:
         return
@@ -832,7 +886,7 @@ async def handle_websearch_on(matcher: Matcher, event: MessageEvent):
         await matcher.finish("请在群聊中发送此指令。")
     group_id = str(event.group_id)
     ds_websearch.set_enabled(group_id, True)
-    await matcher.finish("✅ 已开启本群 AI 联网搜索：每次对话前会自动检索最新网页资料（按次计费，5元/千次成功请求）。")
+    await matcher.finish("✅ 已开启本群 AI 联网搜索：AI 会先用自己的知识回答，若判断需要最新资料会自动联网检索再补充回答（按次计费，5元/千次成功请求）。")
 
 
 websearch_off_cmd = on_command(
@@ -852,7 +906,7 @@ async def handle_websearch_off(matcher: Matcher, event: MessageEvent):
         await matcher.finish("请在群聊中发送此指令。")
     group_id = str(event.group_id)
     ds_websearch.set_enabled(group_id, False)
-    await matcher.finish("❌ 已关闭本群 AI 联网搜索（仍可用「联网 / 搜一下」等关键词单次触发）。")
+    await matcher.finish("❌ 已关闭本群 AI 联网搜索（关闭后 AI 仅用自身知识回答，不再自动联网）。")
 
 
 # ========== AI拉黑（超级用户）==========
@@ -1206,8 +1260,7 @@ def _generate_ai_help_image() -> str:
             ("反推AI图", "图反推后直接调 NovelAI 出图（结果同 AI 画图）；需本群开启 AI 画图；支持图片/引用/@群友头像"),
         ], False),
         ("联网搜索（超管）", [
-            ("开启联网 / 关闭联网", "超管：开启后本群每次 AI 对话先联网检索最新资料（默认关，按次计费，5元/千次）"),
-            ("单次触发", "消息含「联网/搜一下/搜索/查一下」等词，本次对话临时联网（无需开群开关）"),
+            ("开启联网 / 关闭联网", "超管：开启后 AI 先用自己的知识回答，若判断需要最新资料会自动联网检索再补充回答（默认关，按次计费，5元/千次成功请求）"),
         ], True),
         ("ai余额（仅超管）", [
             ("ai余额", "查询当前 DeepSeek API Key 余额，以图片方式返回（可用/赠金/充值/货币）"),
@@ -1280,7 +1333,7 @@ async def handle_ai_help(matcher: Matcher) -> None:
             "· 图反推：发送图片 / 引用含图消息 / @一位群友后发送「图反推」，反推 NovelAI 提示词（需本群开启 AI 功能）\n"
             "· 图反推优化：消息加「优化/美化/优化一下/润色」临时触发 DS 润色；超管可用「开启图反推润色/关闭图反推润色」按群默认开启\n"
             "· 反推AI图：图反推后直接调 NovelAI 出图（结果同 AI 画图，需本群开启 AI 画图）；支持图片/引用/@群友头像\n"
-            "· 联网搜索（超管）：开启联网 / 关闭联网 — 开启后本群每次 AI 对话先联网检索最新资料（默认关，按次计费，5元/千次成功请求）；消息含「联网/搜一下/搜索/查一下」等词可单次临时触发\n"
+            "· 联网搜索（超管）：开启联网 / 关闭联网 — 开启后 AI 先用自己的知识回答，若判断需要最新资料会自动联网检索补充（默认关，按次计费，5元/千次成功请求）\n"
             "· ai余额：发送「ai余额」查询当前 DeepSeek API Key 余额（图片返回）；仅超管可用，需本群开启 AI 功能或私聊"
         )
     await matcher.finish(MessageSegment.image(f"base64://{img_b64}"))

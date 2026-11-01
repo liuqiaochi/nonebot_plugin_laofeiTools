@@ -5,9 +5,10 @@ DeepSeek 联网搜索（自研搜索引擎）
 - Fetch:  POST https://api.deepseek.com/v1/tools/fetch
 两者均为原始 JSON API，复用 DEEPSEEK_API_KEY 鉴权（与 AI 对话同 key）。
 
-接入方式：
-- 按群开关：超管「开启联网 / 关闭联网」开启后，该群每次 AI 对话前先检索最新资料。
-- 单次触发：消息含「联网 / 搜一下 / 搜索 / 查一下」等关键词，本次对话临时联网（无需开群开关）。
+触发方式（自动判断）：
+- 仅当某群被超管「开启联网」后才生效；未开启时 AI 只用自身知识回答，绝不联网。
+- 开启后，AI 先不联网正常回答；若 DS 自判需要最新资料（回答结尾带标记
+  「【需要联网检索】」），则自动调用搜索 API 检索，再用检索结果二次回答。
 - 计费：成功请求 5 元 / 1000 次（2026-11-01 起），失败 / 空结果不计费。
 - 失败一律静默降级（返回空串），绝不阻断正常对话。
 
@@ -26,16 +27,21 @@ from ..config import DATA_DIR
 WEBSEARCH_FILE = DATA_DIR / "ds_websearch.json"
 _cache: Optional[dict] = None
 
-# 单次触发关键词：消息含其一即临时联网（仅 @bot 对话生效，自由发言仅认群开关）
-TRIGGER_KEYWORDS = (
-    "联网", "搜一下", "搜搜", "搜索", "查一下", "查最新",
-    "最新消息", "最近新闻", "web search", "google",
-)
-
 SEARCH_ENDPOINT = "https://api.deepseek.com/v1/tools/search"
 
 # 单次搜索返回条数（API 允许 1~50）
 DEFAULT_COUNT = 5
+
+# DS 自判「需要联网」时在回答结尾加的标记；检测到该标记才触发二次联网检索。
+WEB_MARKER = "【需要联网检索】"
+
+# 注入第一轮对话的系统提示：引导 DS 在判断需要联网时输出上述标记。
+NEED_WEB_HINT = (
+    "判断提示：如果你无法仅凭已有知识准确回答用户的问题，或问题涉及最新资讯、"
+    "实时数据、近期事件、时事新闻等需要联网才能获取的信息，请在你的回答结尾加上标记"
+    f"「{WEB_MARKER}」，以便为你联网查询最新资料；"
+    "如果凭已有知识即可准确回答，则正常回答，不要加该标记。"
+)
 
 
 # ---------------- 按群开关持久化 ----------------
@@ -61,7 +67,7 @@ def _save() -> None:
 
 
 def is_enabled(group_id: str) -> bool:
-    """该群是否开启了「始终联网」（群开关）。"""
+    """该群是否开启了「联网搜索」（群开关，超管控制）。"""
     return str(group_id) in _load().get("enabled", [])
 
 
@@ -78,12 +84,16 @@ def set_enabled(group_id: str, on: bool) -> bool:
     return on
 
 
-def should_search(group_id: str, text: str) -> bool:
-    """@bot 对话是否应触发联网：群开关开启 或 命中单次触发关键词。"""
-    if is_enabled(group_id):
-        return True
-    t = (text or "").lower()
-    return any(k.lower() in t for k in TRIGGER_KEYWORDS)
+def needs_web_search(reply: str) -> bool:
+    """DS 的回答是否自判需要联网（含标记）。"""
+    return bool(reply) and WEB_MARKER in reply
+
+
+def strip_web_marker(reply: str) -> str:
+    """去掉回答中的联网判断标记，避免把标记原样返回给用户。"""
+    if not reply:
+        return ""
+    return reply.replace(WEB_MARKER, "").strip()
 
 
 # ---------------- 搜索调用 ----------------
