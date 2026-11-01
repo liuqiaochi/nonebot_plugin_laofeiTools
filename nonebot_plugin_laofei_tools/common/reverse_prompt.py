@@ -46,8 +46,10 @@ VISION_MODEL = "deepseek-flash"  # 保留作默认值常量（无群配置时的
 # 图反推全局串行队列：同一时刻仅一个任务访问视觉模型，其余并发请求排队（避免打爆 DeepSeek API）
 _reverse_lock = asyncio.Lock()
 
-# 反推提示词的指令：Danbooru 风格英文标签，含画师串规则 + 画面元素组织顺序
-REVERSE_PROMPT_INSTRUCTION = (
+# 反推提示词（按服务商区分）：
+# - Grok：含画师串规则（画风 + 画面元素两方面），Grok 对复杂结构化指令遵循度较好；
+# - DeepSeek：精简版（仅画面元素顺序），去掉画师串部分，避免 DS 输出跑偏/被截断。
+REVERSE_PROMPT_INSTRUCTION_GROK = (
     "请用逗号分隔的英文标签，模仿 Danbooru 风格，输出用于 AI 绘画（NovelAI）的提示词。"
     "一、输出结构（最终输出合并为同一段）：输出画面内元素时分为两个方面。"
     "1）画风方面——按图的画风，给出适配的画师串组合，规则："
@@ -66,6 +68,38 @@ REVERSE_PROMPT_INSTRUCTION = (
     "2）用半角逗号分隔，保持英文小写 tag 风格，不要翻译成中文，不要新增原图未体现的内容。"
     "只输出优化后的提示词本身，不要任何解释或引号。"
 )
+
+# DeepSeek 版反推提示词：只要画面元素（不含画师串）
+REVERSE_PROMPT_INSTRUCTION_DS = (
+    "请用逗号分隔的英文标签，模仿 Danbooru 风格，输出用于 AI 绘画（NovelAI）的提示词。"
+    "一、输出结构按以下顺序组织："
+    "画质/画图质量词 → 主体/角色 → 角色外貌特征"
+    "（若符合外貌特征的角色存在，用「角色名_(出处)」代替外貌描述，含发色、发型）"
+    "→ 角色服装 → 表情 → 角色的动作和姿态 → 环境特征 → 构图/镜头。"
+    "二、基础规则："
+    "1）避免使用重复 tag（包括语义重复）；"
+    "2）用半角逗号分隔，保持英文小写 tag 风格，不要翻译成中文，不要新增原图未体现的内容。"
+    "只输出优化后的提示词本身，不要任何解释或引号。"
+)
+
+# [兼容] 旧名指向 Grok 版；新代码请用 reverse_instruction(group_id) 按服务商取。
+REVERSE_PROMPT_INSTRUCTION = REVERSE_PROMPT_INSTRUCTION_GROK
+
+
+def reverse_instruction(group_id: str = "") -> str:
+    """按本群「图反推」所选服务商返回对应提示词。
+
+    Grok → 带画师串规则的完整版；DeepSeek（及任何非 Grok） → 精简版。
+    """
+    try:
+        provider = llm_providers.resolve_provider(str(group_id or ""), "reverse")
+    except Exception:
+        provider = "deepseek"
+    return (
+        REVERSE_PROMPT_INSTRUCTION_GROK
+        if provider == "grok"
+        else REVERSE_PROMPT_INSTRUCTION_DS
+    )
 
 # 触发关键字（任意位置出现即可，支持 @群友 前/后、引用等任意消息结构）
 REVERSE_KEYWORDS = ("图反推", "反推提示词", "图片反推", "提示词反推")
@@ -308,7 +342,7 @@ async def handle_reverse_prompt(
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": REVERSE_PROMPT_INSTRUCTION},
+                            {"type": "text", "text": reverse_instruction(gid)},
                             {"type": "image_url", "image_url": {"url": data_url}},
                         ],
                     }
@@ -677,7 +711,7 @@ async def handle_reverse_ai_draw(
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": REVERSE_PROMPT_INSTRUCTION},
+                            {"type": "text", "text": reverse_instruction(gid)},
                             {"type": "image_url", "image_url": {"url": data_url}},
                         ],
                     }
