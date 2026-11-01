@@ -60,6 +60,38 @@ REVERSE_KEYWORDS = ("图反推", "反推提示词", "图片反推", "提示词�
 # 优化触发关键字：消息文本段含其一即对反推结果再做一次 DS 文本模型润色（先跑通，后续再做群开关）
 OPTIMIZE_KEYWORDS = ("优化", "美化", "优化一下", "润色")
 
+# 润色修饰符（用于「指令精确匹配」时允许「图反推 优化」「反推AI图美化」这类合法写法）
+_OPT_TOKENS = ("优化一下", "美化一下", "润色一下", "优化", "美化", "润色", "一下")
+
+
+def _normalize_cmd_text(text: str) -> str:
+    """去空白、去 @提及、去首尾标点，便于指令精确匹配。"""
+    t = (text or "").strip()
+    t = re.sub(r"@[A-Za-z0-9_\u4e00-\u9fff]+", "", t)
+    t = t.strip(" 。，、！？!?.,;:…~·\"'「」『』（）()[]【】")
+    return t
+
+
+def _strip_optimize(norm: str) -> str:
+    """去掉开头/结尾的润色修饰符，让「图反推 优化」也能精确命中指令本身。"""
+    s = norm
+    changed = True
+    while changed:
+        changed = False
+        for tok in _OPT_TOKENS:
+            if s.startswith(tok) and len(s) > len(tok):
+                s = s[len(tok):]
+                changed = True
+            elif s.endswith(tok) and len(s) > len(tok):
+                s = s[: len(s) - len(tok)]
+                changed = True
+    return s.strip()
+
+
+def _is_exact_command(text: str, keywords) -> bool:
+    """文本经归一化 + 去润色修饰符后，须精确等于某个指令关键字，杜绝整句含词误触发。"""
+    return _strip_optimize(_normalize_cmd_text(text)) in keywords
+
 # DS 文本模型（复用 config.deepseek_model，与 AI 聊天同一模型）的润色指令：保留英文 Danbooru tag，只整理不臆造
 OPTIMIZE_INSTRUCTION = (
     "你是一名 NovelAI 绘画提示词优化助手。下面是一段由视觉模型从图片反推出的 Danbooru 风格英文提示词。"
@@ -172,24 +204,15 @@ def _format_metadata_extras(meta: dict) -> str:
 
 
 async def _is_reverse_request(event: MessageEvent) -> bool:
-    """自定义规则：消息任意文本段包含反推关键字即触发。
+    """自定义规则：消息文本归一化后须**精确等于**反推指令（可带 @群友 / 润色修饰符）。
 
-    不用 on_command 的原因：on_command 要求命令位于消息开头且 force_whitespace，
-    导致「@群友 图反推」或「图反推@群友」（At 段不在首位/无空白）匹配失败；
-    改用 on_message + 本规则，关键字可在任意位置触发，图片/@群友 提取在 handler 内完成。
-    注意：需排除管理指令「开启图反推润色 / 关闭图反推润色」（文本含「图反推」），
-    否则会和同 priority 的开关指令互相触发。
+    不再用子串包含匹配，避免「一整句话里有这词就触发」的误触发。
+    仍兼容「@群友 图反推」「图反推@群友」「图反推 优化」这类合法写法。
     """
     for seg in event.message:
         if seg.type == "text":
             text = seg.data.get("text", "") or ""
-            if any(kw in text for kw in REVERSE_KEYWORDS):
-                if (
-                    "开启图反推" in text
-                    or "关闭图反推" in text
-                    or "反推AI图" in text
-                ):
-                    continue
+            if _is_exact_command(text, REVERSE_KEYWORDS):
                 return True
     return False
 
@@ -556,13 +579,13 @@ REVERSE_AI_DRAW_KEYWORDS = ("反推AI图", "反推ai图", "反推生图")
 
 
 async def _is_reverse_ai_draw_request(event: MessageEvent) -> bool:
-    """消息任意文本段含「反推AI图」等关键字即触发（与图反推触发方式一致）"""
+    """消息文本归一化后须**精确等于**「反推AI图」等指令（与图反推触发方式一致）。"""
     text = "".join(
         seg.data.get("text", "")
         for seg in event.message
         if seg.type == "text"
     )
-    return any(kw in text for kw in REVERSE_AI_DRAW_KEYWORDS)
+    return _is_exact_command(text, REVERSE_AI_DRAW_KEYWORDS)
 
 
 reverse_ai_draw_cmd = on_message(
