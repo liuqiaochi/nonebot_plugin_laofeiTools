@@ -222,23 +222,21 @@ def _strip_at_segments(message) -> str:
 # ========== @bot 触发规则 ==========
 
 async def _at_bot_rule(event: MessageEvent) -> bool:
-    """仅 @机器人触发，排除回复/引用触发"""
+    """仅 @机器人触发：纯文本回复/引用不触发，但带图片的引用/携带会放行（视觉联合理解）"""
     if isinstance(event, PrivateMessageEvent):
         return False
 
     if not (hasattr(event, "is_tome") and callable(event.is_tome) and event.is_tome()):
         return False
 
-    # 排除回复/引用：OneBot v11 中回复消息在 event 层面有 reply 字段
-    if getattr(event, "reply", None) is not None:
-        logger.debug(f"AI @bot 忽略 (回复): group={getattr(event, 'group_id', 'N/A')}")
+    # 排除纯文本回复/引用；但「引用或携带图片 + @bot」必须放行，
+    # 用于视觉模型联合理解（如：引用一张图并 @bot「这图里的是谁」）。
+    has_reply = getattr(event, "reply", None) is not None or any(
+        seg.type == "reply" for seg in event.message
+    )
+    if has_reply and not _has_image_seg(event):
+        logger.debug(f"AI @bot 忽略 (纯文本回复): group={getattr(event, 'group_id', 'N/A')}")
         return False
-
-    # 再兜底检查消息段中的 reply
-    for seg in event.message:
-        if seg.type == "reply":
-            logger.debug(f"AI @bot 忽略 (reply段): group={getattr(event, 'group_id', 'N/A')}")
-            return False
 
     # 调试：理论上不会到这里，如果到了说明 is_tome 是通过未知方式触发的
     seg_types = [seg.type for seg in event.message]
@@ -356,28 +354,67 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
         await matcher.send(f"AI 功能配置错误：{e}（请管理员检查对应服务商的 API Key：DEEPSEEK_API_KEY / GROK_API_KEY）", reply_message=True)
         return
 
-    model = _get_model(group_id)
+    # 4.5 视觉联合理解：@bot 且（本消息或引用）带图片时，用视觉模型读图+文本
+    img_bytes = None
+    if _has_image_seg(event):
+        try:
+            img_bytes = await _download_image_bytes(bot, event)
+        except Exception as e:
+            logger.warning(f"[AI视觉] 图片下载失败: {e}")
+    use_vision = img_bytes is not None
+
+    model = (
+        llm_providers.get_vision_model(group_id, "ai_chat")
+        if use_vision
+        else _get_model(group_id)
+    )
 
     # 5. 联网方式：未开启="" ；开启且对话切到 Grok="grok"（用 Grok 原生 Live Search，不走 DS 搜索 API）；
     #    否则="ds"（DeepSeek 搜索 API 两阶段：先答后判）。
     web_mode = _web_mode(group_id)
-    _add_history(user_id, "user", prompt)
+    _add_history(user_id, "user", prompt)  # 历史仅存纯文本，避免图片上下文污染后续轮次
 
     # 构造首轮消息 + 调用参数
     messages = _build_messages(user_id, prompt)
+    if use_vision:
+        try:
+            png = _to_png_bytes(img_bytes)
+            data_url = f"data:image/png;base64,{base64.b64encode(png).decode()}"
+            messages[-1] = {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            }
+        except Exception as e:
+            logger.warning(f"[AI视觉] 图片转码失败，回退纯文本: {e}")
+            use_vision = False
+            model = _get_model(group_id)
+
     create_kwargs = {"model": model, "messages": messages, "temperature": 0.7, "max_tokens": 2000}
+
+    extra_body = {}
     if web_mode == "ds":
         # 引导 DS 自判是否需要联网（回答结尾带标记），命中后再检索
         messages.append({"role": "system", "content": ds_websearch.NEED_WEB_HINT})
+        # DeepSeek 视觉模型需关闭思考模式，否则 max_tokens 被 reasoning 吃光
+        if use_vision:
+            extra_body.update(llm_providers.get_vision_extra_body(group_id, "ai_chat"))
     elif web_mode == "grok":
         # Grok 原生实时联网：交给 Grok 自己判断何时检索（auto），无需我们做任何检索
-        create_kwargs["extra_body"] = {"search_parameters": {"mode": "auto"}}
+        extra_body["search_parameters"] = {"mode": "auto"}
+    if extra_body:
+        create_kwargs["extra_body"] = extra_body
 
-    # 6. 调用 API（第一轮）
+    # 6. 调用 API（第一轮；OpenAI SDK 为同步调用，放线程池避免冻结事件循环）
     try:
-        logger.info(f"AI @bot: user={user_id} group={group_id}, prompt={prompt[:50]}..., web={web_mode}")
-        response = client.chat.completions.create(**create_kwargs)
-        reply = response.choices[0].message.content.strip()
+        logger.info(
+            f"AI @bot: user={user_id} group={group_id}, prompt={prompt[:50]}..., "
+            f"web={web_mode}, vision={use_vision}, model={model}"
+        )
+        response = await asyncio.to_thread(client.chat.completions.create, **create_kwargs)
+        reply = (response.choices[0].message.content or "").strip()
         logger.info(f"AI 回复: {reply[:50]}...")
     except Exception as e:
         logger.error(f"AI 调用失败: {e}")
@@ -396,10 +433,12 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
             ]
             try:
                 logger.info(f"[联网二次回答] group={group_id} prompt={prompt[:50]}...")
-                response2 = client.chat.completions.create(
-                    model=model, messages=messages2, temperature=0.7, max_tokens=2000,
+                response2 = await asyncio.to_thread(
+                    client.chat.completions.create,
+                    model=_get_model(group_id),  # 二次回答仅纯文本，用对话模型即可
+                    messages=messages2, temperature=0.7, max_tokens=2000,
                 )
-                reply2 = response2.choices[0].message.content.strip()
+                reply2 = (response2.choices[0].message.content or "").strip()
                 reply = reply2 or clean
             except Exception as e:
                 logger.error(f"[联网二次回答] 失败: {e}")
@@ -1065,6 +1104,20 @@ async def _download_image_bytes(bot, event: MessageEvent) -> Optional[bytes]:
     return None
 
 
+def _to_png_bytes(data: bytes, max_side: int = 1600) -> bytes:
+    """把任意图片字节转码为 PNG（视觉模型明确支持的格式），超长边等比缩小。"""
+    with Image.open(BytesIO(data)) as im:
+        if im.mode not in ("RGB", "RGBA"):
+            im = im.convert("RGBA")
+        w, h = im.size
+        if max(w, h) > max_side:
+            scale = max_side / float(max(w, h))
+            im = im.resize((max(1, int(w * scale)), max(1, int(h * scale))))
+        buf = BytesIO()
+        im.save(buf, format="PNG")
+        return buf.getvalue()
+
+
 def _has_image_seg(event: MessageEvent) -> bool:
     """Rule 检查：消息中是否含图片段（含引用消息）"""
     return _find_image_seg(event) is not None
@@ -1246,6 +1299,7 @@ def _generate_ai_help_image() -> str:
     sections = [
         ("对话", [
             ("@机器人 + 问题", "群聊需先开启，私聊直接用"),
+            ("@机器人 + 图片 + 问题", "附图片或引用含图消息再@我，可看图回答（如「这图里的是谁」）"),
             ("lg清记忆 / lg清空记忆", "清除当前对话历史"),
             ("打开/关闭 ai自由发言", "超管：开启后无需@，bot 基于最近群聊自动接话（需先开启AI）"),
         ]),
@@ -1338,6 +1392,7 @@ async def handle_ai_help(matcher: Matcher) -> None:
         await matcher.finish(
             "🤖 蓝色大肥鱼 · AI 指令\n"
             "· @机器人 + 问题（群聊需开启，私聊直用）\n"
+            "· @机器人 + 图片 + 问题：附图片或引用含图消息再@我，可看图回答（如「这图里的是谁」）\n"
             "· lg清记忆（清除对话历史）\n"
             "· 自由发言（超管）：打开/关闭 ai自由发言 — 开启后无需@，bot 基于最近群聊自动接话（需先开启AI）\n"
             "· 管理（超管）：开启AI / 关闭AI / AI拉黑 / AI解除\n"
