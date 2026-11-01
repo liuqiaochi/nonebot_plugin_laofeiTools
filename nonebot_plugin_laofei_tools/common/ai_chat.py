@@ -51,6 +51,7 @@ from ..config import (
 )
 
 from . import llm_providers
+from . import ds_websearch
 
 # ========== 启动时检查 API Key ==========
 
@@ -342,9 +343,15 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
 
     model = _get_model(group_id)
 
-    # 5. 保存 + 构建消息
+    # 5. 联网搜索增强（DeepSeek Search API；失败静默降级，绝不阻断对话）
+    search_ctx = ""
+    if ds_websearch.should_search(group_id, prompt):
+        search_ctx = await ds_websearch.search_web(prompt, count=5)
+    api_prompt = f"{search_ctx}\n\n用户问题：{prompt}" if search_ctx else prompt
+
+    # 6. 保存 + 构建消息（历史用原始 prompt，避免搜索上下文污染后续轮次）
     _add_history(user_id, "user", prompt)
-    messages = _build_messages(user_id, prompt)
+    messages = _build_messages(user_id, api_prompt)
 
     # 6. 调用 API
     try:
@@ -636,7 +643,12 @@ async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent)
     # 更新人类发言时间戳（供冷场判断；放在决策之后，不影响本次判定）
     _freespeak_last_human_ts[group_id] = float(getattr(event, "time", time.time()))
 
-    messages = _build_freespeak_messages(prev, text)
+    # 联网搜索增强（仅本群显式开启时；失败静默降级）
+    fs_search_ctx = ""
+    if ds_websearch.is_enabled(group_id):
+        fs_search_ctx = await ds_websearch.search_web(text, count=5)
+    fs_text = f"{fs_search_ctx}\n\n当前群聊内容：{text}" if fs_search_ctx else text
+    messages = _build_freespeak_messages(prev, fs_text)
 
     try:
         client = _get_client(group_id)
@@ -799,6 +811,48 @@ async def handle_freespeak_off(matcher: Matcher, event: MessageEvent):
         await matcher.finish("AI 自由发言已经关闭。")
     disable_ai_freespeak(group_id)
     await matcher.finish("❌ 已关闭本群 AI 自由发言。")
+
+
+# ========== AI 联网搜索开关（超级用户）==========
+
+websearch_on_cmd = on_command(
+    "开启联网",
+    aliases={"开启ai联网", "开启联网搜索", "打开联网", "打开ai联网"},
+    permission=SUPERUSER,
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+@websearch_on_cmd.handle()
+async def handle_websearch_on(matcher: Matcher, event: MessageEvent):
+    """超级用户开启本群 AI 联网搜索（每次对话前自动检索最新资料）"""
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish("请在群聊中发送此指令。")
+    group_id = str(event.group_id)
+    ds_websearch.set_enabled(group_id, True)
+    await matcher.finish("✅ 已开启本群 AI 联网搜索：每次对话前会自动检索最新网页资料（按次计费，5元/千次成功请求）。")
+
+
+websearch_off_cmd = on_command(
+    "关闭联网",
+    aliases={"关闭ai联网", "关闭联网搜索", "关掉联网", "关掉ai联网"},
+    permission=SUPERUSER,
+    priority=5,
+    block=True,
+    force_whitespace=True,
+)
+
+
+@websearch_off_cmd.handle()
+async def handle_websearch_off(matcher: Matcher, event: MessageEvent):
+    """超级用户关闭本群 AI 联网搜索"""
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish("请在群聊中发送此指令。")
+    group_id = str(event.group_id)
+    ds_websearch.set_enabled(group_id, False)
+    await matcher.finish("❌ 已关闭本群 AI 联网搜索（仍可用「联网 / 搜一下」等关键词单次触发）。")
 
 
 # ========== AI拉黑（超级用户）==========
@@ -1151,6 +1205,10 @@ def _generate_ai_help_image() -> str:
             ("优化", "消息加「优化/美化/优化一下/润色」临时触发 DS 润色；超管可用「开启图反推润色/关闭图反推润色」按群默认开启"),
             ("反推AI图", "图反推后直接调 NovelAI 出图（结果同 AI 画图）；需本群开启 AI 画图；支持图片/引用/@群友头像"),
         ], False),
+        ("联网搜索（超管）", [
+            ("开启联网 / 关闭联网", "超管：开启后本群每次 AI 对话先联网检索最新资料（默认关，按次计费，5元/千次）"),
+            ("单次触发", "消息含「联网/搜一下/搜索/查一下」等词，本次对话临时联网（无需开群开关）"),
+        ], True),
         ("ai余额（仅超管）", [
             ("ai余额", "查询当前 DeepSeek API Key 余额，以图片方式返回（可用/赠金/充值/货币）"),
             ("范围", "仅超级用户可用；群聊需本群已开启 AI 功能，私聊直接可用"),
@@ -1222,6 +1280,7 @@ async def handle_ai_help(matcher: Matcher) -> None:
             "· 图反推：发送图片 / 引用含图消息 / @一位群友后发送「图反推」，反推 NovelAI 提示词（需本群开启 AI 功能）\n"
             "· 图反推优化：消息加「优化/美化/优化一下/润色」临时触发 DS 润色；超管可用「开启图反推润色/关闭图反推润色」按群默认开启\n"
             "· 反推AI图：图反推后直接调 NovelAI 出图（结果同 AI 画图，需本群开启 AI 画图）；支持图片/引用/@群友头像\n"
+            "· 联网搜索（超管）：开启联网 / 关闭联网 — 开启后本群每次 AI 对话先联网检索最新资料（默认关，按次计费，5元/千次成功请求）；消息含「联网/搜一下/搜索/查一下」等词可单次临时触发\n"
             "· ai余额：发送「ai余额」查询当前 DeepSeek API Key 余额（图片返回）；仅超管可用，需本群开启 AI 功能或私聊"
         )
     await matcher.finish(MessageSegment.image(f"base64://{img_b64}"))
