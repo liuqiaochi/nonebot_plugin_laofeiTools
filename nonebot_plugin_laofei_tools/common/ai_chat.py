@@ -52,6 +52,7 @@ from ..config import (
 
 from . import llm_providers
 from . import ds_websearch
+from . import grok_web
 
 # ========== 启动时检查 API Key ==========
 
@@ -188,8 +189,9 @@ def _web_mode(group_id: str) -> str:
     """本群 AI 对话的「联网」方式：
 
     - "":        未开启联网（纯 DS / 当前模型自身知识，绝不联网）
-    - "grok":    已开启联网 且 本群对话模型切到了 Grok → 走 Grok 原生 Live Search
-                 （在 chat 调用里带 search_parameters，由 Grok 自己判断何时检索，不调用 DS 搜索 API）
+    - "grok":    已开启联网 且 本群对话模型切到了 Grok → 走 xAI 官方 Responses API
+                 + ``tools=[{"type":"web_search"}]``（旧版 search_parameters 已被 xAI
+                 下线，会直接报错；见 common/grok_web.py），不调用 DS 搜索 API
     - "ds":      已开启联网 且 走 DeepSeek（或默认）→ 走 DeepSeek 搜索 API 两阶段（先答后判）
     """
     if not ds_websearch.is_enabled(group_id):
@@ -401,13 +403,11 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
         # DeepSeek 视觉模型需关闭思考模式，否则 max_tokens 被 reasoning 吃光
         if use_vision:
             extra_body.update(llm_providers.get_vision_extra_body(group_id, "ai_chat"))
-    elif web_mode == "grok":
-        # Grok 原生实时联网：交给 Grok 自己判断何时检索（auto），无需我们做任何检索
-        extra_body["search_parameters"] = {"mode": "auto"}
     # Grok 思考强度（提速）：与「联网」开关无关，只要本群对话服务商是 Grok 就生效。
     # grok-4.7/4.6/4.5 无法关闭思考，只能调低强度（默认 high → 配置 low 明显更快）；
     # 非推理模型（grok-4.1-fast / 4.20）由 llm_providers 自动跳过，避免 400。
-    extra_body.update(llm_providers.get_grok_extra_body(group_id, "ai_chat", model))
+    grok_extra = llm_providers.get_grok_extra_body(group_id, "ai_chat", model)
+    extra_body.update(grok_extra)
     if extra_body:
         create_kwargs["extra_body"] = extra_body
 
@@ -417,8 +417,25 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
             f"AI @bot: user={user_id} group={group_id}, prompt={prompt[:50]}..., "
             f"web={web_mode}, vision={use_vision}, model={model}"
         )
-        response = await asyncio.to_thread(client.chat.completions.create, **create_kwargs)
-        reply = (response.choices[0].message.content or "").strip()
+        if web_mode == "grok":
+            # xAI 已下线 chat.completions 的 search_parameters（会直接报错），
+            # 联网改走 Responses API + 服务端 web_search 工具。
+            # 该通道任何异常都降级为「不联网正常回答」，绝不让用户看到失败提示。
+            try:
+                reply = await asyncio.to_thread(
+                    grok_web.web_answer,
+                    client,
+                    model,
+                    messages,
+                    grok_extra.get("reasoning_effort", ""),
+                )
+            except Exception as e:
+                logger.warning(f"[Grok联网] web_search 调用失败，降级为不联网回答: {e}")
+                response = await asyncio.to_thread(client.chat.completions.create, **create_kwargs)
+                reply = (response.choices[0].message.content or "").strip()
+        else:
+            response = await asyncio.to_thread(client.chat.completions.create, **create_kwargs)
+            reply = (response.choices[0].message.content or "").strip()
         logger.info(f"AI 回复: {reply[:50]}...")
     except Exception as e:
         logger.error(f"AI 调用失败: {e}")
@@ -727,12 +744,11 @@ async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent)
     # 更新人类发言时间戳（供冷场判断；放在决策之后，不影响本次判定）
     _freespeak_last_human_ts[group_id] = float(getattr(event, "time", time.time()))
 
-    # 联网方式：未开启="" ；开启且对话切 Grok=用 Grok 原生 Live Search；否则=DS 搜索 API 两阶段
+    # 联网方式：未开启="" ；开启且对话切 Grok=走 Responses API + web_search；否则=DS 搜索 API 两阶段
     web_mode = _web_mode(group_id)
     messages = _build_freespeak_messages(prev, text)
     if web_mode == "ds":
         messages = messages + [{"role": "system", "content": ds_websearch.NEED_WEB_HINT}]
-    grok_search = {"search_parameters": {"mode": "auto"}} if web_mode == "grok" else None
 
     try:
         client = _get_client(group_id)
@@ -744,13 +760,27 @@ async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent)
     try:
         logger.info(f"[自由发言] group={group_id} user={user_id} prompt={text[:50]}..., web={web_mode}")
         fs_kwargs = {"model": model, "messages": messages, "temperature": 0.8, "max_tokens": 1500}
-        fs_extra = dict(grok_search) if grok_search else {}
         # Grok 思考强度（提速），非 Grok 或非推理模型自动为空
-        fs_extra.update(llm_providers.get_grok_extra_body(group_id, "ai_chat", model))
+        fs_extra = llm_providers.get_grok_extra_body(group_id, "ai_chat", model)
         if fs_extra:
             fs_kwargs["extra_body"] = fs_extra
-        response = await asyncio.to_thread(client.chat.completions.create, **fs_kwargs)
-        reply = response.choices[0].message.content.strip()
+        if web_mode == "grok":
+            # Responses API + web_search；失败则降级为不联网回答
+            try:
+                reply = await asyncio.to_thread(
+                    grok_web.web_answer,
+                    client,
+                    model,
+                    messages,
+                    fs_extra.get("reasoning_effort", ""),
+                )
+            except Exception as e:
+                logger.warning(f"[自由发言·Grok联网] web_search 失败，降级为不联网回答: {e}")
+                response = await asyncio.to_thread(client.chat.completions.create, **fs_kwargs)
+                reply = (response.choices[0].message.content or "").strip()
+        else:
+            response = await asyncio.to_thread(client.chat.completions.create, **fs_kwargs)
+            reply = (response.choices[0].message.content or "").strip()
     except Exception as e:
         logger.error(f"[自由发言] AI 调用失败: {e}")
         return
