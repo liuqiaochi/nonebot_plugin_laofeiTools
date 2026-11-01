@@ -404,6 +404,10 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
     elif web_mode == "grok":
         # Grok 原生实时联网：交给 Grok 自己判断何时检索（auto），无需我们做任何检索
         extra_body["search_parameters"] = {"mode": "auto"}
+    # Grok 思考强度（提速）：与「联网」开关无关，只要本群对话服务商是 Grok 就生效。
+    # grok-4.7/4.6/4.5 无法关闭思考，只能调低强度（默认 high → 配置 low 明显更快）；
+    # 非推理模型（grok-4.1-fast / 4.20）由 llm_providers 自动跳过，避免 400。
+    extra_body.update(llm_providers.get_grok_extra_body(group_id, "ai_chat", model))
     if extra_body:
         create_kwargs["extra_body"] = extra_body
 
@@ -740,8 +744,11 @@ async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent)
     try:
         logger.info(f"[自由发言] group={group_id} user={user_id} prompt={text[:50]}..., web={web_mode}")
         fs_kwargs = {"model": model, "messages": messages, "temperature": 0.8, "max_tokens": 1500}
-        if grok_search:
-            fs_kwargs["extra_body"] = grok_search
+        fs_extra = dict(grok_search) if grok_search else {}
+        # Grok 思考强度（提速），非 Grok 或非推理模型自动为空
+        fs_extra.update(llm_providers.get_grok_extra_body(group_id, "ai_chat", model))
+        if fs_extra:
+            fs_kwargs["extra_body"] = fs_extra
         response = await asyncio.to_thread(client.chat.completions.create, **fs_kwargs)
         reply = response.choices[0].message.content.strip()
     except Exception as e:

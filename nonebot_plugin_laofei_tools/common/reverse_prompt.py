@@ -293,6 +293,8 @@ async def handle_reverse_prompt(
             client = llm_providers.build_client(gid, "reverse")
             vision_model = llm_providers.get_vision_model(gid, "reverse")
             extra_body = llm_providers.get_vision_extra_body(gid, "reverse")
+            # Grok 思考强度（提速）：推理模型默认 high，可调低；DeepSeek / 非推理 Grok 自动为空
+            extra_body.update(llm_providers.get_grok_extra_body(gid, "reverse", vision_model))
             data_url = f"data:image/png;base64,{base64.b64encode(image_data).decode()}"
             # 注意：OpenAI SDK 的 chat.completions.create 是**同步阻塞**调用，
             # 必须放进线程池（asyncio.to_thread）以免冻结整个事件循环；
@@ -454,8 +456,7 @@ async def _optimize_prompt(raw: str, group_id: str = "") -> str:
     """
     client = llm_providers.build_client(group_id, "reverse")
     model = llm_providers.get_chat_model(group_id, "reverse")
-    response = await asyncio.to_thread(
-        client.chat.completions.create,
+    opt_kwargs = dict(
         model=model,
         messages=[
             {"role": "system", "content": OPTIMIZE_INSTRUCTION},
@@ -464,6 +465,14 @@ async def _optimize_prompt(raw: str, group_id: str = "") -> str:
         temperature=0.3,
         max_tokens=800,
         timeout=60,
+    )
+    # Grok 思考强度（提速）；DeepSeek 与非推理 Grok 模型自动为空
+    opt_extra = llm_providers.get_grok_extra_body(group_id, "reverse", model)
+    if opt_extra:
+        opt_kwargs["extra_body"] = opt_extra
+    response = await asyncio.to_thread(
+        client.chat.completions.create,
+        **opt_kwargs,
     )
     return (response.choices[0].message.content or "").strip()
 
@@ -659,6 +668,8 @@ async def handle_reverse_ai_draw(
             client = llm_providers.build_client(gid, "reverse")
             vision_model = llm_providers.get_vision_model(gid, "reverse")
             extra_body = llm_providers.get_vision_extra_body(gid, "reverse")
+            # Grok 思考强度（提速）：推理模型默认 high，可调低；DeepSeek / 非推理 Grok 自动为空
+            extra_body.update(llm_providers.get_grok_extra_body(gid, "reverse", vision_model))
             data_url = f"data:image/png;base64,{base64.b64encode(image_data).decode()}"
             create_kwargs = dict(
                 model=vision_model,

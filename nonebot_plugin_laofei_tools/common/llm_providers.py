@@ -77,21 +77,25 @@ def _provider_spec(provider: str) -> dict:
 
     if provider == "deepseek":
         return {
+            "provider": "deepseek",
             "api_key": (getattr(cfg, "deepseek_api_key", "") or "") if cfg else "",
             "base_url": "https://api.deepseek.com",
             "chat_model": (getattr(cfg, "deepseek_model", "deepseek-flash") or "deepseek-flash") if cfg else "deepseek-flash",
             "vision_model": "deepseek-flash",
             "thinking_disable": True,
+            "reasoning_effort": "",
             "label": "DeepSeek",
             "key_env": "DEEPSEEK_API_KEY",
         }
     if provider == "grok":
         return {
+            "provider": "grok",
             "api_key": (getattr(cfg, "grok_api_key", "") or "") if cfg else "",
             "base_url": (getattr(cfg, "grok_base_url", "https://api.x.ai/v1") or "https://api.x.ai/v1") if cfg else "https://api.x.ai/v1",
             "chat_model": (getattr(cfg, "grok_model", "grok-4.7") or "grok-4.7") if cfg else "grok-4.7",
             "vision_model": (getattr(cfg, "grok_vision_model", "grok-4.7") or "grok-4.7") if cfg else "grok-4.7",
             "thinking_disable": False,
+            "reasoning_effort": (getattr(cfg, "grok_reasoning_effort", "low") or "") if cfg else "low",
             "label": "Grok (xAI)",
             "key_env": "GROK_API_KEY",
         }
@@ -185,6 +189,69 @@ def get_vision_extra_body(group_id: str, usage: str) -> dict:
     return {"thinking": {"type": "disabled"}} if spec["thinking_disable"] else {}
 
 
+# ---------------- Grok 思考强度（提速） ----------------
+#
+# 官方文档：不同 Grok 模型支持的 reasoning_effort 档位不同，且非推理模型**不接受该参数**
+# （发送会直接 400）。这里按模型家族做白名单，宁可少发也不要发错。
+#   grok-4.7 / 4.6 : low / medium / high(默认) / xhigh —— 无法关闭思考
+#   grok-4.5       : low / medium / high(默认)       —— 无法关闭思考
+#   grok-4.3       : none / low(默认) / medium / high —— none 可完全关闭思考（近即时）
+#   grok-4.1-fast、grok-4.20 : 非推理模型，不支持该参数
+
+_GROK_EFFORT_BY_FAMILY = (
+    (("4.7", "4.6"), ("low", "medium", "high", "xhigh")),
+    (("4.5",), ("low", "medium", "high")),
+    (("4.3",), ("none", "low", "medium", "high")),
+)
+
+# 命中任一标记即视为非推理模型：不发送 reasoning_effort
+_GROK_NON_REASONING_MARKS = ("-fast", "4.20", "non-reasoning")
+
+# 视为「不发送」的配置值
+_GROK_EFFORT_OFF_VALUES = ("", "off", "disable", "disabled", "0", "false", "no")
+
+
+def _grok_effort_levels(model: str) -> Tuple[str, ...]:
+    """返回该 Grok 模型支持的 reasoning_effort 档位；空元组表示不支持该参数。"""
+    m = (model or "").strip().lower()
+    if not m:
+        return ()
+    if any(mark in m for mark in _GROK_NON_REASONING_MARKS):
+        return ()
+    for names, levels in _GROK_EFFORT_BY_FAMILY:
+        if any(n in m for n in names):
+            return levels
+    return ()
+
+
+def get_grok_extra_body(group_id: str, usage: str, model: str = "") -> dict:
+    """Grok 专属额外参数（reasoning_effort），用于提速；不适用时返回 {}。
+
+    返回的 dict 可直接合并进 OpenAI SDK 的 extra_body：
+    - 非 Grok 服务商 → {}
+    - 配置为空 / off → {}（保持服务商默认，grok-4.7 默认 high）
+    - 非推理模型（grok-4.1-fast / grok-4.20 等）→ {}
+    - 档位超出该模型支持范围 → 回落到 low（不在范围内时不发，避免 400）
+    """
+    spec = _provider_spec(resolve_provider(group_id, usage))
+    if spec.get("provider") != "grok":
+        return {}
+    raw = (spec.get("reasoning_effort") or "").strip().lower()
+    if raw in _GROK_EFFORT_OFF_VALUES:
+        return {}
+    model = model or spec["chat_model"]
+    levels = _grok_effort_levels(model)
+    if not levels:
+        return {}
+    if raw not in levels:
+        if "low" not in levels:
+            logger.debug(f"[LLM] Grok 模型 {model} 不支持 reasoning_effort={raw}，已跳过")
+            return {}
+        logger.debug(f"[LLM] Grok 模型 {model} 不支持 reasoning_effort={raw}，回落到 low")
+        raw = "low"
+    return {"reasoning_effort": raw}
+
+
 # ---------------- 启动校验 ----------------
 
 def check_provider_keys() -> None:
@@ -203,7 +270,17 @@ def check_provider_keys() -> None:
                     f"若某群切换至 {spec['label']} 会因缺 key 报错，配置后即可使用。"
                 )
         else:
+            effort = (spec.get("reasoning_effort") or "").strip()
+            effort_note = ""
+            if spec.get("provider") == "grok":
+                levels = _grok_effort_levels(spec["chat_model"])
+                if not levels:
+                    effort_note = "，思考强度: 该模型非推理/不支持该参数"
+                elif effort.lower() in _GROK_EFFORT_OFF_VALUES:
+                    effort_note = "，思考强度: 未设置（服务商默认）"
+                else:
+                    effort_note = f"，思考强度: {effort.lower()}"
             logger.info(
                 f"✅ {spec['label']} API Key 已配置"
-                f"（endpoint: {spec['base_url']}，对话: {spec['chat_model']}，视觉: {spec['vision_model']}）"
+                f"（endpoint: {spec['base_url']}，对话: {spec['chat_model']}，视觉: {spec['vision_model']}{effort_note}）"
             )
