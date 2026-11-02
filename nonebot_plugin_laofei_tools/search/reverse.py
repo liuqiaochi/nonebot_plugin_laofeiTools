@@ -24,6 +24,7 @@
 - lens_sidecar_timeout / longge_reverse_timeout / longge_reverse_max_results：可选
 """
 
+import base64
 import io
 import re
 import time
@@ -52,12 +53,20 @@ RESULT_TITLE = "🎯 **lg找姬结果**"
 def finded_cq() -> str:
     """结果标题下方固定带的配图 CQ 码（image/finded.png）。
 
-    用 file:// 本地路径而不是 base64：base64 大图会把整条消息撑爆（AI 配图
-    1.6MB 那次就是这么失败的）。文件缺失时返回空串，不影响结果本身。
+    必须用 base64:// 内联，不能用 file:// 本地路径：NapCat 跑在 mac 宿主机，
+    读不到 bot 所在 VM 的 /home/laofei/... 绝对路径，file:// 只会退化成链接文本、
+    图永远发不出。base64 把字节随消息经 websocket 透传给 NapCat 上传，不依赖它
+    能读到本机路径。finded.png 已压到 ~53KB（300×333 调色板 PNG），base64 后约
+    71KB，单条消息体积可控、不会撑爆也不会撞 NapCat 上传超时（retcode=1200）。
+    文件缺失或异常时返回空串，不影响结果本身。
     """
     if not FINDED_IMAGE.exists():
         return ""
-    return f"[CQ:image,file=file://{FINDED_IMAGE.as_posix()}]"
+    try:
+        b64 = base64.b64encode(FINDED_IMAGE.read_bytes()).decode("ascii")
+        return f"[CQ:image,file=base64://{b64}]"
+    except Exception:
+        return ""
 
 
 # ========== 配置读取 ==========
