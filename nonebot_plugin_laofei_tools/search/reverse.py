@@ -287,12 +287,17 @@ def _failure_hint(failures: list) -> str:
 # 渲染
 # ---------------------------------------------------------------------------
 
-def _render_one(item: dict) -> str:
-    """单个结果渲染成短文本：标题下紧跟 finded.png，再列平台/名字/账号。"""
+def _render_one(item: dict, with_image: bool = True) -> str:
+    """单个结果渲染成短文本：标题下紧跟 finded.png，再列平台/名字/账号。
+
+    with_image=False 时只出纯文字（标题+平台/名字/账号+URL），用于「带图那条
+    没发出去」时的兜底，保证作者结论不丢。
+    """
     lines = [RESULT_TITLE]
-    img = finded_cq()
-    if img:
-        lines.append(img)
+    if with_image:
+        img = finded_cq()
+        if img:
+            lines.append(img)
     lines += [
         "",
         f"🌐 平台：{item['platform']}",
@@ -349,17 +354,17 @@ def _sidecar_items(accounts: list) -> list:
     return [item for _, _, item in packed]
 
 
-def render_text(detail: dict) -> str:
+def render_text(detail: dict, with_image: bool = True) -> str:
     """结构化结果 -> 单条文本：只报最可信的一位，弱证据直接判没找到。
 
     正式模式（不带「调试」）只出一条结论，所以宁可报「没找到」也不能把
-    转发号/无关号当答案报出去。
+    转发号/无关号当答案报出去。with_image=False 用于带图发送失败时的纯文字兜底。
     """
     items = detail.get("items") or []
     if detail.get("ok") and items:
         for it in items:
             if not it.get("weak"):
-                return _render_one(it)
+                return _render_one(it, with_image=with_image)
     return detail.get("message") or "没找到姬 😢"
 
 

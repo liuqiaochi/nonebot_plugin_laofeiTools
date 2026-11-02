@@ -10,6 +10,7 @@ NoneBot 指令处理
 图片输入：两条指令均支持「同条消息带图」或「引用一条图片消息」。
 """
 
+import asyncio
 import json
 from typing import List, Optional
 
@@ -280,6 +281,37 @@ async def _send_find_forward(bot: Bot, event: MessageEvent, detail: dict) -> Non
     logger.info(f"[找姬] 合并转发已发送，共 {len(nodes)} 个节点")
 
 
+async def _best_effort_send(bot, event, matcher, message) -> None:
+    """尽力发一条消息，失败只记日志、不向上抛（用于进度提示等非关键发送）。"""
+    try:
+        await matcher.send(message)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[找姬] 进度提示发送失败（忽略）：{e!r}")
+
+
+async def _safe_finish(bot, event, matcher, message, *, retries: int = 3, delay: float = 1.5) -> bool:
+    """带重试地把最终结果发出并结束 matcher；全部失败返回 False。
+
+    主要兜 NapCat 传图偶发超时（ActionFailed retcode=1200）这类瞬时故障：
+    重试几次往往能发出。FinishedException 是 finish 成功结束的正常信号，
+    必须原样透传，否则会被当成失败反复重试。
+    """
+    last = None
+    for attempt in range(1, retries + 1):
+        try:
+            await matcher.finish(message)
+            return True  # 正常不会走到：finish 成功会抛 FinishedException
+        except FinishedException:
+            raise
+        except Exception as e:  # noqa: BLE001
+            last = e
+            logger.warning(f"[找姬] 结果发送失败(第{attempt}次/共{retries})：{e!r}")
+            if attempt < retries:
+                await asyncio.sleep(delay)
+    logger.error(f"[找姬] 结果发送最终失败，消息已丢失：{last!r}")
+    return False
+
+
 @find_chicken.handle()
 async def handle_find_chicken(
     matcher: Matcher,
@@ -311,7 +343,7 @@ async def handle_find_chicken(
         await matcher.finish("请发送一张图片，或引用一张图片后发送「lg找姬」")
         return
 
-    await matcher.send("收到，开始找姬")
+    await _best_effort_send(bot, event, matcher, "收到，开始找姬")
 
     # 注：matcher.finish 一律放在 try 之外。它通过抛异常终止流程，
     # 写在 try 内会被下面宽泛的 except 捕获，误报成「搜索失败：FinishedException()」。
@@ -365,8 +397,12 @@ async def handle_find_chicken(
                 await matcher.finish()
                 return
 
-    # 正式模式：只报置信度最高的那一位（弱证据直接判没找到，不硬凑）
-    await matcher.finish(render_text(detail))
+    # 正式模式：只报置信度最高的那一位（弱证据直接判没找到，不硬凑）。
+    # 最终这条带图消息偶发发不出（NapCat 传图超时 retcode=1200），用带重试的
+    # _safe_finish；若带图版实在发不出，退一步发纯文字结论，保证答案不丢。
+    if not await _safe_finish(bot, event, matcher, render_text(detail)):
+        logger.warning("[找姬] 带图结论发送失败，改发纯文字兜底")
+        await _safe_finish(bot, event, matcher, render_text(detail, with_image=False))
 
 
 # ========== 开启功能指令（超级用户） ==========
