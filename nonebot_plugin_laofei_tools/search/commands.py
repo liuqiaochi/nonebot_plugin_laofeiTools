@@ -42,8 +42,8 @@ from .soutubot import KIND_DOUJINSHI, get_client
 from .reverse import (
     RESULT_TITLE,
     engine_status,
-    finded_base64,
     finded_cq,
+    finded_image_path,
     load_config as _load_reverse_config,
     render_text,
     reverse_search_detail,
@@ -289,33 +289,6 @@ async def _best_effort_send(bot, event, matcher, message) -> None:
         logger.warning(f"[找姬] 进度提示发送失败（忽略）：{e!r}")
 
 
-async def _emit_result(bot, event, message, *, timeout: float = 90.0) -> bool:
-    """发一条消息，只发一次，绝不重试。
-
-    为什么不能重试：NapCat 的 retcode=1200 是「等待回应超时」，**不代表消息
-    没发出** —— 消息往往已经送到 QQ 了，只是回应慢。这种情况重试会把同一条
-    消息重复发 2~3 次（实测刷出三条重复结果）。所以对这类「不确定是否已送达」
-    的超时错误，只能发一次，失败仅记日志。
-
-    为什么给大 timeout：NapCat 把图 upload 到 QQ CDN 比纯文字慢很多，默认
-    30s 经常不够，单条给 90s 让它有机会上传完。
-    """
-    try:
-        await bot.call_api(
-            "send_msg",
-            timeout=timeout,
-            message=message,
-            message_type="group",
-            group_id=int(event.group_id),
-        )
-        return True
-    except FinishedException:
-        raise
-    except Exception as e:  # noqa: BLE001
-        logger.warning(f"[找姬] 消息发送失败（超时类失败可能已实际送达，不重试）：{e!r}")
-        return False
-
-
 @find_chicken.handle()
 async def handle_find_chicken(
     matcher: Matcher,
@@ -402,26 +375,24 @@ async def handle_find_chicken(
                 return
 
     # 正式模式：只报置信度最高的那一位（弱证据直接判没找到，不硬凑）。
-    # 发送拆两步，避免「整条带图消息卡在 NapCat 图片上传」导致答案丢失：
-    #   1) 先发纯文字结论（秒到，保证答案必定到达）；
-    #   2) 再单独补发 finded.jpg 配图（独立 upload，90s timeout，只发一次
-    #      不重试 —— 超时类失败时消息可能已送达，重试会重复刷屏；
-    #      即使图超时也不影响已经发出的结论文字）。
-    # 用「结构化消息段」发送，和插件里正常发图的功能（AI 随机配图「抽老婆」、
-    # 生活助手、帮助图…）走同一条路径：消息段数组。不要用字符串 CQ 码 ——
-    # 那段超长 base64 要 NapCat 自己解析，实测卡成 retcode=1200 超时。
+    # 先发文字结论（保证到达），再用 file:// 本地路径补发配图 —— 与 pet 发配件/
+    # 食物图完全同款（MessageSegment.image(file://) + matcher.finish），是本部署
+    # 最可靠的发图路径。**不要用 base64 内联**：在这里反复 retcode=1200。
     text = render_text(detail, with_image=False)
-    text_ok = await _emit_result(bot, event, [{"type": "text", "data": {"text": text}}])
-    if text_ok:
-        img_b64 = finded_base64()
-        if img_b64:
-            await _emit_result(
-                bot,
-                event,
-                [{"type": "image", "data": {"file": f"base64://{img_b64}"}}],
-                timeout=90.0,
-            )
-    raise FinishedException()
+    await _best_effort_send(bot, event, matcher, text)
+    img_path = finded_image_path()
+    if img_path:
+        try:
+            await matcher.finish(MessageSegment.image(f"file://{img_path}"))
+        except FinishedException:
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[找姬] 配图发送失败（跳过配图，结论已发）：{e!r}")
+            await matcher.finish()
+    else:
+        logger.warning("[找姬] finded 配图文件不存在，仅发文字结论")
+        await matcher.finish()
+    return
 
 
 # ========== 开启功能指令（超级用户） ==========

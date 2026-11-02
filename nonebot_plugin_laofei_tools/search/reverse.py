@@ -45,21 +45,27 @@ except AttributeError:  # Pillow < 9.1
 # ========== 结果标题与配图 ==========
 
 _IMAGE_DIR = Path(__file__).resolve().parent.parent / "image"
-FINDED_IMAGE = _IMAGE_DIR / "finded.jpg"
+FINDED_IMAGE = _IMAGE_DIR / "zhaodaole.jpeg"
 
 RESULT_TITLE = "🎯 **lg找姬结果**"
 
 
+def finded_image_path() -> "Path | None":
+    """finded 配图的本地绝对路径（文件存在才返回，否则 None）。
+
+    用于 file:// 方式发图 —— 与 pet_commands 发配件/食物图完全同款：
+    `MessageSegment.image(f"file://{path}")` + `matcher.finish`。实测宠物动辄
+    几 MB 的 PNG / GIF 都走这条路且稳定，是本部署最可靠的发图路径
+    （base64 内联在这里反复 retcode=1200，NapCat 解超长 base64 时卡住）。
+    """
+    return FINDED_IMAGE if FINDED_IMAGE.exists() else None
+
+
 def finded_base64() -> str:
-    """finded.jpg 的纯 base64 字符串（不带 base64:// 前缀、不带 CQ 包裹）。
+    """finded 配图的纯 base64 字符串（不带 base64:// 前缀、不带 CQ 包裹）。
 
-    供「结构化消息段」方式发送使用 —— 组装成
-    {"type": "image", "data": {"file": "base64://<b64>"}} 这样的 OneBot 消息段。
-
-    为什么需要它：字符串形式的 CQ 码（[CQ:image,file=base64://...]）要 NapCat
-    自己解析那段超长 base64，实测容易卡成 retcode=1200 超时；而项目里所有正常
-    发图的功能（AI 随机配图「抽老婆」、生活助手、帮助图…）走的都是消息段路径。
-    文件缺失或异常时返回空串，调用方据此跳过。
+    保留给必须内联的场景（合并转发节点等）；正式单条发图优先用
+    finded_image_path() 走 file://，更稳。文件缺失或异常时返回空串。
     """
     if not FINDED_IMAGE.exists():
         return ""
@@ -70,12 +76,7 @@ def finded_base64() -> str:
 
 
 def finded_cq() -> str:
-    """结果标题下方固定带的配图 CQ 码（image/finded.jpg），字符串形式。
-
-    保留给合并转发节点等必须传字符串的场景；正式单条发图请用 finded_base64()
-    组装消息段，更稳。为什么不能用 file://：NapCat 跑在 mac 宿主机，读不到
-    bot 所在 VM 的 /home/laofei/... 绝对路径，file:// 只会退化成链接文本。
-    """
+    """finded 配图的字符串 CQ 码（base64:// 内联），给合并转发节点等用。"""
     b64 = finded_base64()
     if not b64:
         return ""
