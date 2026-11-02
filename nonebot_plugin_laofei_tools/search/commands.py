@@ -42,6 +42,7 @@ from .soutubot import KIND_DOUJINSHI, get_client
 from .reverse import (
     RESULT_TITLE,
     engine_status,
+    finded_base64,
     finded_cq,
     load_config as _load_reverse_config,
     render_text,
@@ -406,11 +407,20 @@ async def handle_find_chicken(
     #   2) 再单独补发 finded.png 配图（独立 upload，90s timeout，只发一次
     #      不重试 —— 超时类失败时消息可能已送达，重试会重复刷屏；
     #      即使图超时也不影响已经发出的结论文字）。
-    text_ok = await _emit_result(bot, event, render_text(detail, with_image=False))
+    # 用「结构化消息段」发送，和插件里正常发图的功能（AI 随机配图「抽老婆」、
+    # 生活助手、帮助图…）走同一条路径：消息段数组。不要用字符串 CQ 码 ——
+    # 那段超长 base64 要 NapCat 自己解析，实测卡成 retcode=1200 超时。
+    text = render_text(detail, with_image=False)
+    text_ok = await _emit_result(bot, event, [{"type": "text", "data": {"text": text}}])
     if text_ok:
-        img_cq = finded_cq()
-        if img_cq:
-            await _emit_result(bot, event, img_cq, timeout=90.0)
+        img_b64 = finded_base64()
+        if img_b64:
+            await _emit_result(
+                bot,
+                event,
+                [{"type": "image", "data": {"file": f"base64://{img_b64}"}}],
+                timeout=90.0,
+            )
     raise FinishedException()
 
 
