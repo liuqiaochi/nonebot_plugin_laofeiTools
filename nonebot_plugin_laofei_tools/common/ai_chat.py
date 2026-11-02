@@ -298,6 +298,16 @@ async def _at_bot_rule(event: MessageEvent) -> bool:
     if not (hasattr(event, "is_tome") and callable(event.is_tome) and event.is_tome()):
         return False
 
+    # 指令过滤：文字本身是指令（如引用图片后只发「HQ」「图反推」「lg天气 深圳」）时，
+    # 应交给对应的指令处理器，AI 不当成问题来回答。
+    _text = _plain_text(event)
+    if looks_like_command(_text):
+        logger.debug(
+            f"AI @bot 忽略 (指令文本): group={getattr(event, 'group_id', 'N/A')}, "
+            f"text={_text[:30]!r}"
+        )
+        return False
+
     # 排除纯文本回复/引用；但「引用或携带图片 + @bot」必须放行，
     # 用于视觉模型联合理解（如：引用一张图并 @bot「这图里的是谁」）。
     has_reply = getattr(event, "reply", None) is not None or any(
@@ -697,6 +707,10 @@ _FREESPEAK_SKIP_PREFIXES |= {
     "重启", "休息", "更新", "刷新", "重载",
     # 统一模块开关动词 + 自由发言开关自身（普通聊天极少以此开头）
     "开启", "打开", "启用", "关闭", "关掉", "禁用",
+    # 各功能「开关」指令全名（中文字符续写不会被通用动词规则识别，需显式列出）
+    "开启联网", "关闭联网", "开启ai画图", "关闭ai画图",
+    "开启lg搜图", "关闭lg搜图", "开启积分", "关闭积分",
+    "开启图反推润色", "关闭图反推润色",
     "自由发言开", "自由发言关", "ai自由发言开", "ai自由发言关",
     "打开自由发言", "开启自由发言", "关闭自由发言", "关掉自由发言",
 }
@@ -723,6 +737,37 @@ def _is_command_message(text: str) -> bool:
             nxt = text[len(key):len(key) + 1]
             if nxt == "" or nxt.isspace() or not _CJK_RE.match(nxt):
                 return True
+    return False
+
+
+# 纯 ASCII 单 token 的「指令形态」（外部插件的 HQ / YT / BILI / jm / bd2 等）
+_CMD_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_\-]{1,15}$")
+# 明显是闲聊而非指令的单 token，放行给 AI
+_CMD_TOKEN_ALLOW = {"ok", "okay", "hi", "hey", "hello", "thanks", "thx", "yes", "no"}
+
+
+def looks_like_command(text: str) -> bool:
+    """判断一段文字是否是一条「指令」，而不是要对 AI 说的话。
+
+    用于：@机器人 时（尤其引用/携带图片），若文字本身是指令（如「HQ」「lg天气 深圳」），
+    应交由对应指令处理器，AI 不参与，避免把指令当问题回答。
+
+    判定顺序：
+    1) 去掉残留 @昵称 后为空 -> 非指令（纯图片交给 AI 描述）；
+    2) 命中已知指令前缀表 `_is_command_message` -> 指令；
+    3) 纯 ASCII 单 token（无空格、无中文、长度 2–16）-> 指令（覆盖其他插件的英文指令）；
+       常见闲聊词（ok/hi/thanks…）除外。
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    t = re.sub(r"@[A-Za-z0-9_\u4e00-\u9fff]+", "", t).strip()
+    if not t:
+        return False
+    if _is_command_message(t):
+        return True
+    if not _CJK_RE.search(t) and _CMD_TOKEN_RE.match(t):
+        return t.lower() not in _CMD_TOKEN_ALLOW
     return False
 
 
@@ -792,7 +837,7 @@ async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent)
         return
     if not text:
         return
-    if _is_command_message(text):
+    if looks_like_command(text):
         return
 
     # 智能相关性：仅当命中信号（被cue/提问/@他人/冷场）时高概率接话，纯闲聊低概率
