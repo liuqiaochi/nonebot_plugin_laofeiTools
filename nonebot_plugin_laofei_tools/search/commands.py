@@ -10,7 +10,6 @@ NoneBot 指令处理
 图片输入：两条指令均支持「同条消息带图」或「引用一条图片消息」。
 """
 
-import asyncio
 import json
 from typing import List, Optional
 
@@ -289,33 +288,31 @@ async def _best_effort_send(bot, event, matcher, message) -> None:
         logger.warning(f"[找姬] 进度提示发送失败（忽略）：{e!r}")
 
 
-async def _emit_result(bot, event, message, *, retries: int = 3, delay: float = 2.0, timeout: float = 90.0) -> bool:
-    """带重试地发一条消息（单条给足 timeout 以绕过默认 30s 的 api_timeout）。
+async def _emit_result(bot, event, message, *, timeout: float = 90.0) -> bool:
+    """发一条消息，只发一次，绝不重试。
 
-    为什么需要大 timeout：NapCat 把图 upload 到 QQ CDN 比纯文字慢很多，
-    默认 30s 经常不够，导致 retcode=1200 超时。这里单条给 90s 并失败重试，
-    往往能发出。FinishedException 是正常结束信号，必须原样透传。
+    为什么不能重试：NapCat 的 retcode=1200 是「等待回应超时」，**不代表消息
+    没发出** —— 消息往往已经送到 QQ 了，只是回应慢。这种情况重试会把同一条
+    消息重复发 2~3 次（实测刷出三条重复结果）。所以对这类「不确定是否已送达」
+    的超时错误，只能发一次，失败仅记日志。
+
+    为什么给大 timeout：NapCat 把图 upload 到 QQ CDN 比纯文字慢很多，默认
+    30s 经常不够，单条给 90s 让它有机会上传完。
     """
-    last = None
-    for attempt in range(1, retries + 1):
-        try:
-            await bot.call_api(
-                "send_msg",
-                timeout=timeout,
-                message=message,
-                message_type="group",
-                group_id=int(event.group_id),
-            )
-            return True
-        except FinishedException:
-            raise
-        except Exception as e:  # noqa: BLE001
-            last = e
-            logger.warning(f"[找姬] 消息发送失败(第{attempt}次/共{retries})：{e!r}")
-            if attempt < retries:
-                await asyncio.sleep(delay)
-    logger.error(f"[找姬] 消息发送最终失败：{last!r}")
-    return False
+    try:
+        await bot.call_api(
+            "send_msg",
+            timeout=timeout,
+            message=message,
+            message_type="group",
+            group_id=int(event.group_id),
+        )
+        return True
+    except FinishedException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[找姬] 消息发送失败（超时类失败可能已实际送达，不重试）：{e!r}")
+        return False
 
 
 @find_chicken.handle()
@@ -406,7 +403,8 @@ async def handle_find_chicken(
     # 正式模式：只报置信度最高的那一位（弱证据直接判没找到，不硬凑）。
     # 发送拆两步，避免「整条带图消息卡在 NapCat 图片上传」导致答案丢失：
     #   1) 先发纯文字结论（秒到，保证答案必定到达）；
-    #   2) 再单独补发 finded.png 配图（独立 upload，带 90s timeout 重试，
+    #   2) 再单独补发 finded.png 配图（独立 upload，90s timeout，只发一次
+    #      不重试 —— 超时类失败时消息可能已送达，重试会重复刷屏；
     #      即使图超时也不影响已经发出的结论文字）。
     text_ok = await _emit_result(bot, event, render_text(detail, with_image=False))
     if text_ok:
