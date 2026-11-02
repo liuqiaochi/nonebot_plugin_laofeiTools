@@ -45,13 +45,13 @@ except AttributeError:  # Pillow < 9.1
 # ========== 结果标题与配图 ==========
 
 _IMAGE_DIR = Path(__file__).resolve().parent.parent / "image"
-FINDED_IMAGE = _IMAGE_DIR / "finded.png"
+FINDED_IMAGE = _IMAGE_DIR / "finded.jpg"
 
 RESULT_TITLE = "🎯 **lg找姬结果**"
 
 
 def finded_base64() -> str:
-    """finded.png 的纯 base64 字符串（不带 base64:// 前缀、不带 CQ 包裹）。
+    """finded.jpg 的纯 base64 字符串（不带 base64:// 前缀、不带 CQ 包裹）。
 
     供「结构化消息段」方式发送使用 —— 组装成
     {"type": "image", "data": {"file": "base64://<b64>"}} 这样的 OneBot 消息段。
@@ -70,7 +70,7 @@ def finded_base64() -> str:
 
 
 def finded_cq() -> str:
-    """结果标题下方固定带的配图 CQ 码（image/finded.png），字符串形式。
+    """结果标题下方固定带的配图 CQ 码（image/finded.jpg），字符串形式。
 
     保留给合并转发节点等必须传字符串的场景；正式单条发图请用 finded_base64()
     组装消息段，更稳。为什么不能用 file://：NapCat 跑在 mac 宿主机，读不到
@@ -301,7 +301,7 @@ def _failure_hint(failures: list) -> str:
 # ---------------------------------------------------------------------------
 
 def _render_one(item: dict, with_image: bool = True) -> str:
-    """单个结果渲染成短文本：标题下紧跟 finded.png，再列平台/名字/账号。
+    """单个结果渲染成短文本：标题下紧跟 finded.jpg，再列平台/名字/账号。
 
     with_image=False 时只出纯文字（标题+平台/名字/账号+URL），用于「带图那条
     没发出去」时的兜底，保证作者结论不丢。

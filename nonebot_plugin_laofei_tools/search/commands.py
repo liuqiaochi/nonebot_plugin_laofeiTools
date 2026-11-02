@@ -212,7 +212,7 @@ def _forward_node(bot: Bot, name: str, content: str) -> dict:
 async def _send_find_forward(bot: Bot, event: MessageEvent, detail: dict) -> None:
     """把找姬结果拆成多项合并转发（调试用）。
 
-    节点 1 = 标题 + finded.png + 来源/耗时；节点 2..N = 每个候选账号（弱证据也
+    节点 1 = 标题 + finded.jpg + 来源/耗时；节点 2..N = 每个候选账号（弱证据也
     列出来，标 ⚠️）；随后 = sidecar 原始账号；末节点 = 调试信息 JSON。
     """
     items = detail.get("items") or []
@@ -404,7 +404,7 @@ async def handle_find_chicken(
     # 正式模式：只报置信度最高的那一位（弱证据直接判没找到，不硬凑）。
     # 发送拆两步，避免「整条带图消息卡在 NapCat 图片上传」导致答案丢失：
     #   1) 先发纯文字结论（秒到，保证答案必定到达）；
-    #   2) 再单独补发 finded.png 配图（独立 upload，90s timeout，只发一次
+    #   2) 再单独补发 finded.jpg 配图（独立 upload，90s timeout，只发一次
     #      不重试 —— 超时类失败时消息可能已送达，重试会重复刷屏；
     #      即使图超时也不影响已经发出的结论文字）。
     # 用「结构化消息段」发送，和插件里正常发图的功能（AI 随机配图「抽老婆」、
