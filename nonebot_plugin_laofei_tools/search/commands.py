@@ -43,9 +43,8 @@ from .reverse import (
     RESULT_TITLE,
     engine_status,
     finded_cq,
-    finded_image_path,
     load_config as _load_reverse_config,
-    render_text,
+    render_parts,
     reverse_search_detail,
 )
 
@@ -375,23 +374,31 @@ async def handle_find_chicken(
                 return
 
     # 正式模式：只报置信度最高的那一位（弱证据直接判没找到，不硬凑）。
-    # 先发文字结论（保证到达），再用 file:// 本地路径补发配图 —— 与 pet 发配件/
-    # 食物图完全同款（MessageSegment.image(file://) + matcher.finish），是本部署
-    # 最可靠的发图路径。**不要用 base64 内联**：在这里反复 retcode=1200。
-    text = render_text(detail, with_image=False)
-    await _best_effort_send(bot, event, matcher, text)
-    img_path = finded_image_path()
-    if img_path:
-        try:
-            await matcher.finish(MessageSegment.image(f"file://{img_path}"))
-        except FinishedException:
-            raise
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"[找姬] 配图发送失败（跳过配图，结论已发）：{e!r}")
-            await matcher.finish()
+    # 排版收进**一条消息**：标题文字 → finded 配图 → 平台/名字/账号/链接，
+    # 和宠物图一样一条发完。配图用 file:// 本地路径 —— 与 pet 发配件/食物图
+    # 同款，是本部署唯一稳定可用的发图方式；**不要用 base64 内联**，会 1200。
+    parts = render_parts(detail)
+    if parts.get("text"):
+        await matcher.finish(parts["text"])
+        return
+
+    segments = [MessageSegment.text(f"{parts['title']}\n")]
+    if parts.get("image"):
+        segments.append(MessageSegment.image(f"file://{parts['image']}"))
     else:
         logger.warning("[找姬] finded 配图文件不存在，仅发文字结论")
-        await matcher.finish()
+    segments.append(MessageSegment.text(f"\n{parts['body']}"))
+    message = Message(segments)
+
+    try:
+        await matcher.finish(message)
+    except FinishedException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        # 带图那条发不出去就退纯文字，保证作者结论不丢。只兜一次：
+        # 超时类失败可能其实已送达，多重试会重复刷屏。
+        logger.warning(f"[找姬] 带图消息发送失败，改发纯文字兜底：{e!r}")
+        await matcher.finish(f"{parts['title']}\n\n{parts['body']}")
     return
 
 

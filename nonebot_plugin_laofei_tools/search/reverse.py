@@ -301,19 +301,13 @@ def _failure_hint(failures: list) -> str:
 # 渲染
 # ---------------------------------------------------------------------------
 
-def _render_one(item: dict, with_image: bool = True) -> str:
-    """单个结果渲染成短文本：标题下紧跟 finded.jpg，再列平台/名字/账号。
+def _render_body(item: dict) -> str:
+    """结果正文：平台 / 名字 / 账号 / 链接（不含标题和配图）。
 
-    with_image=False 时只出纯文字（标题+平台/名字/账号+URL），用于「带图那条
-    没发出去」时的兜底，保证作者结论不丢。
+    单独抽出来是为了「单条消息三段式」：标题文字 → 配图 → 正文，
+    与宠物图那种一条消息发完的排版一致。
     """
-    lines = [RESULT_TITLE]
-    if with_image:
-        img = finded_cq()
-        if img:
-            lines.append(img)
-    lines += [
-        "",
+    lines = [
         f"🌐 平台：{item['platform']}",
         f"👤 名字：{item['name']}",
         f"🆔 账号：@{item['handle']}",
@@ -321,6 +315,40 @@ def _render_one(item: dict, with_image: bool = True) -> str:
     if item.get("url"):
         lines.append(item["url"])
     return "\n".join(lines)
+
+
+def _render_one(item: dict, with_image: bool = True) -> str:
+    """单个结果渲染成短文本：标题下紧跟 finded，再列平台/名字/账号。
+
+    字符串场景（合并转发节点等）用这个；正式单条发送请用 render_parts()，
+    那样配图走 file:// 消息段，不用内联长 base64。
+    with_image=False 时只出纯文字，用于纯文字兜底。
+    """
+    lines = [RESULT_TITLE]
+    if with_image:
+        img = finded_cq()
+        if img:
+            lines.append(img)
+    lines += ["", _render_body(item)]
+    return "\n".join(lines)
+
+
+def render_parts(detail: dict) -> dict:
+    """结构化结果 -> 单条消息的三段式（标题 / 配图 / 正文）。
+
+    返回 {"title": 标题, "body": 正文, "image": 本地图片路径或 None}；
+    没有可信候选时返回 {"text": 说明文本}，调用方直接发这条文本即可。
+    """
+    items = detail.get("items") or []
+    if detail.get("ok") and items:
+        for it in items:
+            if not it.get("weak"):
+                return {
+                    "title": RESULT_TITLE,
+                    "body": _render_body(it),
+                    "image": finded_image_path(),
+                }
+    return {"text": detail.get("message") or "没找到姬 😢"}
 
 
 def _sidecar_items(accounts: list) -> list:
