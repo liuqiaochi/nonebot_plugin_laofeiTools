@@ -29,10 +29,6 @@ class Config(BaseModel):
     grok_api_key: str = ""
     grok_model: str = "grok-4.7"
     grok_vision_model: str = "grok-4.7"
-    # Grok 思考强度（提速用）：low / medium / high / xhigh（grok-4.3 另支持 none 完全关闭思考）。
-    # grok-4.7 / 4.6 / 4.5 属推理模型，**无法关闭思考**，只能调低强度；默认 high，设 low 可显著提速。
-    # 填 off / 空 = 不发送该参数；非推理模型（grok-4.1-fast、grok-4.20）会自动跳过，避免 400。
-    grok_reasoning_effort: str = "low"
     # Grok 接入地址（OpenAI 兼容）。默认官方 api.x.ai。
     # 若使用第三方代理/中转：其下发的 key 通常以 grok_ 等非 xai- 前缀开头，
     # 务必把本项改为该代理给出的 base_url，否则官方端点会拒绝 key。
@@ -58,7 +54,7 @@ class Config(BaseModel):
     # POST 过去取结果。不限次数、没有 key、没有额度；mac 关机/超时则本功能不可用。
     lens_sidecar_url: str = ""              # 例 http://192.168.2.45:8787 ；留空=本功能停用
     lens_sidecar_token: str = ""            # 与 sidecar 的 FISH_TOKEN / config.token 一致；留空=不鉴权
-    lens_sidecar_timeout: int = 90          # 主路整体超时（秒），浏览器链路比纯 HTTP 慢
+    lens_sidecar_timeout: int = 90          # 整次 HTTP 超时（秒），必须大于 sidecar 的 totalMs（默认 75s）
 
 
 # 数据文件路径（锚定项目根目录，不依赖运行时 CWD，避免覆盖文件后数据丢失）

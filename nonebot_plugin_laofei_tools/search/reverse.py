@@ -24,7 +24,6 @@
 - lens_sidecar_timeout / longge_reverse_timeout / longge_reverse_max_results：可选
 """
 
-import base64
 import io
 import re
 import time
@@ -53,20 +52,12 @@ RESULT_TITLE = "🎯 **lg找姬结果**"
 def finded_cq() -> str:
     """结果标题下方固定带的配图 CQ 码（image/finded.png）。
 
-    用 base64:// 内联而不是 file:// 本地路径：实测 file:// 在部分 NapCat 部署下
-    会被当成纯文本/链接、图片传不出来；base64 由 OneBot 接口直接透传给 NapCat
-    上传，不依赖它能读到 bot 本机绝对路径。finded.png 已从 442KB 压到 ~53KB
-    （300×333 调色板 PNG），base64 后约 71KB，单条消息体积可控、不会撑爆
-    NapCat 上传超时（项目内 lg搜图 预览早已用同款 base64 发图）。
-    文件缺失或异常时返回空串，不影响结果本身。
+    用 file:// 本地路径而不是 base64：base64 大图会把整条消息撑爆（AI 配图
+    1.6MB 那次就是这么失败的）。文件缺失时返回空串，不影响结果本身。
     """
     if not FINDED_IMAGE.exists():
         return ""
-    try:
-        b64 = base64.b64encode(FINDED_IMAGE.read_bytes()).decode("ascii")
-        return f"[CQ:image,file=base64://{b64}]"
-    except Exception:
-        return ""
+    return f"[CQ:image,file=file://{FINDED_IMAGE.as_posix()}]"
 
 
 # ========== 配置读取 ==========
@@ -199,15 +190,27 @@ _SIDECAR_JUNK_HOST_RE = re.compile(
 
 
 async def search_via_sidecar(image_bytes: bytes, cfg: dict) -> dict:
-    """调 mac 侧 sidecar 反查，返回 {"ok","accounts","error","lens_failed"}。
+    """调 mac 侧 sidecar 反查。
 
-    ok=True 表示链路通了（账号可能为空）；ok=False 表示 sidecar 不可用，调用方
-    直接给「服务不可用」文案。任何异常都在此吞掉并转成 ok=False，不向上抛。
+    返回 {"ok","accounts","error","status","timedOut","failures"}：
+    - ok=True 表示 HTTP 链路通了（账号可能为空，失败原因见 status/failures）；
+    - ok=False 表示 sidecar 不可用（连不上/超时/HTTP 错误），调用方给「服务不可用」文案。
+    - status 由 sidecar 给出三态：ok（有候选）/ empty（引擎跑完但没东西）/ error（引擎全挂）。
+      以前只有「有没有 accounts」，把「确实没搜到」和「引擎抛异常」混成一句「被限流」，
+      现在据此分文案。
+    任何异常都在此吞掉并转成 ok=False，不向上抛。
     """
     url = (cfg.get("sidecar_url") or "").strip().rstrip("/")
     token = (cfg.get("sidecar_token") or "").strip()
     timeout = int(cfg.get("sidecar_timeout") or 90)
-    out = {"ok": False, "accounts": [], "error": "", "lens_failed": False}
+    out = {
+        "ok": False,
+        "accounts": [],
+        "error": "",
+        "status": "",
+        "timedOut": False,
+        "failures": [],
+    }
     if not url:
         out["error"] = "未配置 lens_sidecar_url"
         return out
@@ -241,11 +244,34 @@ async def search_via_sidecar(image_bytes: bytes, cfg: dict) -> dict:
 
     out["ok"] = True
     out["accounts"] = data.get("accounts") or []
-    out["lens_failed"] = any(
-        str((f or {}).get("engine", "")).lower() == "lens"
-        for f in (data.get("failures") or [])
-    )
+    out["status"] = str(data.get("status") or "").strip().lower()
+    out["timedOut"] = bool(data.get("timedOut"))
+    out["failures"] = [
+        f for f in (data.get("failures") or []) if isinstance(f, dict)
+    ]
     return out
+
+
+def _failure_hint(failures: list) -> str:
+    """把 sidecar 的失败原因翻成一句人话（给用户看，不暴露内部细节）。
+
+    只看第一条真正的原因：多条失败往往是同一个根因（引擎只有一个）。
+    """
+    for item in failures or []:
+        reason = str((item or {}).get("reason") or "").strip()
+        if not reason or reason.startswith("空结果"):
+            continue
+        low = reason.lower()
+        if "google_captcha" in low or "captcha" in low:
+            return "谷歌要求人机验证，歇 5–10 分钟再试（同一张图查太勤会这样）"
+        if "google_unreachable" in low or "err_" in low:
+            return "谷歌连不上，检查 mac 上代理/网络是否正常"
+        if "cdp" in low or "devtools" in low or "浏览器" in reason:
+            return "mac 上浏览器起不来，重启一下 sidecar 服务"
+        if "total_timeout" in low:
+            return "这张图查得太慢，超了总时长上限，稍后重试"
+        return reason[:60]
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +394,9 @@ async def reverse_search_detail(image_bytes: bytes) -> dict:
     out["debug"]["sidecar"] = {
         "ok": res["ok"],
         "error": res["error"],
-        "lens_failed": res["lens_failed"],
+        "status": res["status"],
+        "timedOut": res["timedOut"],
+        "failures": res["failures"],
         "raw_accounts": len(res["accounts"] or []),
         "raw": res["accounts"],
     }
@@ -379,10 +407,15 @@ async def reverse_search_detail(image_bytes: bytes) -> dict:
 
     items = _sidecar_items(res["accounts"])
     if not items:
-        # lens 引擎自己失败（captcha / 网络）和"确实没搜到"要分开说，否则用户
-        # 会以为这张图全网都没有，其实是搜索引擎被限流了。
-        if res["lens_failed"]:
-            return done("搜索被限流或失败 😢 稍等几分钟再试（Google 对同图频繁查询会出验证码）")
+        # 三态分开说，别把三种情况混成一句「没找到」：
+        #   error = 引擎全挂（captcha / 网络 / 浏览器起不来）→ 说清原因，用户能自己处理；
+        #   撞总预算 = 引擎还在跑但到点了 → 让用户稍后重试，而不是以为图没出处；
+        #   empty = 引擎正常跑完、确实没东西 → 才是「换张更清晰的图」。
+        if res["status"] == "error":
+            hint = _failure_hint(res["failures"])
+            return done(f"搜索失败 😢 {hint}" if hint else "搜索失败 😢 搜索引擎没有正常返回，稍后再试")
+        if res["timedOut"]:
+            return done("搜索超时 😢 这张图查得太久被掐断了，稍后重试一下")
         return done("没找到姬 😢 换张更清晰的图，或该图全网暂无转载")
 
     if items[0]["weak"]:
