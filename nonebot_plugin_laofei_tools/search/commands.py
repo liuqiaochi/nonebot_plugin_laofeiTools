@@ -289,26 +289,32 @@ async def _best_effort_send(bot, event, matcher, message) -> None:
         logger.warning(f"[找姬] 进度提示发送失败（忽略）：{e!r}")
 
 
-async def _safe_finish(bot, event, matcher, message, *, retries: int = 3, delay: float = 1.5) -> bool:
-    """带重试地把最终结果发出并结束 matcher；全部失败返回 False。
+async def _emit_result(bot, event, message, *, retries: int = 3, delay: float = 2.0, timeout: float = 90.0) -> bool:
+    """带重试地发一条消息（单条给足 timeout 以绕过默认 30s 的 api_timeout）。
 
-    主要兜 NapCat 传图偶发超时（ActionFailed retcode=1200）这类瞬时故障：
-    重试几次往往能发出。FinishedException 是 finish 成功结束的正常信号，
-    必须原样透传，否则会被当成失败反复重试。
+    为什么需要大 timeout：NapCat 把图 upload 到 QQ CDN 比纯文字慢很多，
+    默认 30s 经常不够，导致 retcode=1200 超时。这里单条给 90s 并失败重试，
+    往往能发出。FinishedException 是正常结束信号，必须原样透传。
     """
     last = None
     for attempt in range(1, retries + 1):
         try:
-            await matcher.finish(message)
-            return True  # 正常不会走到：finish 成功会抛 FinishedException
+            await bot.call_api(
+                "send_msg",
+                timeout=timeout,
+                message=message,
+                message_type="group",
+                group_id=int(event.group_id),
+            )
+            return True
         except FinishedException:
             raise
         except Exception as e:  # noqa: BLE001
             last = e
-            logger.warning(f"[找姬] 结果发送失败(第{attempt}次/共{retries})：{e!r}")
+            logger.warning(f"[找姬] 消息发送失败(第{attempt}次/共{retries})：{e!r}")
             if attempt < retries:
                 await asyncio.sleep(delay)
-    logger.error(f"[找姬] 结果发送最终失败，消息已丢失：{last!r}")
+    logger.error(f"[找姬] 消息发送最终失败：{last!r}")
     return False
 
 
@@ -398,11 +404,16 @@ async def handle_find_chicken(
                 return
 
     # 正式模式：只报置信度最高的那一位（弱证据直接判没找到，不硬凑）。
-    # 最终这条带图消息偶发发不出（NapCat 传图超时 retcode=1200），用带重试的
-    # _safe_finish；若带图版实在发不出，退一步发纯文字结论，保证答案不丢。
-    if not await _safe_finish(bot, event, matcher, render_text(detail)):
-        logger.warning("[找姬] 带图结论发送失败，改发纯文字兜底")
-        await _safe_finish(bot, event, matcher, render_text(detail, with_image=False))
+    # 发送拆两步，避免「整条带图消息卡在 NapCat 图片上传」导致答案丢失：
+    #   1) 先发纯文字结论（秒到，保证答案必定到达）；
+    #   2) 再单独补发 finded.png 配图（独立 upload，带 90s timeout 重试，
+    #      即使图超时也不影响已经发出的结论文字）。
+    text_ok = await _emit_result(bot, event, render_text(detail, with_image=False))
+    if text_ok:
+        img_cq = finded_cq()
+        if img_cq:
+            await _emit_result(bot, event, img_cq, timeout=90.0)
+    raise FinishedException()
 
 
 # ========== 开启功能指令（超级用户） ==========
