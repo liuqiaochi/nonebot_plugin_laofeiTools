@@ -15,7 +15,7 @@ import time
 from collections import defaultdict, deque
 from io import BytesIO
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 import httpx
 from PIL import Image, ImageDraw, ImageFont
@@ -325,12 +325,13 @@ async def _at_bot_rule(event: MessageEvent) -> bool:
         )
         return False
 
-    # 排除纯文本回复/引用；但「引用或携带图片 + @bot」必须放行，
-    # 用于视觉模型联合理解（如：引用一张图并 @bot「这图里的是谁」）。
+    # 排除「纯文本回复/引用」：既无内联图片、又无 @bot 后的文字，才视为无意义引用并跳过。
+    # 注意：被引用图片若未内联（NapCat 常见），需交给 handler 通过 get_msg 判定，
+    # 故仅当「无内联图 且 无 @bot 文字」时才拦截，避免「引用图片 + 提问」被误杀。
     has_reply = getattr(event, "reply", None) is not None or any(
         seg.type == "reply" for seg in event.message
     )
-    if has_reply and not _has_image_seg(event):
+    if has_reply and not _has_image_seg(event) and not _text:
         logger.debug(f"AI @bot 忽略 (纯文本回复): group={getattr(event, 'group_id', 'N/A')}")
         return False
 
@@ -447,6 +448,16 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
     if text:
         prompt_parts.append(text)
 
+    # 4.5 视觉联合理解预备：@bot 且（本消息或引用）带图片时走视觉模型。
+    # NapCat 等实现下被引用图片常不内联到 event.reply.message，因此无条件尝试下载
+    # （_download_image_bytes 内部已含 bot.get_msg 兜底），并以「能否读到图」作为是否走视觉的唯一判据。
+    img_bytes, had_image_intent = await _download_image_bytes(bot, event)
+    if img_bytes is not None and not text:
+        # 仅带图、没文字：给一个默认视觉提问
+        prompt_parts.append(
+            "请描述这张图片的内容；如果图中是动漫/游戏角色，请告诉我角色名与出处。"
+        )
+
     if not prompt_parts:
         await matcher.send("有什么事吗？@我然后说你想问的就好啦～", reply_message=True)
         return
@@ -463,17 +474,10 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
         await matcher.send(f"AI 功能配置错误：{e}（请管理员检查对应服务商的 API Key：DEEPSEEK_API_KEY / GROK_API_KEY）", reply_message=True)
         return
 
-    # 4.5 视觉联合理解：@bot 且（本消息或引用）带图片时，用视觉模型读图+文本
-    img_bytes = None
-    if _has_image_seg(event):
-        try:
-            img_bytes = await _download_image_bytes(bot, event)
-        except Exception as e:
-            logger.warning(f"[AI视觉] 图片下载失败: {e}")
     use_vision = img_bytes is not None
 
     # 用户确实携带/引用了图片但没能读取到时，明确告知，避免纯文本模型瞎猜「看不见图」
-    if _has_image_seg(event) and not use_vision:
+    if had_image_intent and not use_vision:
         await matcher.send(
             "抱歉，我没能成功读取到图片，请直接发送图片后再 @我提问～",
             reply_message=True,
@@ -1231,12 +1235,13 @@ def _arg_plain_text(args) -> str:
     return str(args).strip()
 
 
-async def _download_image_bytes(bot, event: MessageEvent) -> Optional[bytes]:
+async def _download_image_bytes(bot, event: MessageEvent) -> Tuple[Optional[bytes], bool]:
     """从消息图片段取二进制：优先当前消息/引用内联图，缺失时拉取真实被引用消息兜底。
 
-    NapCat 等实现下，被引用（reply）消息的图片常常不在当前 event 内联，
-    event.reply.message 可能为空或不含图片段；此时用 bot.get_msg(message_id)
-    拉取真实被引用消息再取图片 URL。下载统一复用 utils.download_image
+    返回 (图片字节 | None, 是否有图意图)。「图意图」= 用户（本消息或引用）确实附了一张图
+    （无论是否成功下载），用于：① 用户确实发了图但读取失败 → 明确回执而非空手调用文本模型；
+    ② NapCat 等实现下被引用图片常不内联到 event.reply.message，需用 bot.get_msg(message_id)
+    拉真实引用消息判定/取图。下载统一复用 utils.download_image
     （与图反推同路径，兼容 http 直链 / get_image / get_file 多兜底）。
     """
     from .utils import download_image as _dl_image
@@ -1253,11 +1258,16 @@ async def _download_image_bytes(bot, event: MessageEvent) -> Optional[bytes]:
             logger.warning(f"[AI视觉] 图片下载失败: {e}")
             return None
 
+    had_intent = False
+
     # 1) 优先当前消息图片 / 引用消息内联图片
     seg = _find_image_seg(event)
-    data = await _fetch(seg)
-    if data:
-        return data
+    if seg is not None:
+        had_intent = True
+        data = await _fetch(seg)
+        if data:
+            return data, True
+        # 内联图下载失败，继续尝试从真实引用消息取更可靠的图
 
     # 2) 引用消息可能没内联图片：拉取真实被引用消息再取图
     reply = getattr(event, "reply", None)
@@ -1272,12 +1282,13 @@ async def _download_image_bytes(bot, event: MessageEvent) -> Optional[bytes]:
                     rmsg = OBMessage(rmsg)
                 for s2 in rmsg:
                     if s2.type == "image":
+                        had_intent = True
                         data = await _fetch(s2)
                         if data:
-                            return data
+                            return data, True
         except Exception as e:
             logger.warning(f"[AI视觉] 拉取引用消息失败: {e}")
-    return None
+    return None, had_intent
 
 
 def _to_png_bytes(data: bytes, max_side: int = 1600) -> bytes:
@@ -1313,7 +1324,7 @@ add_img_cmd = on_command(
 @add_img_cmd.handle()
 async def handle_add_img(matcher: Matcher, bot: Bot, event: MessageEvent) -> None:
     """引用或附带一张图片，发送「ai图添加」存入资源目录"""
-    data = await _download_image_bytes(bot, event)
+    data, _ = await _download_image_bytes(bot, event)
     if not data:
         await matcher.finish("没找到图片，请引用或附带一张图片后再发送「ai图添加」~")
     seg = _find_image_seg(event)
