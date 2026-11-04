@@ -408,7 +408,20 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
 
     # 如果有引用消息，把引用内容带上
     if event.reply:
-        reply_text = event.reply.message.extract_plain_text().strip()
+        # 仅取引用消息中的纯文本段；图片/转发等不转为文字，避免把图片 URL 当文本塞给模型
+        # （曾导致模型回复「你甩的这堆链接全是文字」却看不到图）。
+        rmsg = getattr(event.reply, "message", None)
+        reply_text = ""
+        if rmsg is not None:
+            try:
+                from nonebot.adapters.onebot.v11 import Message as OBMessage
+                if not isinstance(rmsg, OBMessage):
+                    rmsg = OBMessage(rmsg)
+                reply_text = "".join(
+                    sg.data.get("text", "") for sg in rmsg if sg.type == "text"
+                ).strip()
+            except Exception:
+                reply_text = ""
         if reply_text:
             prompt_parts.append(f"（用户引用了以下消息作为上下文）\n{reply_text}\n（以下是用户的问题）")
 
@@ -441,6 +454,14 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
         except Exception as e:
             logger.warning(f"[AI视觉] 图片下载失败: {e}")
     use_vision = img_bytes is not None
+
+    # 用户确实携带/引用了图片但没能读取到时，明确告知，避免纯文本模型瞎猜「看不见图」
+    if _has_image_seg(event) and not use_vision:
+        await matcher.send(
+            "抱歉，我没能成功读取到图片，请直接发送图片后再 @我提问～",
+            reply_message=True,
+        )
+        return
 
     model = (
         llm_providers.get_vision_model(group_id, "ai_chat")
@@ -1205,37 +1226,51 @@ def _arg_plain_text(args) -> str:
 
 
 async def _download_image_bytes(bot, event: MessageEvent) -> Optional[bytes]:
-    """从消息图片段取二进制：base64:// / http(s) 下载 / bot.get_image 兜底"""
+    """从消息图片段取二进制：优先当前消息/引用内联图，缺失时拉取真实被引用消息兜底。
+
+    NapCat 等实现下，被引用（reply）消息的图片常常不在当前 event 内联，
+    event.reply.message 可能为空或不含图片段；此时用 bot.get_msg(message_id)
+    拉取真实被引用消息再取图片 URL。下载统一复用 utils.download_image
+    （与图反推同路径，兼容 http 直链 / get_image / get_file 多兜底）。
+    """
+    from .utils import download_image as _dl_image
+
+    async def _fetch(seg) -> Optional[bytes]:
+        if seg is None:
+            return None
+        url = seg.data.get("url") or seg.data.get("file")
+        if not url:
+            return None
+        try:
+            return await _dl_image(bot, url)
+        except Exception as e:
+            logger.warning(f"[AI视觉] 图片下载失败: {e}")
+            return None
+
+    # 1) 优先当前消息图片 / 引用消息内联图片
     seg = _find_image_seg(event)
-    if seg is None:
-        return None
-    # 1) base64 内嵌
-    for raw in (seg.data.get("url"), seg.data.get("file")):
-        if raw and raw.startswith("base64://"):
-            try:
-                return base64.b64decode(raw.split("base64://", 1)[1])
-            except Exception:
-                pass
-    # 2) http(s) 下载
-    dl = seg.data.get("url") or seg.data.get("file")
-    if dl and (dl.startswith("http://") or dl.startswith("https://")):
+    data = await _fetch(seg)
+    if data:
+        return data
+
+    # 2) 引用消息可能没内联图片：拉取真实被引用消息再取图
+    reply = getattr(event, "reply", None)
+    mid = getattr(reply, "message_id", None) or getattr(reply, "id", None)
+    if mid is not None and bot is not None:
         try:
-            async with httpx.AsyncClient(timeout=20) as client:
-                resp = await client.get(dl)
-                if resp.status_code == 200:
-                    return resp.content
+            real = await bot.get_msg(message_id=mid)
+            rmsg = real.get("message") if isinstance(real, dict) else None
+            if rmsg is not None:
+                from nonebot.adapters.onebot.v11 import Message as OBMessage
+                if not isinstance(rmsg, OBMessage):
+                    rmsg = OBMessage(rmsg)
+                for s2 in rmsg:
+                    if s2.type == "image":
+                        data = await _fetch(s2)
+                        if data:
+                            return data
         except Exception as e:
-            logger.warning(f"[AI配图] 下载图片失败: {e}")
-    # 3) bot.get_image 兜底（同机可用）
-    f = seg.data.get("file")
-    if f and not f.startswith("base64://"):
-        try:
-            info = await bot.get_image(f)
-            fp = info.get("file")
-            if fp and Path(fp).is_file():
-                return Path(fp).read_bytes()
-        except Exception as e:
-            logger.warning(f"[AI配图] get_image 失败: {e}")
+            logger.warning(f"[AI视觉] 拉取引用消息失败: {e}")
     return None
 
 
