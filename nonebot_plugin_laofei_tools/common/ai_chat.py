@@ -517,8 +517,11 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
 
     extra_body = {}
     if web_mode == "ds":
-        # 引导 DS 自判是否需要联网（回答结尾带标记），命中后再检索
-        messages.append({"role": "system", "content": ds_websearch.NEED_WEB_HINT})
+        # 引导 DS 自判是否需要联网（回答结尾带标记），命中后再检索。
+        # 视觉模式下不附加此提示：图识别任务无需联网，且避免模型误带标记触发
+        # 二次回答时丢失图片上下文（日志曾出现 vision=True 但最终回复变成「没图」）。
+        if not use_vision:
+            messages.append({"role": "system", "content": ds_websearch.NEED_WEB_HINT})
         # DeepSeek 视觉模型需关闭思考模式，否则 max_tokens 被 reasoning 吃光
         if use_vision:
             extra_body.update(llm_providers.get_vision_extra_body(group_id, "ai_chat"))
@@ -554,8 +557,11 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
         await matcher.send(f"AI 暂时无法回复，请稍后再试。", reply_message=True)
         return
 
-    # 7. DeepSeek 路线：命中标记则检索并二次回答（Grok 原生路线已完成，无需处理）
-    if web_mode == "ds" and ds_websearch.needs_web_search(reply):
+    # 7. DeepSeek 路线：命中标记则检索并二次回答（Grok 原生路线已完成，无需处理）。
+    # 视觉模式（带图）下不做联网二次回答：图片已随首轮请求传入，二次回答若重调纯文本模型
+    # 会丢失视觉上下文（日志曾出现 vision=True 但最终回复「没图啊，我瞎猜不出来」）。
+    # 视觉答案即最终答案；下面 elif 仍会把可能残留的标记剥掉。
+    if web_mode == "ds" and not use_vision and ds_websearch.needs_web_search(reply):
         clean = ds_websearch.strip_web_marker(reply)
         ctx = await ds_websearch.search_web(prompt, count=5)
         if ctx:
