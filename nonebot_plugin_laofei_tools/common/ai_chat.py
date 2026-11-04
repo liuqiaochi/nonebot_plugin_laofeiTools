@@ -138,6 +138,23 @@ def _clean_history(user_id: str):
     ]
 
 
+_URL_RE = re.compile(r"https?://\S+")
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(https?://[^)]+\)")
+
+def _strip_source_links(text: str) -> str:
+    """去除回复中可能残留的来源链接（裸 URL / Markdown 链接），确保联网答案简练。
+
+    双保险：ds_websearch 已不再把 URL 注入上下文，此处再对最终回复兜底剥离，
+    覆盖模型仍自行贴出链接的情况。仅删链接本身，不破坏正文。
+    """
+    if not text:
+        return text
+    text = _MD_LINK_RE.sub(r"\1", text)
+    text = _URL_RE.sub("", text)
+    text = re.sub(r" {2,}", " ", text)  # 折叠删除链接后残留的多余空格
+    return text.strip()
+
+
 def _add_history(user_id: str, role: str, content: str):
     """添加一条聊天记录"""
     _clean_history(user_id)
@@ -541,7 +558,7 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
             base = _build_messages(user_id, prompt)
             messages2 = base[:-1] + [
                 {"role": "assistant", "content": clean},
-                {"role": "user", "content": f"{ctx}\n\n用户问题：{prompt}"},
+                {"role": "user", "content": f"{ctx}\n\n用户问题：{prompt}\n（请只给出简练、直接的答案，不要罗列来源链接）"},
             ]
             try:
                 logger.info(f"[联网二次回答] group={group_id} prompt={prompt[:50]}...")
@@ -561,6 +578,8 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
         # 开启了联网但 DS 判断不需要：去掉可能残留的标记
         reply = ds_websearch.strip_web_marker(reply)
 
+    # 去除联网检索残留的来源链接，给出简练答案（DS 联网与 Grok 联网通用兜底）
+    reply = _strip_source_links(reply)
     _add_history(user_id, "assistant", reply)
 
     # 随机配图：每次回复从资源目录随机取一张（无图则跳过）
@@ -644,36 +663,22 @@ _freespeak_last_human_ts: dict = {}   # 群 -> 上次人类发言时间戳（冷
 
 
 def _freespeak_should_reply(text: str, event, group_id: str, bot) -> tuple:
-    """智能相关性判断：本次是否值得 AI 接话。
+    """自由发言模式：仅在群友**提及机器人名字**时才接话（按群隔离，上下文 200 条）。
 
     返回 (should_reply: bool, reason: str)。
-    信号加权：提到 bot 名 / @他人 / 疑问句式 / 冷场，命中越多接话概率越高；
-    纯闲聊（无信号）仅以低概率偶尔接话。始终受群级冷却约束。
+    设计：避免无差别自动接话带来的「串群 / 乱插话」观感；只有被点名
+    （如「蓝色大肥鱼」「大肥鱼」「肥鱼」「蓝鱼」）才回应。仍受群级冷却约束防刷屏。
     """
-    # 1) 群级冷却：避免短时间连续刷屏
+    # 群级冷却：避免短时间连续刷屏
     last = _freespeak_last_reply_ts.get(group_id, 0.0)
     now = float(getattr(event, "time", time.time()))
     if now - last < _FREESPEAK_REPLY_COOLDOWN:
         return False, "cooldown"
 
-    score = 0
-    # 2) 提到 bot 名字
+    # 仅在文本包含任一机器人名字时接话
     if any(name in text for name in _FREESPEAK_BOT_NAMES):
-        score += 2
-    # 3) 疑问句式
-    if text.rstrip().endswith(("?", "？")) or _FREESPEAK_QUESTION_RE.search(text):
-        score += 1
-    # 4) 冷场：距上次人类发言较久
-    last_human = _freespeak_last_human_ts.get(group_id, 0.0)
-    if last_human and now - last_human > _FREESPEAK_SILENCE_SEC:
-        score += 1
-
-    prob = (_FREESPEAK_PROB_HIGH if score >= 2
-            else _FREESPEAK_PROB_MID if score == 1
-            else _FREESPEAK_PROB_LOW)
-    if random.random() < prob:
-        return True, f"score={score}/prob={prob:.2f}"
-    return False, f"score={score}/prob={prob:.2f}"
+        return True, "mentioned-name"
+    return False, "no-name-mention"
 
 
 def _freespeak_sender_name(event) -> str:
@@ -912,7 +917,7 @@ async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent)
             base = _build_freespeak_messages(prev, text)
             messages2 = base[:-1] + [
                 {"role": "assistant", "content": clean},
-                {"role": "user", "content": f"{ctx}\n\n当前群聊内容：{text}"},
+                {"role": "user", "content": f"{ctx}\n\n当前群聊内容：{text}\n（请只给出简练、直接的答案，不要罗列来源链接）"},
             ]
             try:
                 logger.info(f"[自由发言·联网二次回答] group={group_id} text={text[:50]}...")
@@ -934,6 +939,7 @@ async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent)
         return
 
     # 记入缓冲（供后续上下文），bot 落款用「蓝色大肥鱼」
+    reply = _strip_source_links(reply)
     _freespeak_buffer[group_id].append({"name": "蓝色大肥鱼", "text": reply})
 
     # 普通发送（不引用）

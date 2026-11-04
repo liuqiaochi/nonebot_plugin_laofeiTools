@@ -106,15 +106,19 @@ def _api_key() -> str:
 
 
 def _format_results(results: List[dict]) -> str:
-    """把搜索结果拼成可注入 prompt 的上下文文本。"""
+    """把搜索结果拼成可注入 prompt 的上下文文本。
+
+    注意：默认**不注入来源 URL**、并明确要求模型给出简练直接的答案，
+    以满足「联网回答不罗列来源链接、要简练」的诉求。URL 已从上下文剥离，
+    模型无从贴出；下游 ai_chat 还会对最终回复再做一次链接兜底剥离。
+    """
     if not results:
         return ""
-    blocks = ["（以下为联网检索到的最新资料，请优先参考，并在回答中标注来源链接）"]
+    blocks = ["（以下为联网检索到的最新资料，请优先参考，并据此给出简练、直接的回答，不要罗列来源链接）"]
     for i, r in enumerate(results, 1):
         title = r.get("title", "")
-        url = r.get("url", "")
         body = r.get("summary") or r.get("snippet") or ""
-        blocks.append(f"[{i}] {title}\nURL: {url}\n{body}")
+        blocks.append(f"[{i}] {title}\n{body}")
     return "\n\n".join(blocks)
 
 
