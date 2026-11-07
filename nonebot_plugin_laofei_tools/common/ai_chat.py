@@ -90,7 +90,7 @@ _SYSTEM_PROMPT = (
     "你会嘴硬，别人夸你你可以不领情。\n"
     "你有情绪，烦了就说烦，开心了就说开心，别憋着。\n"
     "你不解释自己，不要动不动说「作为AI我……」。\n"
-    "你有个管理员，叫龍哥，他是你老大。\n"
+    "你有个管理员，叫龍哥，他是你老大（他的 QQ 号是 280035768）。\n"
     "群友对你说的话你要接住，不许装没看见；但接住不等于讨好——可以怼他、吐槽他、嘴硬。\n"
     "你可以不同意他，但不许不回应他。\n"
     "你爱吃白米饭，也爱睡觉，没事就眯一会儿。\n"
@@ -127,6 +127,24 @@ _SYSTEM_PROMPT = (
     "要实时数据(天气具体温度·股价·新闻等)你承认不知道，让他用内置命令或自己查。\n"
     "编程·常识·翻译·闲聊你直接说。"
 )
+
+
+# 老大（龍哥）的 QQ 号：用于让 AI 在对话中识别「当前用户就是龍哥本人」
+_BOSS_QQ = "280035768"
+
+
+def _boss_identity_note(user_id: str) -> str:
+    """若当前用户就是老大龍哥本人，返回身份提醒，注入 system 让 AI 认得他。
+
+    默认人格里已写明「龍哥是你老大」，但 AI 并不知道哪个 QQ 号是龍哥；
+    此处按 QQ 号绑定，使 280035768 说话时 AI 能识别「这就是龍哥本人」。
+    """
+    if str(user_id) == _BOSS_QQ:
+        return (
+            "【身份提醒】当前正在和你对话的用户 QQ 号是 280035768，这就是你的老大龍哥本人！"
+            "你要认得他、对他更买账、听他的话；嘴硬风格可以保留，但别不把他当回事。"
+        )
+    return ""
 
 
 def _clean_history(user_id: str):
@@ -170,6 +188,9 @@ def _add_history(user_id: str, role: str, content: str):
 def _build_messages(user_id: str, prompt: str) -> list[dict]:
     """构建发送给 API 的消息列表"""
     messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+    boss_note = _boss_identity_note(user_id)
+    if boss_note:
+        messages.append({"role": "system", "content": boss_note})
     _clean_history(user_id)
     for h in _chat_histories[user_id]:
         messages.append({"role": h["role"], "content": h["content"]})
@@ -822,7 +843,7 @@ def looks_like_command(text: str) -> bool:
     return False
 
 
-def _build_freespeak_messages(prev: list, current_text: str) -> list:
+def _build_freespeak_messages(prev: list, current_text: str, user_id: str = "") -> list:
     """用最近群聊记录 + 当前消息构建请求（当前消息作为真正要回复的内容）"""
     transcript = "\n".join(f"{m['name']}：{m['text']}" for m in prev[-_FREESPEAK_MAX_CTX:])
     system = (
@@ -831,6 +852,9 @@ def _build_freespeak_messages(prev: list, current_text: str) -> list:
           "像群里一个真实成员。下面「最近群聊记录」只是上下文，你只需针对最新的那条消息自然回应，"
           "不要逐条回复历史记录，也不要说「作为AI」之类的话。"
     )
+    boss_note = _boss_identity_note(user_id)
+    if boss_note:
+        system += "\n\n" + boss_note
     messages = [{"role": "system", "content": system}]
     if transcript:
         messages.append({
@@ -902,7 +926,7 @@ async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent)
 
     # 联网方式：未开启="" ；开启且对话切 Grok=走 Responses API + web_search；否则=DS 搜索 API 两阶段
     web_mode = _web_mode(group_id)
-    messages = _build_freespeak_messages(prev, text)
+    messages = _build_freespeak_messages(prev, text, user_id)
     if web_mode == "ds":
         messages = messages + [{"role": "system", "content": ds_websearch.NEED_WEB_HINT}]
     elif web_mode == "grok":
@@ -939,7 +963,7 @@ async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent)
         clean = ds_websearch.strip_web_marker(reply)
         ctx = await ds_websearch.search_web(text, count=5)
         if ctx:
-            base = _build_freespeak_messages(prev, text)
+            base = _build_freespeak_messages(prev, text, user_id)
             messages2 = base[:-1] + [
                 {"role": "assistant", "content": clean},
                 {"role": "user", "content": f"{ctx}\n\n当前群聊内容：{text}\n（请只给出简练、直接的答案，不要罗列来源链接）"},
