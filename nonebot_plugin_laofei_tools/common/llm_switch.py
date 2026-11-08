@@ -1,7 +1,7 @@
 """
 LLM 服务商切换指令（超管，按群）
 
-- 对话模型 <deepseek|grok>  /  反推模型 <deepseek|grok>  ：设置本群「对话」/「图反推」的服务商
+- 对话模型 <deepseek|grok|gemini>  /  反推模型 <deepseek|grok|gemini>  ：设置本群「对话」/「图反推」的服务商
 - 重置对话模型  /  重置反推模型                      ：清除本群该项 override，回退全局默认
 - 模型设置  /  查看模型                              ：查看本群当前配置 + 全局默认（群成员可用）
 
@@ -28,6 +28,8 @@ def _msg(event: MessageEvent) -> str:
 
 def _parse_provider(text: str):
     t = text.lower()
+    if "gemini" in t:
+        return "gemini"
     if "grok" in t:
         return "grok"
     if "deepseek" in t or " ds" in t or t.startswith("ds"):
@@ -71,7 +73,7 @@ async def handle_set_chat(matcher, event: MessageEvent):
     gid = str(event.group_id)
     p = _parse_provider(_msg(event))
     if not p:
-        await matcher.finish("请指定服务商：对话模型 deepseek 或 对话模型 grok")
+        await matcher.finish("请指定服务商：对话模型 deepseek / grok / gemini")
     ok, msg = llm_providers.set_provider(gid, "ai_chat", p)
     await matcher.finish(("✅ " if ok else "❌ ") + msg)
 
@@ -89,7 +91,7 @@ async def handle_set_reverse(matcher, event: MessageEvent):
     gid = str(event.group_id)
     p = _parse_provider(_msg(event))
     if not p:
-        await matcher.finish("请指定服务商：反推模型 deepseek 或 反推模型 grok")
+        await matcher.finish("请指定服务商：反推模型 deepseek / grok / gemini")
     ok, msg = llm_providers.set_provider(gid, "reverse", p)
     await matcher.finish(("✅ " if ok else "❌ ") + msg)
 
@@ -145,7 +147,7 @@ async def handle_view(matcher, event: MessageEvent):
         f"· 对话：{label(chat)}" + ("" if chat == dchat else f"（默认：{label(dchat)}）"),
         f"· 图反推：{label(rev)}" + ("" if rev == drev else f"（默认：{label(drev)}）"),
         "",
-        "切换：超管发送「对话模型 deepseek/grok」「反推模型 deepseek/grok」",
+        "切换：超管发送「对话模型 deepseek/grok/gemini」「反推模型 deepseek/grok/gemini」",
         "重置：超管发送「重置对话模型」「重置反推模型」",
     ]
     await matcher.finish(MessageSegment.text("\n".join(lines)))

@@ -34,6 +34,15 @@ class Config(BaseModel):
     # 务必把本项改为该代理给出的 base_url，否则官方端点会拒绝 key。
     grok_base_url: str = "https://api.x.ai/v1"
 
+    # Gemini (Google) AI 配置（可选；启用后可在群内切换对话/图反推到 Gemini）
+    # 走官方 OpenAI 兼容端点（base_url 见下），无需额外 SDK；
+    # 联网可选走 Gemini 原生 Google Search grounding（见 common/gemini_web.py）。
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"
+    # Gemini 接入地址（OpenAI 兼容）。默认官方 generativelanguage 的 openai 路径。
+    # 注意：base_url 末尾不要带斜杠，OpenAI SDK 会自动拼接 /chat/completions。
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
+
     # NovelAI 画图配置
     novelai_api_key: str = ""
     novelai_model: str = "nai-diffusion-4-5-curated"

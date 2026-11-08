@@ -27,7 +27,7 @@ from ..config import DATA_DIR, safe_json_save
 
 PROVIDER_FILE = DATA_DIR / "llm_provider_groups.json"
 
-VALID_PROVIDERS = ("deepseek", "grok")
+VALID_PROVIDERS = ("deepseek", "grok", "gemini")
 VALID_USAGES = ("ai_chat", "reverse")
 
 USAGE_LABELS = {"ai_chat": "对话", "reverse": "图反推"}
@@ -98,6 +98,23 @@ def _provider_spec(provider: str) -> dict:
             "reasoning_effort": (getattr(cfg, "grok_reasoning_effort", "low") or "") if cfg else "low",
             "label": "Grok (xAI)",
             "key_env": "GROK_API_KEY",
+        }
+    if provider == "gemini":
+        chat = (getattr(cfg, "gemini_model", "gemini-2.5-flash") or "gemini-2.5-flash") if cfg else "gemini-2.5-flash"
+        return {
+            "provider": "gemini",
+            "api_key": (getattr(cfg, "gemini_api_key", "") or "") if cfg else "",
+            "base_url": (
+                getattr(cfg, "gemini_base_url", "https://generativelanguage.googleapis.com/v1beta/openai")
+                or "https://generativelanguage.googleapis.com/v1beta/openai"
+            ) if cfg else "https://generativelanguage.googleapis.com/v1beta/openai",
+            "chat_model": chat,
+            # Gemini 同模型原生多模态，视觉直接复用对话模型
+            "vision_model": chat,
+            "thinking_disable": False,
+            "reasoning_effort": "",
+            "label": "Gemini (Google)",
+            "key_env": "GEMINI_API_KEY",
         }
     raise ValueError(f"未知 LLM 服务商：{provider}（仅支持 {' / '.join(VALID_PROVIDERS)}）")
 

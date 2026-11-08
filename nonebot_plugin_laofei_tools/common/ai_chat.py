@@ -53,6 +53,7 @@ from ..config import (
 from . import llm_providers
 from . import ds_websearch
 from . import grok_web
+from . import gemini_web
 
 # ========== 启动时检查 API Key ==========
 
@@ -241,8 +242,11 @@ def _web_mode(group_id: str) -> str:
     """
     if not ds_websearch.is_enabled(group_id):
         return ""
-    if llm_providers.resolve_provider(group_id, "ai_chat") == "grok":
+    provider = llm_providers.resolve_provider(group_id, "ai_chat")
+    if provider == "grok":
         return "grok"
+    if provider == "gemini":
+        return "gemini"
     return "ds"
 
 
@@ -575,6 +579,17 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
             reply = await _grok_web_reply(
                 client, model, messages, prompt, grok_extra, create_kwargs
             )
+        elif web_mode == "gemini":
+            # Gemini 原生 Google Search grounding：一步到位实时联网，不走 DS 二次回答
+            logger.info(f"[Gemini grounding] group={group_id} prompt={prompt[:50]}...")
+            try:
+                reply = await gemini_web.gemini_grounded_reply(
+                    group_id, messages, temperature=0.7, max_tokens=2000
+                )
+            except Exception as e:
+                logger.warning(f"[Gemini grounding] 失败，降级普通 Gemini 调用: {e}")
+                response = await asyncio.to_thread(client.chat.completions.create, **create_kwargs)
+                reply = (response.choices[0].message.content or "").strip()
         else:
             response = await asyncio.to_thread(client.chat.completions.create, **create_kwargs)
             reply = (response.choices[0].message.content or "").strip()
@@ -958,6 +973,17 @@ async def handle_freespeak(matcher: Matcher, bot: Bot, event: GroupMessageEvent)
             reply = await _grok_web_reply(
                 client, model, messages, text, fs_extra, fs_kwargs, tag="·自由发言"
             )
+        elif web_mode == "gemini":
+            # Gemini 原生 Google Search grounding（一步到位实时联网）
+            logger.info(f"[Gemini grounding·自由发言] group={group_id} text={text[:50]}...")
+            try:
+                reply = await gemini_web.gemini_grounded_reply(
+                    group_id, messages, temperature=0.8, max_tokens=1500
+                )
+            except Exception as e:
+                logger.warning(f"[Gemini grounding·自由发言] 失败，降级普通 Gemini 调用: {e}")
+                response = await asyncio.to_thread(client.chat.completions.create, **fs_kwargs)
+                reply = (response.choices[0].message.content or "").strip()
         else:
             response = await asyncio.to_thread(client.chat.completions.create, **fs_kwargs)
             reply = (response.choices[0].message.content or "").strip()
