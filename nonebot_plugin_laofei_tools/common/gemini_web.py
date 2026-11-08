@@ -151,7 +151,13 @@ async def gemini_grounded_reply(
 
     try:
         parts = data["candidates"][0]["content"]["parts"]
-        text = "".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
+        # gemini-3.x 默认开启思考，回复 parts 会夹带 thought:true 的思考段，
+        # 必须过滤掉，否则 AI 会把内部思考内容一起当成回答发出来。
+        text = "".join(
+            p.get("text", "")
+            for p in parts
+            if isinstance(p, dict) and not p.get("thought")
+        ).strip()
         if not text:
             raise ValueError("Gemini grounding：模型返回为空")
         return text
