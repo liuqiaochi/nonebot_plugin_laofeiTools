@@ -42,6 +42,11 @@ class Config(BaseModel):
     # Gemini 接入地址（OpenAI 兼容）。默认官方 generativelanguage 的 openai 路径。
     # 注意：base_url 末尾不要带斜杠，OpenAI SDK 会自动拼接 /chat/completions。
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
+    # Gemini 原生 Google Search grounding（联网）开关，默认关闭。
+    # 原因：免费层未绑卡调用 grounding 直接 429（需付费项目），且大陆出口 IP
+    # 还会撞「User location is not supported」(400)。关闭时 Gemini 群即使开启
+    # 联网也不检索，走模型自身知识；绑卡+代理就绪后 .env 设 GEMINI_GROUNDING=true 开启。
+    gemini_grounding: bool = False
 
     # NovelAI 画图配置
     novelai_api_key: str = ""

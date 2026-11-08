@@ -239,6 +239,9 @@ def _web_mode(group_id: str) -> str:
                  + ``tools=[{"type":"web_search"}]``（旧版 search_parameters 已被 xAI
                  下线，会直接报错；见 common/grok_web.py），不调用 DS 搜索 API
     - "ds":      已开启联网 且 走 DeepSeek（或默认）→ 走 DeepSeek 搜索 API 两阶段（先答后判）
+    - "gemini":  已开启联网 且 切到 Gemini 且 gemini_grounding=true → Gemini 原生
+                 Google Search grounding（见 common/gemini_web.py；免费层 429 +
+                 大陆地区封锁，默认关闭，关闭时 Gemini 群一律不联网）
     """
     if not ds_websearch.is_enabled(group_id):
         return ""
@@ -246,6 +249,10 @@ def _web_mode(group_id: str) -> str:
     if provider == "grok":
         return "grok"
     if provider == "gemini":
+        # Gemini 原生 grounding 需绑卡（免费层 429）且受地区封锁限制，默认关：
+        # 关闭时 Gemini 群即使开了联网也不检索，走模型自身知识（gemini_grounding 可开）。
+        if not getattr(driver.config, "gemini_grounding", False):
+            return ""
         return "gemini"
     return "ds"
 
