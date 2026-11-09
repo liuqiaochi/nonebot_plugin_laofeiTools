@@ -100,7 +100,7 @@ def _provider_spec(provider: str) -> dict:
             "key_env": "GROK_API_KEY",
         }
     if provider == "gemini":
-        chat = (getattr(cfg, "gemini_model", "gemini-3.8-flash") or "gemini-3.8-flash") if cfg else "gemini-3.8-flash"
+        chat = (getattr(cfg, "gemini_model", "gemini-3.1-pro") or "gemini-3.1-pro") if cfg else "gemini-3.1-pro"
         return {
             "provider": "gemini",
             "api_key": (getattr(cfg, "gemini_api_key", "") or "") if cfg else "",
@@ -189,7 +189,9 @@ def build_client(group_id: str, usage: str) -> OpenAI:
             f"本群「{USAGE_LABELS.get(usage, usage)}」已选择 {spec['label']}，"
             f"但未配置其 API Key。请在 .env 中设置 {spec['key_env']}"
         )
-    return OpenAI(api_key=spec["api_key"], base_url=spec["base_url"], timeout=60.0)
+    # Gemini 走 Google 共享集群，偶发 503 高负载；多给一次重试自愈（其余服务商保持默认 2 次）
+    max_retries = 3 if provider == "gemini" else 2
+    return OpenAI(api_key=spec["api_key"], base_url=spec["base_url"], timeout=60.0, max_retries=max_retries)
 
 
 def get_chat_model(group_id: str, usage: str) -> str:
