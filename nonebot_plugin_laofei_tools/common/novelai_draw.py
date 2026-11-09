@@ -12,6 +12,7 @@ import json
 import io
 import os
 import random
+import re
 import tempfile
 import zipfile
 
@@ -240,6 +241,11 @@ def _is_v4_model(model: str) -> bool:
 
 # ========== 尺寸参数 ==========
 
+# NovelAI 自定义尺寸约束：宽高须为 64 的倍数，单边范围 64~1600
+_NAI_SIZE_UNIT = 64
+_NAI_SIZE_MIN = 64
+_NAI_SIZE_MAX = 1600
+
 # 尺寸预设：关键字 -> (宽, 高)，均为 64 的倍数，适配 NovelAI v4/v5 潜在空间
 SIZE_PRESETS = {
     "竖": (832, 1216), "竖图": (832, 1216), "竖屏": (832, 1216), "portrait": (832, 1216),
@@ -247,13 +253,45 @@ SIZE_PRESETS = {
     "方": (1024, 1024), "方图": (1024, 1024), "正方形": (1024, 1024), "square": (1024, 1024),
 }
 
+
+def _fix_nai_side(v: int) -> int:
+    """把单边长度规整到 NovelAI 合法值：先四舍五入到最近的 64 倍数，
+    再夹紧到 [64, 1600]。用户随手写的非 64 倍数尺寸会在此被自动修正。"""
+    v = int(v / _NAI_SIZE_UNIT + 0.5) * _NAI_SIZE_UNIT
+    return max(_NAI_SIZE_MIN, min(_NAI_SIZE_MAX, v))
+
+
+def _clamp_to_nai(w: int, h: int):
+    """把宽高规整为 NovelAI 合法尺寸（均为 64 倍数、单边 64~1600）。"""
+    return _fix_nai_side(w), _fix_nai_side(h)
+
+
+def _ratio_to_pixels(a: int, b: int):
+    """把比例 a:b 换算为最接近、且单边均 ≤1600 的 64 倍数像素尺寸。"""
+    w = a * _NAI_SIZE_UNIT
+    h = b * _NAI_SIZE_UNIT
+    mx = max(w, h)
+    if mx > _NAI_SIZE_MAX:
+        scale = _NAI_SIZE_MAX / mx
+        w = int(w * scale / _NAI_SIZE_UNIT + 0.5) * _NAI_SIZE_UNIT
+        h = int(h * scale / _NAI_SIZE_UNIT + 0.5) * _NAI_SIZE_UNIT
+    return _clamp_to_nai(w, h)
+
+
 # ai画图 指令用法说明（空参数时复用）
 AI_DRAW_USAGE = (
     "用法：ai画图 [尺寸] <提示词>\n"
-    "尺寸（可选，放在最前）：竖 / 横 / 方（或 竖图 / 横图 / 方图）\n"
+    "尺寸（可选，放在最前）：\n"
+    "  预设：竖 / 横 / 方\n"
+    "  绝对尺寸：WxH（如 576x1024、1280X576），非 64 倍数会自动取整\n"
+    "  比例：a:b（如 9:16、16:9、20:9），自动换算为 64 倍数像素\n"
+    "  单边范围 64~1600，超出会自动夹紧\n"
     "  不写尺寸默认竖屏 832×1216\n"
     "示例：\n"
     "  ai画图 1girl, cat ears, masterpiece\n"
+    "  ai画图 576x1024 1girl\n"
+    "  ai画图 9:16 1girl        # 竖屏手机比例\n"
+    "  ai画图 9:20 1girl        # 竖屏超长（20:9 手机），20:9 则是横向超宽\n"
     "  ai画图 横 风景, 日落\n"
     "  ai画图 方 一只猫\n"
     "支持用 | 分隔负面提示词：ai画图 1girl | bad hands, blurry"
@@ -263,13 +301,35 @@ AI_DRAW_USAGE = (
 def _resolve_size_arg(token: str):
     """解析指令首 token 作为尺寸参数。
 
+    支持三种写法：
+      1. 预设名：竖 / 横 / 方（及英文别名 portrait / landscape / square 等）
+      2. 绝对尺寸：WxH，如 576x1024 / 1280X576（非 64 倍数自动取整，超 1600 夹紧）
+      3. 比例：a:b，如 9:16 / 16:9 / 20:9（自动换算为 64 倍数像素）
+
     返回：
       - None         : 不是尺寸参数（整句应作为提示词）
-      - (w, h) tuple : 已解析的尺寸（宽, 高）
+      - (w, h) tuple : 已解析 / 规整后的尺寸（宽, 高）
     """
-    t = (token or "").strip().lower()
+    if not token:
+        return None
+    t = token.strip().lower()
+
+    # 1) 预设名
     if t in SIZE_PRESETS:
         return SIZE_PRESETS[t]
+
+    # 2) 绝对尺寸 WxH（支持 x / X / * / × 分隔）
+    m = re.match(r"^(\d+)[xX*×](\d+)$", t)
+    if m:
+        return _clamp_to_nai(int(m.group(1)), int(m.group(2)))
+
+    # 3) 比例 a:b
+    m = re.match(r"^(\d+):(\d+)$", t)
+    if m:
+        a, b = int(m.group(1)), int(m.group(2))
+        if a > 0 and b > 0:
+            return _ratio_to_pixels(a, b)
+
     return None
 
 
@@ -719,7 +779,7 @@ async def handle_novelai_help(matcher: Matcher, event: MessageEvent):
     sections = [
         ("__text__", "仅群聊可用，默认关闭，需超级管理员开启。同一时间仅支持一个生成任务，进行中发送会提示等待。"),
         ("使用", [
-            ("ai画图 [尺寸] <提示词>", "尺寸放最前：竖/横/方，或自定义 WxH（64 倍数）"),
+            ("ai画图 [尺寸] <提示词>", "尺寸放最前：竖/横/方，或自定义 WxH（如 576x1024），或比例 a:b（如 9:16 / 20:9）；非 64 倍数自动取整，单边 64~1600"),
             ("ai生图 / ai绘画 / ai绘图", "ai画图 的别名"),
             ("ai画图 提示词 | 负面词", "用 | 分隔负面提示词"),
         ]),
@@ -739,7 +799,7 @@ async def handle_novelai_help(matcher: Matcher, event: MessageEvent):
             ("ai画图设置 字段 值", "修改单个参数（不带值则查询该字段可设置范围），例：步数 25 / 引导 7.5 / 采样器 euler_a / 质量 关 / uc human_focus / 重缩放 0.04"),
             ("ai画图重置设置", "恢复本人全部默认参数"),
         ]),
-        ("__text__", "默认尺寸 832×1216（竖屏），默认模型 nai-diffusion-4-5-curated。尺寸参数放最前：竖/横/方，不写则用竖屏。"),
+        ("__text__", "默认尺寸 832×1216（竖屏），默认模型 nai-diffusion-4-5-curated。尺寸参数放最前：竖/横/方，或自定义 WxH（如 576x1024）、比例 a:b（如 9:16 / 20:9）；非 64 倍数会自动取整到最近的 64，单边限制 64~1600。不写尺寸则用竖屏。"),
     ]
     img_b64 = render_help_image("AI 画图帮助", sections, footer="AI 画图 · NovelAI")
     await matcher.finish(MessageSegment.image(f"base64://{img_b64}"))
