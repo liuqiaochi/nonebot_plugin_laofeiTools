@@ -85,6 +85,24 @@ REVERSE_PROMPT_INSTRUCTION_DS = (
     "只输出优化后的提示词本身，不要任何解释或引号。"
 )
 
+# Gemini 专用图反推提示词（英文；针对 Gemini 强结构化遵循能力定制，分流见 reverse_instruction）
+REVERSE_PROMPT_INSTRUCTION_GEMINI = (
+    "You are a professional NovelAI prompt generator. Strictly follow the requirements below and output only one single line of the final prompt. Do not include any explanations, numbering, quotes, or extra text.\n"
+    "Task: Based on the image, generate a Danbooru-style prompt for NovelAI V5 (English, lowercase, separated by half-width commas).\n"
+    "Output structure (merged into one paragraph):\n"
+    "1. Style section: Provide a suitable artist string combination (maximum 6). Format must be \"weight::artist_name_::\".\n"
+    "- There must be exactly one main artist with a weight between 0.8 and 0.9.\n"
+    "- Secondary artists must have an average weight of \u22640.6, with no single one exceeding 0.8.\n"
+    "- Replace all spaces in artist names with underscores.\n"
+    "- Strictly avoid high-frequency popular artists (such as wlop, sakimichan, chen_bin, rella, modare, shirogane_hina, krenz, ask, yoneyama_mai, etc.). Prioritize lesser-known artists that better match the specific style of the image.\n"
+    "- Include a small number of additional style-enhancing tags alongside the artist strings.\n"
+    "2. Content section, in this exact order: quality tags \u2192 subject/character \u2192 appearance features \u2192 clothing \u2192 expression \u2192 pose/action \u2192 environment \u2192 composition/camera.\n"
+    "- Do not use duplicate tags (including semantically similar ones).\n"
+    "- Do not add anything not present in the original image.\n"
+    "- If a known character matches the appearance, replace the appearance description with \"character_name_(source)\" (including hair color and hairstyle).\n"
+    "Output only the complete prompt itself."
+)
+
 # [兼容] 旧名指向 Grok 版；新代码请用 reverse_instruction(group_id) 按服务商取。
 REVERSE_PROMPT_INSTRUCTION = REVERSE_PROMPT_INSTRUCTION_GROK
 
@@ -98,11 +116,11 @@ def reverse_instruction(group_id: str = "") -> str:
         provider = llm_providers.resolve_provider(str(group_id or ""), "reverse")
     except Exception:
         provider = "deepseek"
-    return (
-        REVERSE_PROMPT_INSTRUCTION_GROK
-        if provider in ("grok", "gemini")
-        else REVERSE_PROMPT_INSTRUCTION_DS
-    )
+    if provider == "grok":
+        return REVERSE_PROMPT_INSTRUCTION_GROK
+    if provider == "gemini":
+        return REVERSE_PROMPT_INSTRUCTION_GEMINI
+    return REVERSE_PROMPT_INSTRUCTION_DS
 
 # 触发关键字（任意位置出现即可，支持 @群友 前/后、引用等任意消息结构）
 REVERSE_KEYWORDS = ("图反推", "反推提示词", "图片反推", "提示词反推")
