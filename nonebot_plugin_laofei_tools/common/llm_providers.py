@@ -100,7 +100,7 @@ def _provider_spec(provider: str) -> dict:
             "key_env": "GROK_API_KEY",
         }
     if provider == "gemini":
-        chat = (getattr(cfg, "gemini_model", "gemini-3.1-pro") or "gemini-3.1-pro") if cfg else "gemini-3.1-pro"
+        chat = (getattr(cfg, "gemini_model", "gemini-3.1-pro-preview") or "gemini-3.1-pro-preview") if cfg else "gemini-3.1-pro-preview"
         return {
             "provider": "gemini",
             "api_key": (getattr(cfg, "gemini_api_key", "") or "") if cfg else "",
