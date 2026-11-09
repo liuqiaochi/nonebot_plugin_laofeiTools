@@ -294,6 +294,55 @@ def disable_reverse_polish(group_id: str) -> None:
     _save_reverse_polish_groups(_reverse_polish_groups)
 
 
+# ========== 图反推提示词自定义（运行时可改，持久化到 JSON，按服务商 ds/grok/gemini 区分）==========
+# 默认提示词仍写死在 reverse_prompt.py（REVERSE_PROMPT_INSTRUCTION_*），此处仅存储「用户运行时覆盖」的版本。
+# 通过指令「修改prompt <ds|grok|gemini> <prompt>」写入；「重置prompt <...>」清回默认；「查看prompt <...>」查看。
+# 内存缓存 + 原子写入（safe_json_save），bot 运行时即时生效，无需重启。
+
+REVERSE_PROMPT_CUSTOM_FILE = DATA_DIR / "reverse_prompt_custom.json"
+
+_reverse_prompt_custom: dict = {}
+
+
+def _load_reverse_prompt_custom() -> dict:
+    _ensure_data_dir()
+    if REVERSE_PROMPT_CUSTOM_FILE.exists():
+        try:
+            with open(REVERSE_PROMPT_CUSTOM_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return dict(data.get("prompts", {}))
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_reverse_prompt_custom(prompts: dict) -> None:
+    safe_json_save(REVERSE_PROMPT_CUSTOM_FILE, {"prompts": prompts})
+
+
+_reverse_prompt_custom = _load_reverse_prompt_custom()
+
+
+def get_reverse_prompt_custom(provider: str) -> str | None:
+    """返回指定服务商的自定义图反推提示词；未设置返回 None（调用方回退默认）。"""
+    return _reverse_prompt_custom.get(provider)
+
+
+def set_reverse_prompt_custom(provider: str, prompt: str) -> None:
+    """持久化写入某服务商的自定义图反推提示词（运行时即时生效）。"""
+    _reverse_prompt_custom[provider] = prompt
+    _save_reverse_prompt_custom(_reverse_prompt_custom)
+
+
+def reset_reverse_prompt_custom(provider: str) -> bool:
+    """清除某服务商的自定义提示词，回退默认。返回是否确有清除。"""
+    if provider in _reverse_prompt_custom:
+        del _reverse_prompt_custom[provider]
+        _save_reverse_prompt_custom(_reverse_prompt_custom)
+        return True
+    return False
+
+
 # ========== AI 自由发言群聊开关（默认关闭，依赖 AI 对话已开启） ==========
 # 与 AI 功能群开关同构，独立 JSON 文件，按群记录是否开启自由发言模式。
 # 自由发言模式下：无需 @，bot 基于最近 200 条群聊上下文自动接话。

@@ -33,6 +33,9 @@ from ..config import (
     is_novelai_group_enabled,
     enable_reverse_polish,
     disable_reverse_polish,
+    get_reverse_prompt_custom,
+    set_reverse_prompt_custom,
+    reset_reverse_prompt_custom,
 )
 from .utils import download_image
 from . import llm_providers
@@ -110,17 +113,41 @@ REVERSE_PROMPT_INSTRUCTION = REVERSE_PROMPT_INSTRUCTION_GROK
 def reverse_instruction(group_id: str = "") -> str:
     """按本群「图反推」所选服务商返回对应提示词。
 
+    优先返回运行时自定义的提示词（见「修改prompt」指令）；未设置则回退写死的默认：
     Grok / Gemini → 带画师串规则的完整版；DeepSeek（及任何非此二者） → 精简版。
     """
     try:
         provider = llm_providers.resolve_provider(str(group_id or ""), "reverse")
     except Exception:
         provider = "deepseek"
+    custom = get_reverse_prompt_custom(provider)
+    if custom:
+        return custom
     if provider == "grok":
         return REVERSE_PROMPT_INSTRUCTION_GROK
     if provider == "gemini":
         return REVERSE_PROMPT_INSTRUCTION_GEMINI
     return REVERSE_PROMPT_INSTRUCTION_DS
+
+
+# 图反推提示词运行时管理指令支持的「服务商」关键字（ds = deepseek）
+_REVERSE_PROMPT_PROVIDER_ALIAS = {
+    "ds": "deepseek",
+    "deepseek": "deepseek",
+    "grok": "grok",
+    "gemini": "gemini",
+}
+
+# 用于「查看prompt」回显默认提示词（与 reverse_instruction 的回退逻辑保持一致）
+_REVERSE_PROMPT_DEFAULT_BY_PROVIDER = {
+    "grok": REVERSE_PROMPT_INSTRUCTION_GROK,
+    "gemini": REVERSE_PROMPT_INSTRUCTION_GEMINI,
+    "deepseek": REVERSE_PROMPT_INSTRUCTION_DS,
+}
+
+
+def _default_prompt_for(provider: str) -> str:
+    return _REVERSE_PROMPT_DEFAULT_BY_PROVIDER.get(provider, REVERSE_PROMPT_INSTRUCTION_DS)
 
 # 触发关键字（任意位置出现即可，支持 @群友 前/后、引用等任意消息结构）
 REVERSE_KEYWORDS = ("图反推", "反推提示词", "图片反推", "提示词反推")
@@ -785,3 +812,129 @@ async def handle_reverse_ai_draw(
 
     # 4. 调 NovelAI 出图并合并转发发送（与 ai画图 一致，图片 + 提示词一起返回）
     await draw_prompt_to_image(bot, event, matcher, prompt)
+
+
+# ========== 图反推提示词运行时管理（仅超级用户，全局按服务商生效，无需重启 bot）==========
+# 默认提示词写死在 REVERSE_PROMPT_INSTRUCTION_*，本组指令允许超管在运行时覆盖/查看/重置，
+# 立即持久化到 reverse_prompt_custom.json 并生效，无需改代码重启。
+#   - 修改prompt <ds|grok|gemini> <新提示词> ：覆盖该服务商的图反推提示词（全局即时生效）
+#   - 查看prompt <ds|grok|gemini>           ：显示当前生效提示词（标注「自定义」或「默认」）
+#   - 重置prompt <ds|grok|gemini>           ：清除自定义，回退写死的默认
+# 注：提示词为全局（按服务商）配置，影响所有使用该服务商的群，故限超管。
+
+
+def _match_modify_prompt(text: str) -> tuple[str, str] | None:
+    """解析「修改prompt <服务商> <提示词>」。返回 (provider, prompt) 或 None。
+
+    prompt 允许为空（交由调用方判定为用法提示）。服务商非法时 provider="__invalid__"。
+    """
+    m = re.match(r"^修改prompt\s+(\S+)\s*([\s\S]*)$", text.strip())
+    if not m:
+        return None
+    alias = m.group(1).lower()
+    provider = _REVERSE_PROMPT_PROVIDER_ALIAS.get(alias)
+    if not provider:
+        return ("__invalid__", alias)
+    return (provider, m.group(2).strip())
+
+
+def _match_view_prompt(text: str) -> str | None:
+    """解析「查看prompt <服务商>」。返回 provider 或 "__invalid__" 或 None（非本指令）。"""
+    m = re.match(r"^查看prompt\s+(\S+)\s*$", text.strip())
+    if not m:
+        return None
+    alias = m.group(1).lower()
+    return _REVERSE_PROMPT_PROVIDER_ALIAS.get(alias, "__invalid__")
+
+
+def _match_reset_prompt(text: str) -> str | None:
+    """解析「重置prompt <服务商>」。返回 provider 或 "__invalid__" 或 None（非本指令）。"""
+    m = re.match(r"^重置prompt\s+(\S+)\s*$", text.strip())
+    if not m:
+        return None
+    alias = m.group(1).lower()
+    return _REVERSE_PROMPT_PROVIDER_ALIAS.get(alias, "__invalid__")
+
+
+def _is_prompt_manage_request(event: MessageEvent) -> bool:
+    """消息文本命中任一图反推提示词管理指令（修改/查看/重置）即触发。"""
+    text = _message_text(event).strip()
+    return (
+        bool(re.match(r"^修改prompt\s+", text))
+        or bool(re.match(r"^查看prompt\s+", text))
+        or bool(re.match(r"^重置prompt\s+", text))
+    )
+
+
+_PROVIDER_LABEL = {"deepseek": "DS（DeepSeek）", "grok": "Grok", "gemini": "Gemini"}
+
+PROMPT_MANAGE_HELP = (
+    "图反推提示词管理指令（仅超管可用）：\n"
+    "修改prompt <ds|grok|gemini> <新提示词> —— 覆盖该服务商的图反推提示词（全局即时生效）\n"
+    "查看prompt <ds|grok|gemini> —— 查看当前生效的提示词\n"
+    "重置prompt <ds|grok|gemini> —— 清除自定义，回退默认写死提示词"
+)
+
+
+prompt_manage_cmd = on_message(
+    rule=Rule(_is_prompt_manage_request),
+    permission=SUPERUSER,
+    priority=5,
+    block=True,
+)
+
+
+@prompt_manage_cmd.handle()
+async def handle_prompt_manage(matcher: Matcher, event: MessageEvent):
+    """超管在运行时管理图反推提示词（修改/查看/重置），无需重启 bot。"""
+    text = _message_text(event).strip()
+
+    # 1) 修改
+    if (mp := _match_modify_prompt(text)) is not None:
+        provider, prompt = mp
+        if provider == "__invalid__":
+            await matcher.finish(
+                f"未知服务商「{prompt}」。支持：ds（DeepSeek）、grok、gemini。\n{PROMPT_MANAGE_HELP}"
+            )
+        if not prompt:
+            await matcher.finish(
+                f"请提供新提示词。用法：\n修改prompt {provider} <新提示词>\n"
+                "（提示词为全局配置，影响所有使用该服务商的群）"
+            )
+        set_reverse_prompt_custom(provider, prompt)
+        await matcher.finish(
+            f"✅ 已更新 {_PROVIDER_LABEL.get(provider, provider)} 的图反推提示词，"
+            "全局即时生效，下一次图反推即使用新提示词（无需重启）。"
+        )
+
+    # 2) 查看
+    if (vp := _match_view_prompt(text)) is not None:
+        if vp == "__invalid__":
+            # 从原文取别名给出更友好提示
+            alias = re.match(r"^查看prompt\s+(\S+)", text)
+            await matcher.finish(
+                f"未知服务商「{(alias.group(1) if alias else '')}」。支持：ds（DeepSeek）、grok、gemini。"
+            )
+        custom = get_reverse_prompt_custom(vp)
+        if custom:
+            await matcher.finish(
+                f"【{_PROVIDER_LABEL.get(vp, vp)} 图反推提示词 · 自定义】\n\n{custom}"
+            )
+        await matcher.finish(
+            f"【{_PROVIDER_LABEL.get(vp, vp)} 图反推提示词 · 默认（写死）】\n\n{_default_prompt_for(vp)}"
+        )
+
+    # 3) 重置
+    if (rp := _match_reset_prompt(text)) is not None:
+        if rp == "__invalid__":
+            alias = re.match(r"^重置prompt\s+(\S+)", text)
+            await matcher.finish(
+                f"未知服务商「{(alias.group(1) if alias else '')}」。支持：ds（DeepSeek）、grok、gemini。"
+            )
+        if reset_reverse_prompt_custom(rp):
+            await matcher.finish(
+                f"✅ 已重置 {_PROVIDER_LABEL.get(rp, rp)} 的图反推提示词为默认（写死）值。"
+            )
+        await matcher.finish(
+            f"{_PROVIDER_LABEL.get(rp, rp)} 当前已是默认提示词，无需重置。"
+        )
