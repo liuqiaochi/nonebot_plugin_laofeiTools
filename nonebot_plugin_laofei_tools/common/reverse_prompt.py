@@ -92,7 +92,7 @@ REVERSE_PROMPT_INSTRUCTION = REVERSE_PROMPT_INSTRUCTION_GROK
 def reverse_instruction(group_id: str = "") -> str:
     """按本群「图反推」所选服务商返回对应提示词。
 
-    Grok → 带画师串规则的完整版；DeepSeek（及任何非 Grok） → 精简版。
+    Grok / Gemini → 带画师串规则的完整版；DeepSeek（及任何非此二者） → 精简版。
     """
     try:
         provider = llm_providers.resolve_provider(str(group_id or ""), "reverse")
@@ -100,7 +100,7 @@ def reverse_instruction(group_id: str = "") -> str:
         provider = "deepseek"
     return (
         REVERSE_PROMPT_INSTRUCTION_GROK
-        if provider == "grok"
+        if provider in ("grok", "gemini")
         else REVERSE_PROMPT_INSTRUCTION_DS
     )
 
