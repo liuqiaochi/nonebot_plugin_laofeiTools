@@ -38,7 +38,7 @@ class Config(BaseModel):
     # 走官方 OpenAI 兼容端点（base_url 见下），无需额外 SDK；
     # 联网可选走 Gemini 原生 Google Search grounding（见 common/gemini_web.py）。
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.5-flash"
+    gemini_model: str = "gemini-4-argon"
     # Gemini 接入地址（OpenAI 兼容）。默认官方 generativelanguage 的 openai 路径。
     # 注意：base_url 末尾不要带斜杠，OpenAI SDK 会自动拼接 /chat/completions。
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
