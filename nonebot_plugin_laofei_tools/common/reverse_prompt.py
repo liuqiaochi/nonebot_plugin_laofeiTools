@@ -9,6 +9,7 @@
 
 import asyncio
 import base64
+import time
 import json
 import re
 from io import BytesIO
@@ -36,8 +37,10 @@ from ..config import (
     get_reverse_prompt_custom,
     set_reverse_prompt_custom,
     reset_reverse_prompt_custom,
+    DATA_DIR,
 )
 from .utils import download_image
+from .data_utils import safe_json_save
 from . import llm_providers
 from .novelai_draw import draw_prompt_to_image
 
@@ -228,24 +231,104 @@ def _message_has_reasoning(message) -> bool:
     return False
 
 
-def _extract_vision_text(message) -> str:
+def _extract_vision_text(message) -> tuple[str, str]:
     """从视觉模型返回的 message 中提取反推文本。
 
+    返回 (text, source)，source 为内容来源：
+      - "content"           : 正常从 message.content 取得
+      - "reasoning_content" : 兜底从 DeepSeek 的 reasoning_content 取得
+      - "thought"/"reasoning": 兜底从 Gemini 等模型的 thought 段取得
+      - "none"              : 全空
     content 优先；若为空（Gemini 等模型默认开启 thinking、把结果写进 thought /
     reasoning 段导致 content 为空）则兜底从 reasoning_content / thought 段取，
     避免“请求成功但 content 空”被直接判失败。
     """
     content = getattr(message, "content", None) or ""
     if content.strip():
-        return content
+        return content, "content"
     for attr in ("reasoning_content", "thought", "reasoning"):
         val = getattr(message, attr, None)
         if val and str(val).strip():
             logger.warning(
                 f"[图反推] message.content 为空，从 message.{attr} 兜底提取反推文本"
             )
-            return str(val)
-    return ""
+            return str(val), attr
+    return "", "none"
+
+
+# ========== 图反推运行日志（记录完整请求与结果，供「反推日志」指令查看）==========
+REVERSE_LOG_FILE = DATA_DIR / "reverse_log.json"
+REVERSE_LOG_MAX = 200          # 最多保留最近 200 条，防止无限增长
+REVERSE_LOG_VIEW = 10          # 「反推日志」指令默认查看最近 10 条
+
+
+def _load_reverse_log() -> list:
+    """读取图反推日志（JSON 数组），损坏或缺失返回空列表。"""
+    try:
+        if REVERSE_LOG_FILE.exists():
+            with open(REVERSE_LOG_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                return data
+    except Exception as e:
+        logger.warning(f"[图反推日志] 读取失败: {e}")
+    return []
+
+
+def _log_reverse(entry: dict) -> None:
+    """记录一条图反推/反推AI图日志（最新在前，超出上限截断旧的）。
+
+    entry 字段建议：time/gid/uid/mode/provider/model/cmd/image/need_optimize/
+    raw/prompt/raw_src/artist_fixed/status/error/finish_reason。
+    """
+    try:
+        logs = _load_reverse_log()
+        logs.insert(0, entry)
+        if len(logs) > REVERSE_LOG_MAX:
+            logs = logs[:REVERSE_LOG_MAX]
+        # 不传 cache_is_empty：空列表是合法初始态，也应写入（避免误清空保护拦截）
+        safe_json_save(REVERSE_LOG_FILE, logs, cache_name="reverse_log")
+    except Exception as e:
+        logger.warning(f"[图反推日志] 写入失败: {e}")
+
+
+def _format_reverse_log(e: dict, idx: int) -> str:
+    """将一条日志格式化为可读文本（raw 过长截断，完整内容见 reverse_log.json）。"""
+    time_ = e.get("time", "?")
+    gid = e.get("gid") or "私聊"
+    uid = e.get("uid", "?")
+    mode = "反推AI图" if e.get("mode") == "ai_draw" else "图反推"
+    status = e.get("status", "?")
+    provider = e.get("provider", "?")
+    model = e.get("model", "?")
+    src = e.get("raw_src", "content")
+    artist = "是" if e.get("artist_fixed") else "否"
+    fr = e.get("finish_reason")
+    err = e.get("error", "")
+    img = e.get("image") or {}
+    img_desc = img.get("source", "?")
+    img_size = img.get("size_kb")
+    img_info = img_desc + (f"（约 {img_size}KB）" if img_size else "")
+    lines = [
+        f"#{idx}  {time_}  [{status}]",
+        f"群: {gid}  用户: {uid}  类型: {mode}",
+        f"服务商: {provider}  模型: {model}",
+        f"图片: {img_info}  指令: {e.get('cmd', '')}",
+        f"优化: {'是' if e.get('need_optimize') else '否'}  画师串修正: {artist}  来源: {src}"
+        + (f"  finish_reason: {fr}" if fr is not None else ""),
+    ]
+    if status == "fail":
+        lines.append(f"错误: {err}")
+    prompt = (e.get("prompt") or "").strip()
+    if prompt:
+        lines.append(f"最终提示词:\n{prompt}")
+    raw = (e.get("raw") or "").strip()
+    if raw:
+        # raw 可能极长（thought 段），QQ 单条 node 截断到 1500 字，完整见文件
+        if len(raw) > 1500:
+            raw = raw[:1500] + "\n…(已截断，完整原始返回见 reverse_log.json)"
+        lines.append(f"原始返回:\n{raw}")
+    return "\n".join(lines)
 
 
 # ========== NovelAI 画师串修正（移植自「画师串转换-web-v1.0.html」，仅 NAI 格式）==========
@@ -537,7 +620,7 @@ async def handle_reverse_prompt(
                 client.chat.completions.create,
                 **create_kwargs,
             )
-            raw = _extract_vision_text(response.choices[0].message)
+            raw, raw_src = _extract_vision_text(response.choices[0].message)
             prompt = _sanitize_reverse_prompt(raw)
             if prompt and prompt != raw.strip():
                 logger.info(
@@ -546,11 +629,39 @@ async def handle_reverse_prompt(
                 )
         except ValueError as e:
             # 服务商 API Key 未配置
+            _log_reverse({
+                "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "gid": gid, "uid": str(event.user_id),
+                "mode": "text",
+                "provider": llm_providers.resolve_provider(gid, "reverse"),
+                "model": "(未初始化)",
+                "cmd": _message_text(event).strip(),
+                "image": {"source": source_desc, "size_kb": None},
+                "need_optimize": need_optimize,
+                "raw": "", "prompt": "", "raw_src": "none",
+                "artist_fixed": False,
+                "status": "fail",
+                "error": f"配置错误：{e}",
+            })
             await matcher.finish(f"图反推配置错误：{e}")
             return
         except Exception as e:
             logger.error(f"图反推调用视觉模型失败: {e}")
             # 直接回显异常类型与信息便于排查，而非一律“请稍后再试”
+            _log_reverse({
+                "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "gid": gid, "uid": str(event.user_id),
+                "mode": "text",
+                "provider": llm_providers.resolve_provider(gid, "reverse"),
+                "model": "(未初始化)",
+                "cmd": _message_text(event).strip(),
+                "image": {"source": source_desc, "size_kb": None},
+                "need_optimize": need_optimize,
+                "raw": "", "prompt": "", "raw_src": "none",
+                "artist_fixed": False,
+                "status": "fail",
+                "error": f"{type(e).__name__}: {e}",
+            })
             await matcher.finish(f"反推失败：{type(e).__name__} - {e}")
             return
 
@@ -567,6 +678,21 @@ async def handle_reverse_prompt(
                 detail = f"（finish_reason={fr}，思考模式={has_reason}）"
             except Exception:
                 detail = ""
+            _log_reverse({
+                "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "gid": gid, "uid": str(event.user_id),
+                "mode": "text",
+                "provider": llm_providers.resolve_provider(gid, "reverse"),
+                "model": vision_model,
+                "cmd": _message_text(event).strip(),
+                "image": {"source": source_desc, "size_kb": None},
+                "need_optimize": need_optimize,
+                "raw": raw, "prompt": "", "raw_src": raw_src,
+                "artist_fixed": False,
+                "status": "fail",
+                "finish_reason": fr,
+                "error": f"空内容{detail}",
+            })
             await matcher.finish(f"未能反推出提示词，请换一张图重试{detail}")
             return
 
@@ -602,6 +728,19 @@ async def handle_reverse_prompt(
         parts.append("，可直接用于 NovelAI：")
         prefix = "".join(parts)
         msg.append(MessageSegment.text(f"{prefix}\n\n{prompt}"))
+        _log_reverse({
+            "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "gid": gid, "uid": str(event.user_id),
+            "mode": "text",
+            "provider": llm_providers.resolve_provider(gid, "reverse"),
+            "model": vision_model,
+            "cmd": _message_text(event).strip(),
+            "image": {"source": source_desc, "size_kb": None},
+            "need_optimize": need_optimize,
+            "raw": raw, "prompt": prompt, "raw_src": raw_src,
+            "artist_fixed": artist_fixed,
+            "status": "ok",
+        })
         await matcher.finish(msg)
 
 
@@ -873,6 +1012,19 @@ async def handle_reverse_ai_draw(
             prompt, _ = await _resolve_metadata_prompt(meta, need_optimize, gid)
             if prompt:
                 prompt, _ = correct_nai_artist_strings(prompt)
+                _log_reverse({
+                    "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "gid": gid, "uid": str(event.user_id),
+                    "mode": "ai_draw",
+                    "provider": llm_providers.resolve_provider(gid, "reverse"),
+                    "model": llm_providers.get_vision_model(gid, "reverse"),
+                    "cmd": _message_text(event).strip(),
+                    "image": {"source": source_desc, "size_kb": None},
+                    "need_optimize": need_optimize,
+                    "raw": "", "prompt": prompt, "raw_src": "nai_metadata",
+                    "artist_fixed": True,
+                    "status": "ok",
+                })
                 await draw_prompt_to_image(bot, event, matcher, prompt)
                 return
 
@@ -912,7 +1064,7 @@ async def handle_reverse_ai_draw(
                 client.chat.completions.create,
                 **create_kwargs,
             )
-            raw = _extract_vision_text(response.choices[0].message)
+            raw, raw_src = _extract_vision_text(response.choices[0].message)
             prompt = _sanitize_reverse_prompt(raw)
             if prompt and prompt != raw.strip():
                 logger.info(
@@ -920,10 +1072,38 @@ async def handle_reverse_ai_draw(
                     f"raw前40={raw[:40]!r}"
                 )
         except ValueError as e:
+            _log_reverse({
+                "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "gid": gid, "uid": str(event.user_id),
+                "mode": "ai_draw",
+                "provider": llm_providers.resolve_provider(gid, "reverse"),
+                "model": "(未初始化)",
+                "cmd": _message_text(event).strip(),
+                "image": {"source": source_desc, "size_kb": None},
+                "need_optimize": need_optimize,
+                "raw": "", "prompt": "", "raw_src": "none",
+                "artist_fixed": False,
+                "status": "fail",
+                "error": f"配置错误：{e}",
+            })
             await matcher.finish(f"反推AI图 配置错误：{e}")
             return
         except Exception as e:
             logger.error(f"反推AI图 视觉调用失败: {e}")
+            _log_reverse({
+                "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "gid": gid, "uid": str(event.user_id),
+                "mode": "ai_draw",
+                "provider": llm_providers.resolve_provider(gid, "reverse"),
+                "model": "(未初始化)",
+                "cmd": _message_text(event).strip(),
+                "image": {"source": source_desc, "size_kb": None},
+                "need_optimize": need_optimize,
+                "raw": "", "prompt": "", "raw_src": "none",
+                "artist_fixed": False,
+                "status": "fail",
+                "error": f"{type(e).__name__}: {e}",
+            })
             await matcher.finish(f"反推失败：{type(e).__name__} - {e}")
             return
 
@@ -935,6 +1115,21 @@ async def handle_reverse_ai_draw(
                 detail = f"（finish_reason={fr}，思考模式={has_reason}）"
             except Exception:
                 detail = ""
+            _log_reverse({
+                "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "gid": gid, "uid": str(event.user_id),
+                "mode": "ai_draw",
+                "provider": llm_providers.resolve_provider(gid, "reverse"),
+                "model": vision_model,
+                "cmd": _message_text(event).strip(),
+                "image": {"source": source_desc, "size_kb": None},
+                "need_optimize": need_optimize,
+                "raw": raw, "prompt": "", "raw_src": raw_src,
+                "artist_fixed": False,
+                "status": "fail",
+                "finish_reason": fr,
+                "error": f"空内容{detail}",
+            })
             await matcher.finish(f"未能反推出提示词，请换一张图重试{detail}")
             return
 
@@ -949,9 +1144,22 @@ async def handle_reverse_ai_draw(
                 await matcher.send(f"提示词优化失败（{type(e).__name__}），使用原始反推词出图")
 
     # 3.3 画师串修正（与图反推文本结果同一套逻辑），规整后再出图
-    prompt, _ = correct_nai_artist_strings(prompt)
+    prompt, artist_fixed = correct_nai_artist_strings(prompt)
 
     # 4. 调 NovelAI 出图并合并转发发送（与 ai画图 一致，图片 + 提示词一起返回）
+    _log_reverse({
+        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "gid": gid, "uid": str(event.user_id),
+        "mode": "ai_draw",
+        "provider": llm_providers.resolve_provider(gid, "reverse"),
+        "model": vision_model,
+        "cmd": _message_text(event).strip(),
+        "image": {"source": source_desc, "size_kb": None},
+        "need_optimize": need_optimize,
+        "raw": raw, "prompt": prompt, "raw_src": raw_src,
+        "artist_fixed": artist_fixed,
+        "status": "ok",
+    })
     await draw_prompt_to_image(bot, event, matcher, prompt)
 
 
@@ -1079,3 +1287,72 @@ async def handle_prompt_manage(matcher: Matcher, event: MessageEvent):
         await matcher.finish(
             f"{_PROVIDER_LABEL.get(rp, rp)} 当前已是默认提示词，无需重置。"
         )
+
+
+# ========== 图反推运行日志查看（最近 10 条，供排查）==========
+REVERSE_LOG_KEYWORDS = ("图反推日志", "反推日志", "reverse日志", "查看反推日志")
+
+
+async def _is_reverse_log_request(event) -> bool:
+    """自定义规则：消息文本归一化后须精确等于日志查看指令。"""
+    for seg in event.message:
+        if seg.type == "text":
+            text = seg.data.get("text", "") or ""
+            if _is_exact_command(text, REVERSE_LOG_KEYWORDS):
+                return True
+    return False
+
+
+reverse_log_cmd = on_message(
+    rule=Rule(_is_reverse_log_request),
+    priority=5,
+    block=True,
+)
+
+
+@reverse_log_cmd.handle()
+async def handle_reverse_log(matcher, bot, event):
+    """查看最近 10 条图反推/反推AI图日志（含完整请求与结果摘要，合并转发呈现）。"""
+    gid = str(event.group_id) if getattr(event, "group_id", None) is not None else ""
+    logs = _load_reverse_log()
+    if gid:
+        # 群聊只显示本群日志
+        logs = [e for e in logs if e.get("gid") == gid]
+    logs = logs[:REVERSE_LOG_VIEW]
+    if not logs:
+        await matcher.finish("暂无图反推日志。")
+
+    bot_name = "蓝色大肥鱼"
+    try:
+        bot_info = await bot.get_login_info()
+        bot_name = bot_info.get("nickname", "蓝色大肥鱼")
+    except Exception:
+        pass
+    group_id = getattr(event, "group_id", None)
+
+    # 群聊：合并转发，每条日志一个 node（完整可读）
+    if group_id:
+        nodes = []
+        for i, e in enumerate(logs, 1):
+            nodes.append({
+                "type": "node",
+                "data": {
+                    "name": bot_name,
+                    "uin": bot.self_id,
+                    "content": str(MessageSegment.text(_format_reverse_log(e, i))),
+                },
+            })
+        try:
+            await asyncio.wait_for(
+                bot.call_api("send_group_forward_msg", group_id=group_id, messages=nodes),
+                timeout=90,
+            )
+        except Exception as ex:
+            logger.error(f"反推日志合并转发失败: {ex}")
+            await matcher.send("⚠️ 日志合并转发发送失败，请稍后重试或直接查看服务器 reverse_log.json")
+        await matcher.finish()
+        return
+
+    # 私聊（无 group_id）：降级为单条文本摘要（raw 已截断，完整见服务器文件）
+    summary = "\n\n".join(_format_reverse_log(e, i) for i, e in enumerate(logs, 1))
+    await matcher.finish(f"图反推日志（最近 {len(logs)} 条）：\n\n{summary}")

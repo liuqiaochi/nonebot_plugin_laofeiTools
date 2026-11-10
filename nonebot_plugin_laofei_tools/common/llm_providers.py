@@ -203,9 +203,15 @@ def get_vision_model(group_id: str, usage: str) -> str:
 
 
 def get_vision_extra_body(group_id: str, usage: str) -> dict:
-    """视觉模型额外参数：DeepSeek 需关闭思考模式；Grok 无需。"""
-    spec = _provider_spec(resolve_provider(group_id, usage))
-    return {"thinking": {"type": "disabled"}} if spec["thinking_disable"] else {}
+    """视觉模型额外参数：DeepSeek 需关闭思考模式；Gemini 默认开启 thinking 且无法关闭，
+    显式降到最低推理预算以减少 thought 噪声、省 token；Grok 无需。"""
+    provider = resolve_provider(group_id, usage)
+    spec = _provider_spec(provider)
+    if spec["thinking_disable"]:
+        return {"thinking": {"type": "disabled"}}
+    if provider == "gemini":
+        return {"reasoning_effort": "minimal"}
+    return {}
 
 
 # ---------------- Grok 思考强度（提速） ----------------
