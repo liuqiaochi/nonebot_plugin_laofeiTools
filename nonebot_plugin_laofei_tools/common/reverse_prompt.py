@@ -213,6 +213,103 @@ def _sanitize_reverse_prompt(text: str) -> str:
     return re.sub(r"\n{2,}", "\n", stripped).strip()
 
 
+# ========== NovelAI 画师串修正（移植自「画师串转换-web-v1.0.html」，仅 NAI 格式）==========
+# 图反推结果常含 NovelAI 画师串（weight::artist:name::），LLM 偶尔会写出名字带空格、
+# 漏写词末 _、混用 artist: 标记、把整名用 () 包住等问题。这里在发出结果前统一规整为合法
+# NAI 格式：名字内空格->_、词末 :: 前强制补 _、整名被 () 包住则去括号、artist: 大小写归一。
+# 仅作用于形如 [权重::]::[artist:]名字:: 的画师 token；其余普通 tag 原样保留，不改语义。
+# 与 HTML 同构：提取用 _nai_plain（_ -> 空格、去词末空格），写入用 _nai_out_name（空格 -> _、补词末 _），
+# 二者互为逆且幂等——已正确的画师串再跑一遍不会被改坏。
+
+def _nai_plain(s: str) -> str:
+    """提取 NovelAI 画师名：所有 _ 转为空格，并删去词末空格（与写入规则互逆）。"""
+    return str(s).rstrip(" \t").replace("_", " ")
+
+
+def _nai_out_name(s: str) -> str:
+    """写入 NovelAI 画师名：空格 -> _，并在词末 :: 前强制补一个 _（幂等）。"""
+    return str(s).rstrip(" \t").replace(" ", "_") + "_"
+
+
+def _unwrap_paren(s: str) -> str:
+    """整个画师名被一对 () 包住时删去括号（可多层）；内部括号不处理。"""
+    s = str(s)
+    while len(s) >= 2 and s[0] == "(" and s[-1] == ")":
+        depth = 0
+        wrap = True
+        for i, ch in enumerate(s):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0 and i != len(s) - 1:
+                    wrap = False
+                    break
+        if not wrap or depth != 0:
+            break
+        inner = s[1:-1].strip()
+        if not inner:
+            break
+        s = inner
+    return s
+
+
+# 画师 token 判定：可选[权重::] + 可选 artist: + 名字 + 闭合 ::（artist: 大小写不敏感）
+_NAI_ARTIST_RE = re.compile(
+    r"^\s*(?:(\d+(?:\.\d+)?)\s*)?::((?:artist:)?)(.*?)::\s*$",
+    re.IGNORECASE,
+)
+
+
+def _correct_one_artist_token(tok: str) -> str:
+    """修正单个画师 token。非 NAI 画师串（无闭合 ::）原样返回。"""
+    m = _NAI_ARTIST_RE.match(tok)
+    if not m:
+        return tok
+    weight, has_artist, body = m.group(1), m.group(2), m.group(3)
+    # 名字 = 闭合 :: 之前的部分；若内部仍混入多余 ::，取最后一个 :: 之前（与 HTML lastIndexOf 一致）
+    name = body
+    if "::" in name:
+        name = name[: name.rfind("::")]
+    name = _unwrap_paren(name.strip())
+    if not name:
+        return tok
+    # 先提取(->空格)再写入(->下划线+词末_)，保证幂等
+    name = _nai_out_name(_nai_plain(name))
+    # 权重校验：须落在 (0.1, 10)，否则视为未给（省略权重前缀）
+    if weight:
+        try:
+            v = float(weight)
+            if not (0.1 < v < 10):
+                weight = ""
+        except ValueError:
+            weight = ""
+    marker = "artist:" if has_artist else ""
+    if weight:
+        return f"{weight}::{marker}{name}::"
+    return f"::{marker}{name}::"
+
+
+def correct_nai_artist_strings(prompt: str):
+    """修正提示词中所有 NovelAI 画师串；非画师 token 原样保留。
+
+    返回 (修正后文本, 是否发生过修正)。逗号及逗号后的空格原样保留，仅规整画师 token 本身。
+    """
+    if not prompt:
+        return prompt, False
+    changed = False
+    out = []
+    for p in re.split(r"(,\s*)", prompt):
+        if p and p[0] == ",":
+            out.append(p)  # 分隔符（含其后空格）原样保留
+        else:
+            fixed = _correct_one_artist_token(p)
+            if fixed != p:
+                changed = True
+            out.append(fixed)
+    return "".join(out), changed
+
+
 # ========== NovelAI 嵌入元数据提取（先读图内自带 prompt/seed，命中则跳过视觉反推）==========
 # 依据：NovelAI 官方 novelai-image-metadata 与社区工具印证，NA 生成图会写入嵌入信息，主要有两类：
 #  1) 传统 PNG 文本块：Software="NovelAI"、Description=正向提示词、Comment=JSON(uc/seed/steps/scale/sampler...)
@@ -453,6 +550,9 @@ async def handle_reverse_prompt(
                 # 优化失败不阻断主流程，回退原始反推词并提示
                 await matcher.send(f"提示词优化失败（{type(e).__name__}），返回原始反推词")
 
+        # 3.6 画师串修正：结果含 NAI 画师串（weight::artist:name::）时统一规整为合法格式
+        prompt, artist_fixed = correct_nai_artist_strings(prompt)
+
         # 4. 返回结果（直接返回文本便于复制）
         msg = Message()
         if getattr(event, "message_id", None):
@@ -462,6 +562,8 @@ async def handle_reverse_prompt(
             parts.append(f"（来自{source_desc}）")
         if optimized_flag:
             parts.append("（已用 DeepSeek 润色）")
+        if artist_fixed:
+            parts.append("（画师串已自动修正）")
         parts.append("，可直接用于 NovelAI：")
         prefix = "".join(parts)
         msg.append(MessageSegment.text(f"{prefix}\n\n{prompt}"))
@@ -735,6 +837,7 @@ async def handle_reverse_ai_draw(
         if meta and meta.get("prompt"):
             prompt, _ = await _resolve_metadata_prompt(meta, need_optimize, gid)
             if prompt:
+                prompt, _ = correct_nai_artist_strings(prompt)
                 await draw_prompt_to_image(bot, event, matcher, prompt)
                 return
 
@@ -809,6 +912,9 @@ async def handle_reverse_ai_draw(
             except Exception as e:
                 logger.error(f"反推AI图 优化失败: {e}")
                 await matcher.send(f"提示词优化失败（{type(e).__name__}），使用原始反推词出图")
+
+    # 3.3 画师串修正（与图反推文本结果同一套逻辑），规整后再出图
+    prompt, _ = correct_nai_artist_strings(prompt)
 
     # 4. 调 NovelAI 出图并合并转发发送（与 ai画图 一致，图片 + 提示词一起返回）
     await draw_prompt_to_image(bot, event, matcher, prompt)
