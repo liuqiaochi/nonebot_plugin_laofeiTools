@@ -278,8 +278,9 @@ def _load_reverse_log() -> list:
 def _log_reverse(entry: dict) -> None:
     """记录一条图反推/反推AI图日志（最新在前，超出上限截断旧的）。
 
-    entry 字段建议：time/gid/uid/mode/provider/model/cmd/image/need_optimize/
+    entry 字段建议：time/gid/uid/mode/provider/model/cmd/request/image/need_optimize/
     raw/prompt/raw_src/artist_fixed/status/error/finish_reason。
+    request 为发给视觉模型的「请求 prompt」文本（reverse_instruction(gid)），不含图片二进制。
     """
     try:
         logs = _load_reverse_log()
@@ -317,6 +318,13 @@ def _format_reverse_log(e: dict, idx: int) -> str:
         f"优化: {'是' if e.get('need_optimize') else '否'}  画师串修正: {artist}  来源: {src}"
         + (f"  finish_reason: {fr}" if fr is not None else ""),
     ]
+    req = e.get("request")
+    if req:
+        req_s = str(req)
+        # 反推指令可能较长，QQ 单条 node 截断到 1500 字，完整见 reverse_log.json
+        if len(req_s) > 1500:
+            req_s = req_s[:1500] + "\n…(已截断，完整请求见 reverse_log.json)"
+        lines.append(f"请求 prompt:\n{req_s}")
     if status == "fail":
         lines.append(f"错误: {err}")
     prompt = (e.get("prompt") or "").strip()
@@ -636,6 +644,7 @@ async def handle_reverse_prompt(
                 "provider": llm_providers.resolve_provider(gid, "reverse"),
                 "model": "(未初始化)",
                 "cmd": _message_text(event).strip(),
+                "request": reverse_instruction(gid),
                 "image": {"source": source_desc, "size_kb": None},
                 "need_optimize": need_optimize,
                 "raw": "", "prompt": "", "raw_src": "none",
@@ -655,6 +664,7 @@ async def handle_reverse_prompt(
                 "provider": llm_providers.resolve_provider(gid, "reverse"),
                 "model": "(未初始化)",
                 "cmd": _message_text(event).strip(),
+                "request": reverse_instruction(gid),
                 "image": {"source": source_desc, "size_kb": None},
                 "need_optimize": need_optimize,
                 "raw": "", "prompt": "", "raw_src": "none",
@@ -685,6 +695,7 @@ async def handle_reverse_prompt(
                 "provider": llm_providers.resolve_provider(gid, "reverse"),
                 "model": vision_model,
                 "cmd": _message_text(event).strip(),
+                "request": reverse_instruction(gid),
                 "image": {"source": source_desc, "size_kb": None},
                 "need_optimize": need_optimize,
                 "raw": raw, "prompt": "", "raw_src": raw_src,
@@ -735,6 +746,7 @@ async def handle_reverse_prompt(
             "provider": llm_providers.resolve_provider(gid, "reverse"),
             "model": vision_model,
             "cmd": _message_text(event).strip(),
+            "request": reverse_instruction(gid),
             "image": {"source": source_desc, "size_kb": None},
             "need_optimize": need_optimize,
             "raw": raw, "prompt": prompt, "raw_src": raw_src,
@@ -1019,6 +1031,7 @@ async def handle_reverse_ai_draw(
                     "provider": llm_providers.resolve_provider(gid, "reverse"),
                     "model": llm_providers.get_vision_model(gid, "reverse"),
                     "cmd": _message_text(event).strip(),
+                "request": reverse_instruction(gid),
                     "image": {"source": source_desc, "size_kb": None},
                     "need_optimize": need_optimize,
                     "raw": "", "prompt": prompt, "raw_src": "nai_metadata",
@@ -1079,6 +1092,7 @@ async def handle_reverse_ai_draw(
                 "provider": llm_providers.resolve_provider(gid, "reverse"),
                 "model": "(未初始化)",
                 "cmd": _message_text(event).strip(),
+                "request": reverse_instruction(gid),
                 "image": {"source": source_desc, "size_kb": None},
                 "need_optimize": need_optimize,
                 "raw": "", "prompt": "", "raw_src": "none",
@@ -1097,6 +1111,7 @@ async def handle_reverse_ai_draw(
                 "provider": llm_providers.resolve_provider(gid, "reverse"),
                 "model": "(未初始化)",
                 "cmd": _message_text(event).strip(),
+                "request": reverse_instruction(gid),
                 "image": {"source": source_desc, "size_kb": None},
                 "need_optimize": need_optimize,
                 "raw": "", "prompt": "", "raw_src": "none",
@@ -1122,6 +1137,7 @@ async def handle_reverse_ai_draw(
                 "provider": llm_providers.resolve_provider(gid, "reverse"),
                 "model": vision_model,
                 "cmd": _message_text(event).strip(),
+                "request": reverse_instruction(gid),
                 "image": {"source": source_desc, "size_kb": None},
                 "need_optimize": need_optimize,
                 "raw": raw, "prompt": "", "raw_src": raw_src,
@@ -1154,6 +1170,7 @@ async def handle_reverse_ai_draw(
         "provider": llm_providers.resolve_provider(gid, "reverse"),
         "model": vision_model,
         "cmd": _message_text(event).strip(),
+        "request": reverse_instruction(gid),
         "image": {"source": source_desc, "size_kb": None},
         "need_optimize": need_optimize,
         "raw": raw, "prompt": prompt, "raw_src": raw_src,
