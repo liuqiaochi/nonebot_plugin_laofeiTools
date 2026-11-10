@@ -207,14 +207,14 @@ def get_vision_extra_body(group_id: str, usage: str) -> dict:
     显式降到最低推理预算以减少 thought 噪声、省 token；Grok 无需。
 
     注意：Gemini 的 reasoning_effort 仅支持 low/medium/high（minimal 仅 Gemini 3 Flash /
-    3.1 Flash-Lite 支持，4 系传 minimal 会 400）。这里统一用 low（全系列支持的最低档）。
+    3.1 Flash-Lite 支持，4 系传 minimal 会 400）。这里统一用 medium（平衡档，全系列支持）。
     """
     provider = resolve_provider(group_id, usage)
     spec = _provider_spec(provider)
     if spec["thinking_disable"]:
         return {"thinking": {"type": "disabled"}}
     if provider == "gemini":
-        return {"reasoning_effort": "low"}
+        return {"reasoning_effort": "medium"}
     return {}
 
 
