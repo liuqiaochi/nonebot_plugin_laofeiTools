@@ -3,8 +3,8 @@ NoneBot 指令处理
 
 指令：
     lg搜图 - 以图搜图（后端 soutubot.moe，动漫/本子垂直库），群聊可用、需先开启
-    lg找姬 - 反向图片搜索（走 mac 侧浏览器 sidecar + Google Lens，能搜 x.com 等站点）；默认干净合并转发返回
-    lg找姬 调试 - 同上，但合并转发逐条列出每个候选与调试信息（仅超管）
+    lg找姬 - 反向图片搜索（走 mac 侧浏览器 sidecar + Google Lens，能搜 x.com 等站点）；默认干净合并转发、多结果返回
+    lg找姬 调试 - 同上，但合并转发逐条列出每个候选（含弱证据标 ⚠️）与调试信息（仅超管）
     开启lg搜图 / 关闭lg搜图 - 超级用户管理群聊搜图功能
 
 图片输入：两条指令均支持「同条消息带图」或「引用一条图片消息」。
@@ -202,7 +202,7 @@ async def _send_find_forward(
     """把找姬结果以合并转发发出。
 
     两种形态：
-    - 正式模式（debug=False，默认 `lg找姬`）：标题节点 + 只给最可信的那一位，
+    - 正式模式（debug=False，默认 `lg找姬`）：标题节点 + **多结果**列出全部非弱证据候选，
       **不含任何调试信息**（无原始账号、无调试 JSON、无耗时/来源），弱证据不露面。
     - 调试模式（debug=True，`lg找姬 调试` 仅超管）：标题节点标注调试 + 来源/耗时，
       逐条列全部候选（弱证据标 ⚠️），再附 sidecar 原始账号、末节点附调试 JSON ——
@@ -296,17 +296,17 @@ async def _send_find_forward(
             head.append(detail.get("message") or "没找到姬 😢")
             nodes.append(_forward_node(bot, "找姬结果", "\n".join(head)))
         else:
-            head.append("（已为你锁定最可信的一位）")
+            head.append(f"（已为你锁定 {len(strong)} 位最可信的候选）")
             nodes.append(_forward_node(bot, "找姬结果", "\n".join(head)))
-            it = strong[0]
-            lines = [
-                f"#1 {it['platform']}",
-                f"👤 名字：{it['name']}",
-                f"🆔 账号：@{it['handle']}",
-            ]
-            if it.get("url"):
-                lines.append(it["url"])
-            nodes.append(_forward_node(bot, f"候选1·{it['platform']}", "\n".join(lines)))
+            for i, it in enumerate(strong, 1):
+                lines = [
+                    f"#{i} {it['platform']}",
+                    f"👤 名字：{it['name']}",
+                    f"🆔 账号：@{it['handle']}",
+                ]
+                if it.get("url"):
+                    lines.append(it["url"])
+                nodes.append(_forward_node(bot, f"候选{i}·{it['platform']}", "\n".join(lines)))
 
     await bot.call_api(
         "send_group_forward_msg",
@@ -334,10 +334,10 @@ async def handle_find_chicken(
     """处理找姬指令（mac 侧浏览器 sidecar + Google Lens 反向图片搜索）
 
     两种模式（结果都以合并转发形式返回）：
-    - `lg找姬`：干净的合并转发，只给最可信的那位（弱证据不露面），**不含任何调试信息**，
-      保持准确率优先。
+    - `lg找姬`：干净的合并转发，**多结果**列出全部非弱证据候选（弱证据不露面），**不含任何
+      调试信息**。
     - `lg找姬 调试`：合并转发逐条列出全部候选（弱证据标 ⚠️）+ sidecar 原始账号 + 调试 JSON，
-      **仅超管**；普通群员发这个也只会收到正式的一条结论。
+      **仅超管**；普通群员发这个也只会收到正式的多结果结论。
     """
     # 1. 私聊不可用
     if isinstance(event, PrivateMessageEvent):
@@ -387,7 +387,7 @@ async def handle_find_chicken(
         return
 
     # 两种模式结果都以合并转发返回：
-    # - 默认 `lg找姬`：干净合并转发，只给最可信的那位，**不含调试信息**；
+    # - 默认 `lg找姬`：干净合并转发，**多结果**列出全部非弱证据候选，**不含调试信息**；
     # - `lg找姬 调试`（仅超管）：合并转发逐条列全部候选 + 原始账号 + 调试 JSON。
     # 调试**只给超管**：普通群员发「lg找姬 调试」也走正式干净转发，不提示不报错。
     debug = False
@@ -760,7 +760,7 @@ async def handle_search_help(matcher: Matcher, event: MessageEvent):
     sections = [
         ("搜图指令", [
             ("lg搜图", "动漫/本子反搜（soutubot）"),
-            ("lg找姬", "全站反搜，只回一条最可信的"),
+            ("lg找姬", "全站反搜，多结果返回"),
         ]),
         ("管理指令", [
             ("开启lg搜图", "开启搜图功能（超管）"),

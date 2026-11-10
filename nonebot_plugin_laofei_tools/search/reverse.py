@@ -5,7 +5,7 @@
 1. QQ 图下载到内存后，压到长边 1600 / JPEG q88；
 2. 把字节 POST 给常驻 mac 的 Node 服务（server.mjs 的 /find?max=N）；
 3. mac 那边用真实 Chrome 上传 Google Lens、解析结果、按证据强度排序；
-4. 本模块把返回的账号列表转成一条短文本（正式模式）或结构化 items（调试模式）。
+4. 本模块把返回的账号列表转成结构化 items，再由 commands 渲染成合并转发（正式模式多结果、调试模式含全部候选与调试信息）。
 
 为什么不在 Ubuntu 上直连：bot 跑在无 GUI 的虚拟机里，起不了浏览器，也就没法
 上传 Lens；mac 上有真实浏览器、链路已跑通。做成独立服务还带来进程隔离
@@ -241,7 +241,7 @@ async def search_via_sidecar(image_bytes: bytes, cfg: dict) -> dict:
         headers["x-fish-token"] = token
     # 过局域网前先压图：QQ 原图常 8MB+，传过去再给浏览器上传会很慢
     payload = shrink_for_upload(image_bytes)
-    # 一次多要几个：正式模式只取第一条，但「lg找姬 调试」要逐条列出来对照。
+    # 一次多要几个：正式与调试都逐条列出候选，多要几个才有得挑。
     max_items = max(1, int(cfg.get("max_results") or 5))
 
     try:
@@ -336,16 +336,20 @@ def render_parts(detail: dict) -> dict:
 
     返回 {"title": 标题, "body": 正文, "image": 本地图片路径或 None}；
     没有可信候选时返回 {"text": 说明文本}，调用方直接发这条文本即可。
+
+    body 现在列出**全部非弱证据候选**（多结果），用空行分隔；与正式合并转发的
+    多结果语义保持一致（弱证据不露面，避免报错人）。这是合并转发发送失败时的
+    单条兜底形态，正常路径请走 commands._send_find_forward 的合并转发多节点。
     """
     items = detail.get("items") or []
-    if detail.get("ok") and items:
-        for it in items:
-            if not it.get("weak"):
-                return {
-                    "title": RESULT_TITLE,
-                    "body": _render_body(it),
-                    "image": finded_image_path(),
-                }
+    strong = [it for it in items if not it.get("weak")]
+    if strong:
+        body = "\n\n".join(_render_body(it) for it in strong)
+        return {
+            "title": RESULT_TITLE,
+            "body": body,
+            "image": finded_image_path(),
+        }
     return {"text": detail.get("message") or "没找到姬 😢"}
 
 
@@ -355,9 +359,9 @@ def _sidecar_items(accounts: list) -> list:
     sidecar（mac 侧浏览器）那边已经按「这条号出自第几条搜索结果」「是不是被别人
     @ 的图上主角」「是不是卡片文本猜的」排好序了。这里**不能**再按平台权重重排：
     之前重排成 twitter 优先，只要结果里有个无关推特号，就会把真正的 Instagram /
-    微博作者挤到后面 —— 单条结果模式于是报错人。现在只做两件事：
+    微博作者挤到后面 —— 只取单条时于是报错人。现在只做两件事：
     1) 丢掉镜像站（sotwe / twstalker…）的号；
-    2) 把 confidence=weak（卡片文本猜的）沉到最后，其余保持原顺序。
+    2) 把 confidence=weak（卡片文本猜的）沉到最后，正式模式不展示弱证据（避免报错人），其余保持原顺序。
     """
     packed = []
     for index, a in enumerate(accounts or []):
