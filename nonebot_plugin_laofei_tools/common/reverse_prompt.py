@@ -213,6 +213,41 @@ def _sanitize_reverse_prompt(text: str) -> str:
     return re.sub(r"\n{2,}", "\n", stripped).strip()
 
 
+# ========== 视觉模型返回内容提取（兼容 Gemini 默认 thinking 把结果落在 thought 段）==========
+def _message_has_reasoning(message) -> bool:
+    """判断视觉模型响应是否包含思考/推理内容。
+
+    DeepSeek 走 ``reasoning_content``；Gemini 在 OpenAI 兼容端点默认开启 thinking 时，
+    结果可能落在 ``thought`` / ``reasoning`` 等非标准字段。此处一并检测，避免把
+    “思考模式=False” 误判（Gemini 不返回 reasoning_content，旧判断永远为 False）。
+    """
+    for attr in ("reasoning_content", "thought", "reasoning"):
+        val = getattr(message, attr, None)
+        if val and str(val).strip():
+            return True
+    return False
+
+
+def _extract_vision_text(message) -> str:
+    """从视觉模型返回的 message 中提取反推文本。
+
+    content 优先；若为空（Gemini 等模型默认开启 thinking、把结果写进 thought /
+    reasoning 段导致 content 为空）则兜底从 reasoning_content / thought 段取，
+    避免“请求成功但 content 空”被直接判失败。
+    """
+    content = getattr(message, "content", None) or ""
+    if content.strip():
+        return content
+    for attr in ("reasoning_content", "thought", "reasoning"):
+        val = getattr(message, attr, None)
+        if val and str(val).strip():
+            logger.warning(
+                f"[图反推] message.content 为空，从 message.{attr} 兜底提取反推文本"
+            )
+            return str(val)
+    return ""
+
+
 # ========== NovelAI 画师串修正（移植自「画师串转换-web-v1.0.html」，仅 NAI 格式）==========
 # 图反推结果常含 NovelAI 画师串（weight::artist:name::），LLM 偶尔会写出名字带空格、
 # 漏写词末 _、混用 artist: 标记、把整名用 () 包住等问题。这里在发出结果前统一规整为合法
@@ -502,7 +537,7 @@ async def handle_reverse_prompt(
                 client.chat.completions.create,
                 **create_kwargs,
             )
-            raw = response.choices[0].message.content or ""
+            raw = _extract_vision_text(response.choices[0].message)
             prompt = _sanitize_reverse_prompt(raw)
             if prompt and prompt != raw.strip():
                 logger.info(
@@ -524,10 +559,10 @@ async def handle_reverse_prompt(
             try:
                 choice = response.choices[0]
                 fr = getattr(choice, "finish_reason", None)
-                has_reason = bool(getattr(choice.message, "reasoning_content", None))
+                has_reason = _message_has_reasoning(choice.message)
                 logger.warning(
                     f"图反推返回空内容: model={vision_model}, finish_reason={fr}, "
-                    f"有reasoning_content={has_reason}（多为视觉模型思考模式耗尽预算）"
+                    f"有思考内容={has_reason}（多为视觉模型 thinking 把结果写在 thought 段或安全过滤清空 content）"
                 )
                 detail = f"（finish_reason={fr}，思考模式={has_reason}）"
             except Exception:
@@ -877,7 +912,7 @@ async def handle_reverse_ai_draw(
                 client.chat.completions.create,
                 **create_kwargs,
             )
-            raw = response.choices[0].message.content or ""
+            raw = _extract_vision_text(response.choices[0].message)
             prompt = _sanitize_reverse_prompt(raw)
             if prompt and prompt != raw.strip():
                 logger.info(
@@ -896,7 +931,7 @@ async def handle_reverse_ai_draw(
             try:
                 choice = response.choices[0]
                 fr = getattr(choice, "finish_reason", None)
-                has_reason = bool(getattr(choice.message, "reasoning_content", None))
+                has_reason = _message_has_reasoning(choice.message)
                 detail = f"（finish_reason={fr}，思考模式={has_reason}）"
             except Exception:
                 detail = ""
