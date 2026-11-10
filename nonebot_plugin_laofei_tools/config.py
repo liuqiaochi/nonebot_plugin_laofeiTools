@@ -57,10 +57,6 @@ class Config(BaseModel):
     # -> 2026-10-31 起 SerpApi 也去掉了，只剩 mac 侧浏览器 sidecar 一条路。
     longge_reverse_timeout: int = 25        # 单次请求超时（秒）
     longge_reverse_max_results: int = 5     # 向 sidecar 索取的候选数量上限（调试模式会逐条列出）
-    # 全局调试开关：True 时所有 lg找姬 都走「合并转发」分多项展示。
-    # 日常保持 False —— 正式模式只回一条最可信的结论；
-    # 想临时看多项时直接在群里发「lg找姬 调试」，不用改配置。
-    longge_reverse_debug_forward: bool = False
 
     # ---- lg找姬 的唯一引擎：mac 侧浏览器 sidecar（项目根目录 server.mjs）----
     # bot 跑在无 GUI 的 Ubuntu 虚拟机里，直连 Google Lens 需要真实浏览器，

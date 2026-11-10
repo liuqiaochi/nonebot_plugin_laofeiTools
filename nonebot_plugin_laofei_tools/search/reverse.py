@@ -93,8 +93,6 @@ _CFG_ATTRS = {
     "sidecar_url": ("lens_sidecar_url", ""),
     "sidecar_token": ("lens_sidecar_token", ""),
     "sidecar_timeout": ("lens_sidecar_timeout", 90),
-    # 调试：结果走合并转发展示多项
-    "debug_forward": ("longge_reverse_debug_forward", False),
 }
 
 

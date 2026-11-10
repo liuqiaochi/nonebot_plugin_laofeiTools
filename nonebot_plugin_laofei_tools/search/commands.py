@@ -3,8 +3,8 @@ NoneBot 指令处理
 
 指令：
     lg搜图 - 以图搜图（后端 soutubot.moe，动漫/本子垂直库），群聊可用、需先开启
-    lg找姬 - 反向图片搜索（走 mac 侧浏览器 sidecar + Google Lens，能搜 x.com 等站点）
-    lg找姬 调试 - 同上，但结果走合并转发，逐条列出每个候选与调试信息（仅超管）
+    lg找姬 - 反向图片搜索（走 mac 侧浏览器 sidecar + Google Lens，能搜 x.com 等站点）；默认干净合并转发返回
+    lg找姬 调试 - 同上，但合并转发逐条列出每个候选与调试信息（仅超管）
     开启lg搜图 / 关闭lg搜图 - 超级用户管理群聊搜图功能
 
 图片输入：两条指令均支持「同条消息带图」或「引用一条图片消息」。
@@ -164,18 +164,6 @@ _SOURCE_LABEL = {
 }
 
 
-def _debug_forward_enabled() -> bool:
-    """全局调试开关（longge_reverse_debug_forward）：开着时所有调用都走合并转发。
-
-    日常应该关着 —— 正式模式只报一条结论，调试靠指令参数「lg找姬 调试」临时开启。
-    注意：这个开关和「调试」参数一样，**只对超管生效**。
-    """
-    try:
-        return bool(_load_reverse_config().get("debug_forward", False))
-    except Exception:  # noqa: BLE001 - 读不到配置就按默认关
-        return False
-
-
 # 指令参数里出现这些词就走调试（多项）模式
 _DEBUG_ARGS = ("调试", "debug")
 
@@ -208,69 +196,117 @@ def _forward_node(bot: Bot, name: str, content: str) -> dict:
     }
 
 
-async def _send_find_forward(bot: Bot, event: MessageEvent, detail: dict) -> None:
-    """把找姬结果拆成多项合并转发（调试用）。
+async def _send_find_forward(
+    bot: Bot, event: MessageEvent, detail: dict, *, debug: bool = False
+) -> None:
+    """把找姬结果以合并转发发出。
 
-    节点 1 = 标题 + finded.jpg + 来源/耗时；节点 2..N = 每个候选账号（弱证据也
-    列出来，标 ⚠️）；随后 = sidecar 原始账号；末节点 = 调试信息 JSON。
+    两种形态：
+    - 正式模式（debug=False，默认 `lg找姬`）：标题节点 + 只给最可信的那一位，
+      **不含任何调试信息**（无原始账号、无调试 JSON、无耗时/来源），弱证据不露面。
+    - 调试模式（debug=True，`lg找姬 调试` 仅超管）：标题节点标注调试 + 来源/耗时，
+      逐条列全部候选（弱证据标 ⚠️），再附 sidecar 原始账号、末节点附调试 JSON ——
+      这些内部细节只给超管看，便于排查到底命中/错在哪。
     """
     items = detail.get("items") or []
-    debug = dict(detail.get("debug") or {})
-    # sidecar 的原始账号嵌套在 debug["sidecar"]["raw"]，摘出来单独成节点，
-    # 免得整个塞进调试 JSON 里刷屏
-    sidecar_debug = dict(debug.get("sidecar") or {})
-    raw_accounts = sidecar_debug.pop("raw", None)
-    if sidecar_debug:
-        debug["sidecar"] = sidecar_debug
-    nodes = []
 
+    # ---- 调试模式：完整带上调试信息 ----
+    if debug:
+        debug_data = dict(detail.get("debug") or {})
+        # sidecar 的原始账号嵌套在 debug["sidecar"]["raw"]，摘出来单独成节点，
+        # 免得整个塞进调试 JSON 里刷屏
+        sidecar_debug = dict(debug_data.get("sidecar") or {})
+        raw_accounts = sidecar_debug.pop("raw", None)
+        if sidecar_debug:
+            debug_data["sidecar"] = sidecar_debug
+
+        nodes = []
+        head = [RESULT_TITLE]
+        img = finded_cq()
+        if img:
+            head.append(img)
+        head += [
+            "",
+            f"🔧 调试模式：合并转发（共 {len(items)} 项候选）",
+            f"📡 来源：{_SOURCE_LABEL.get(detail.get('source') or '', detail.get('source') or '未知')}",
+        ]
+        if debug_data.get("elapsed") is not None:
+            head.append(f"⏱ 耗时：{debug_data['elapsed']}s")
+        if not detail.get("ok"):
+            head.append("⚠️ " + (detail.get("message") or "证据不足，正式模式会判没找到"))
+        nodes.append(_forward_node(bot, "找姬结果", "\n".join(x for x in head if x)))
+
+        for i, it in enumerate(items, 1):
+            tag = "⚠️弱证据" if it.get("weak") else "✅"
+            lines = [
+                f"#{i} {tag} {it['platform']}",
+                f"👤 名字：{it['name']}",
+                f"🆔 账号：@{it['handle']}",
+            ]
+            if it.get("url"):
+                lines.append(it["url"])
+            if it.get("score") is not None:
+                lines.append(f"📊 置信度：{it['score']}")
+            for ev in it.get("evidence") or []:
+                lines.append(f"· {ev}")
+            nodes.append(_forward_node(bot, f"候选{i}·{it['platform']}", "\n".join(lines)))
+
+        if raw_accounts:
+            lines = [f"sidecar 原始账号 {len(raw_accounts)} 条："]
+            for a in raw_accounts[:10]:
+                if isinstance(a, dict):
+                    lines.append(
+                        f"- {a.get('platform')} / @{a.get('handle')} / "
+                        f"{a.get('authorName') or '-'} / {a.get('url') or '-'}"
+                    )
+            nodes.append(_forward_node(bot, "原始账号", "\n".join(lines)))
+
+        nodes.append(
+            _forward_node(
+                bot,
+                "调试信息",
+                json.dumps(debug_data, ensure_ascii=False, default=str)[:1200],
+            )
+        )
+
+        await bot.call_api(
+            "send_group_forward_msg",
+            group_id=event.group_id,
+            messages=nodes,
+        )
+        logger.info(f"[找姬] 合并转发(调试)已发送，共 {len(nodes)} 个节点")
+        return
+
+    # ---- 正式模式：干净合并转发，不含调试信息 ----
+    nodes = []
     head = [RESULT_TITLE]
     img = finded_cq()
     if img:
         head.append(img)
-    head += [
-        "",
-        f"🔧 调试模式：合并转发（共 {len(items)} 项候选）",
-        f"📡 来源：{_SOURCE_LABEL.get(detail.get('source') or '', detail.get('source') or '未知')}",
-    ]
-    if debug.get("elapsed") is not None:
-        head.append(f"⏱ 耗时：{debug['elapsed']}s")
-    if not detail.get("ok"):
-        head.append("⚠️ " + (detail.get("message") or "证据不足，正式模式会判没找到"))
-    nodes.append(_forward_node(bot, "找姬结果", "\n".join(x for x in head if x)))
+    head.append("")
 
-    for i, it in enumerate(items, 1):
-        tag = "⚠️弱证据" if it.get("weak") else "✅"
-        lines = [
-            f"#{i} {tag} {it['platform']}",
-            f"👤 名字：{it['name']}",
-            f"🆔 账号：@{it['handle']}",
-        ]
-        if it.get("url"):
-            lines.append(it["url"])
-        if it.get("score") is not None:
-            lines.append(f"📊 置信度：{it['score']}")
-        for ev in it.get("evidence") or []:
-            lines.append(f"· {ev}")
-        nodes.append(_forward_node(bot, f"候选{i}·{it['platform']}", "\n".join(lines)))
-
-    if raw_accounts:
-        lines = [f"sidecar 原始账号 {len(raw_accounts)} 条："]
-        for a in raw_accounts[:10]:
-            if isinstance(a, dict):
-                lines.append(
-                    f"- {a.get('platform')} / @{a.get('handle')} / "
-                    f"{a.get('authorName') or '-'} / {a.get('url') or '-'}"
-                )
-        nodes.append(_forward_node(bot, "原始账号", "\n".join(lines)))
-
-    nodes.append(
-        _forward_node(
-            bot,
-            "调试信息",
-            json.dumps(debug, ensure_ascii=False, default=str)[:1200],
-        )
-    )
+    if not items:
+        # 完全没候选：失败 / 超时 / 空结果，只给一句文案
+        head.append(detail.get("message") or "没找到姬 😢")
+        nodes.append(_forward_node(bot, "找姬结果", "\n".join(head)))
+    else:
+        strong = [it for it in items if not it.get("weak")]
+        if not strong:
+            # 正式模式：最像的也是弱证据，不露面，按「没找到」处理
+            head.append(detail.get("message") or "没找到姬 😢")
+            nodes.append(_forward_node(bot, "找姬结果", "\n".join(head)))
+        else:
+            head.append("（已为你锁定最可信的一位）")
+            nodes.append(_forward_node(bot, "找姬结果", "\n".join(head)))
+            it = strong[0]
+            lines = [
+                f"#1 {it['platform']}",
+                f"👤 名字：{it['name']}",
+                f"🆔 账号：@{it['handle']}",
+            ]
+            if it.get("url"):
+                lines.append(it["url"])
+            nodes.append(_forward_node(bot, f"候选1·{it['platform']}", "\n".join(lines)))
 
     await bot.call_api(
         "send_group_forward_msg",
@@ -297,10 +333,11 @@ async def handle_find_chicken(
 ):
     """处理找姬指令（mac 侧浏览器 sidecar + Google Lens 反向图片搜索）
 
-    两种模式：
-    - `lg找姬`：只报一条结论（最可信的那位），保持准确率优先。
-    - `lg找姬 调试`：合并转发分多项展示（每个候选 + 原始账号 + 调试信息），**仅超管**；
-      普通群员发这个也只会收到一条结论。
+    两种模式（结果都以合并转发形式返回）：
+    - `lg找姬`：干净的合并转发，只给最可信的那位（弱证据不露面），**不含任何调试信息**，
+      保持准确率优先。
+    - `lg找姬 调试`：合并转发逐条列出全部候选（弱证据标 ⚠️）+ sidecar 原始账号 + 调试 JSON，
+      **仅超管**；普通群员发这个也只会收到正式的一条结论。
     """
     # 1. 私聊不可用
     if isinstance(event, PrivateMessageEvent):
@@ -349,34 +386,33 @@ async def handle_find_chicken(
         await matcher.finish(detail.get("message") or "没找到姬 😢")
         return
 
-    # 调试模式：`lg找姬 调试` 或全局开关 longge_reverse_debug_forward 打开时，
-    # 拆成多项合并转发（标题+配图 / 每个候选 / 原始账号 / 调试信息），
-    # 便于对照到底命中了什么。日常不带参数时只回一条结论。
-    #
-    # 调试**只给超管**：普通群员即使发「lg找姬 调试」也走正式模式（一条结论），
-    # 不提示、不报错 —— 免得在群里刷出「你没权限」这种没意义的消息。
-    debug = _wants_debug(args.extract_plain_text()) or _debug_forward_enabled()
-    if debug:
+    # 两种模式结果都以合并转发返回：
+    # - 默认 `lg找姬`：干净合并转发，只给最可信的那位，**不含调试信息**；
+    # - `lg找姬 调试`（仅超管）：合并转发逐条列全部候选 + 原始账号 + 调试 JSON。
+    # 调试**只给超管**：普通群员发「lg找姬 调试」也走正式干净转发，不提示不报错。
+    debug = False
+    if _wants_debug(args.extract_plain_text()):
         operator = await _is_operator(bot, event)
         if not operator:
             logger.info(f"[找姬] 非超管({event.get_user_id()})请求调试模式，已按正式模式回复")
         else:
-            sent = False
-            try:
-                await _send_find_forward(bot, event, detail)
-                sent = True
-            except FinishedException:
-                raise
-            except Exception as e:
-                logger.warning(f"[找姬] 合并转发失败，回退单条文本：{e}")
-            if sent:
-                await matcher.finish()
-                return
+            debug = True
 
-    # 正式模式：只报置信度最高的那一位（弱证据直接判没找到，不硬凑）。
-    # 排版收进**一条消息**：标题文字 → finded 配图 → 平台/名字/账号/链接，
-    # 和宠物图一样一条发完。配图用 file:// 本地路径 —— 与 pet 发配件/食物图
-    # 同款，是本部署唯一稳定可用的发图方式；**不要用 base64 内联**，会 1200。
+    try:
+        await _send_find_forward(bot, event, detail, debug=debug)
+    except FinishedException:
+        raise
+    except Exception as e:
+        logger.warning(f"[找姬] 合并转发失败，回退单条文本：{e}")
+        # 不 return，落到下方 render_parts 兜底
+    else:
+        await matcher.finish()
+        return
+
+    # 兜底：合并转发发不出去时，退回单条消息（标题 → 配图 → 正文），不含调试信息。
+    # 排版收进**一条消息**：标题文字 → finded 配图 → 平台/名字/账号/链接，和宠物图
+    # 一样一条发完。配图用 file:// 本地路径 —— 与 pet 发配件/食物图同款，是本部署
+    # 唯一稳定可用的发图方式；**不要用 base64 内联**，会 1200。
     parts = render_parts(detail)
     if parts.get("text"):
         await matcher.finish(parts["text"])
