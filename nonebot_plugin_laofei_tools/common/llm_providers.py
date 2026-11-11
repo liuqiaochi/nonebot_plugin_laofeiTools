@@ -30,6 +30,14 @@ PROVIDER_FILE = DATA_DIR / "llm_provider_groups.json"
 VALID_PROVIDERS = ("deepseek", "grok", "gemini")
 VALID_USAGES = ("ai_chat", "reverse")
 
+# 各服务商「常见可切换模型名」示例（仅作帮助展示用；最终以端点实际支持为准）。
+# 默认模型会从 driver.config 动态读取，这里只列几个常见选项，帮助用户知道能填什么。
+KNOWN_MODELS = {
+    "deepseek": ["deepseek-chat", "deepseek-reasoner", "deepseek-flash (视觉/图反推)"],
+    "grok": ["grok-4.7", "grok-4.6", "grok-4.5", "grok-4.3", "grok-4.1-fast", "grok-4.20"],
+    "gemini": ["gemini-4-argon", "gemini-3-flash", "gemini-3-pro", "gemini-2.5-flash", "gemini-2.5-pro"],
+}
+
 USAGE_LABELS = {"ai_chat": "对话", "reverse": "图反推"}
 
 DEFAULT_DATA = {
@@ -125,6 +133,35 @@ def provider_label(provider: str) -> str:
         return _provider_spec(provider)["label"]
     except ValueError:
         return provider
+
+
+def format_model_help() -> str:
+    """生成「LLM 模型切换帮助」文本：列出可切换服务商、默认模型、常见可切换模型，
+    以及切换/查看/重置指令。默认模型从 driver.config 动态读取，始终与实际配置一致。
+    """
+    lines = [
+        "📋 LLM 模型切换帮助",
+        "可切换服务商（同服务商内可指定具体模型名，无需改 config / 重启 bot）：",
+    ]
+    for p in VALID_PROVIDERS:
+        try:
+            spec = _provider_spec(p)
+        except ValueError:
+            continue
+        examples = KNOWN_MODELS.get(p, [])
+        ex = "、".join(examples) if examples else "（以端点实际支持为准）"
+        lines.append(f"· {spec['label']}：默认 {spec['chat_model']}")
+        lines.append(f"   常见可切换：{ex}")
+    lines.append("")
+    lines.append("指令（切换仅超管；查看群成员可用）：")
+    lines.append("· 对话模型 <服务商> [模型名]   例：对话模型 gemini  /  对话模型 grok grok-4.7")
+    lines.append("· 反推模型 <服务商> [模型名]   例：反推模型 grok  /  反推模型 deepseek deepseek-chat")
+    lines.append("· 重置对话模型  /  重置反推模型   （回退全局默认）")
+    lines.append("· 模型设置 / 查看模型            （看本群当前配置）")
+    lines.append("· 模型帮助                       （本说明）")
+    lines.append("")
+    lines.append("说明：不写模型名则用服务商默认；写具体名即覆盖（仅限该服务商端点支持的模型）。")
+    return "\n".join(lines)
 
 
 # ---------------- 按群/用途解析与设置 ----------------

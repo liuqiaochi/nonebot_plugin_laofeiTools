@@ -73,6 +73,11 @@ def _is_view(event: MessageEvent) -> bool:
     return ("模型设置" in _msg(event)) or ("查看模型" in _msg(event))
 
 
+def _is_help(event: MessageEvent) -> bool:
+    t = _msg(event)
+    return any(k in t for k in ("模型帮助", "支持模型", "模型列表", "切换模型帮助", "模型切换帮助"))
+
+
 # ---------------- 设置对话服务商 ----------------
 
 set_chat_cmd = on_message(rule=Rule(_is_set_chat), permission=SUPERUSER, priority=5, block=True)
@@ -164,5 +169,19 @@ async def handle_view(matcher, event: MessageEvent):
         "",
         "切换：超管发送「对话模型 deepseek/grok/gemini [模型名]」「反推模型 deepseek/grok/gemini [模型名]」",
         "重置：超管发送「重置对话模型」「重置反推模型」",
+        "全部可切换模型：发送「模型帮助」",
     ]
     await matcher.finish(MessageSegment.text("\n".join(lines)))
+
+
+# ---------------- 模型切换帮助（群成员可用） ----------------
+
+help_cmd = on_message(rule=Rule(_is_help), priority=5, block=True)
+
+
+@help_cmd.handle()
+async def handle_help(matcher, event: MessageEvent):
+    """列出可切换的服务商、默认/常见模型及切换指令（群成员可用）"""
+    if isinstance(event, PrivateMessageEvent):
+        await matcher.finish("请在群聊中发送此指令。")
+    await matcher.finish(MessageSegment.text(llm_providers.format_model_help()))
