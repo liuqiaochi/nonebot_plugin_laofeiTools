@@ -145,8 +145,14 @@ def get_default_provider(usage: str) -> str:
     return _load().get("default", {}).get(usage, "deepseek")
 
 
-def set_provider(group_id: str, usage: str, provider: str) -> Tuple[bool, str]:
-    """设置某群某用途的服务商。返回 (ok, 提示)。"""
+def set_provider(group_id: str, usage: str, provider: str, model: str = None) -> Tuple[bool, str]:
+    """设置某群某用途的服务商与可选具体模型名。返回 (ok, 提示)。
+
+    model 语义：
+      - None：仅设置/保留服务商，不动模型名 override
+      - ""  ：清除该用途的模型名 override（回落服务商默认模型）
+      - 非空：设置模型名 override（同时设置服务商）
+    """
     provider = (provider or "").strip().lower()
     if provider not in VALID_PROVIDERS:
         return False, f"未知服务商，仅支持：{' / '.join(VALID_PROVIDERS)}"
@@ -156,21 +162,41 @@ def set_provider(group_id: str, usage: str, provider: str) -> Tuple[bool, str]:
     gid = str(group_id)
     data.setdefault("groups", {})
     data["groups"].setdefault(gid, {})
-    data["groups"][gid][usage] = provider
+    grp = data["groups"][gid]
+    grp[usage] = provider
+
+    warn = ""
+    if model is not None:
+        model = (model or "").strip()
+        if model:
+            kw_map = {"gemini": "gemini", "grok": "grok", "deepseek": "deepseek"}
+            kw = kw_map.get(provider, "")
+            if kw and kw not in model.lower():
+                warn = "（⚠️ 模型名似乎不属于该服务商，请确认端点支持此模型）"
+            grp[f"{usage}_model"] = model
+        else:
+            grp.pop(f"{usage}_model", None)
+
     _save(data)
-    return True, f"已将本群「{USAGE_LABELS[usage]}」模型切换为 {_provider_spec(provider)['label']}"
+    label = _provider_spec(provider)["label"]
+    if model is None:
+        return True, f"已将本群「{USAGE_LABELS[usage]}」切换为 {label}"
+    if model == "":
+        return True, f"已将本群「{USAGE_LABELS[usage]}」切换为 {label}（使用该服务商默认模型）"
+    return True, f"已将本群「{USAGE_LABELS[usage]}」切换为 {label}（模型：{model}）{warn}"
 
 
 def reset_provider(group_id: str, usage: str) -> Tuple[bool, str]:
-    """重置某群某用途为全局默认。返回 (ok, 提示)。"""
+    """重置某群某用途为全局默认（同时清除模型名 override）。返回 (ok, 提示)。"""
     if usage not in VALID_USAGES:
         return False, f"用途仅支持：{' / '.join(USAGE_LABELS.values())}"
     data = _load()
     gid = str(group_id)
     grp = data.get("groups", {}).get(gid)
-    if not grp or usage not in grp:
+    if not grp or (usage not in grp and f"{usage}_model" not in grp):
         return False, f"本群「{USAGE_LABELS[usage]}」未单独设置，已使用全局默认"
-    del grp[usage]
+    grp.pop(usage, None)
+    grp.pop(f"{usage}_model", None)
     if not grp:
         data["groups"].pop(gid, None)
     _save(data)
@@ -194,11 +220,30 @@ def build_client(group_id: str, usage: str) -> OpenAI:
     return OpenAI(api_key=spec["api_key"], base_url=spec["base_url"], timeout=60.0, max_retries=max_retries)
 
 
+def _model_override(group_id: str, usage: str) -> str:
+    """返回本群某用途的具体模型名 override（若有），否则空串。
+
+    存储结构：llm_provider_groups.json 的 groups[<gid>][f"{usage}_model"]。
+    与服务商(provider)字段并列，互不影响；不写则回落服务商默认模型。
+    """
+    data = _load()
+    grp = data.get("groups", {}).get(str(group_id))
+    if not grp:
+        return ""
+    return (grp.get(f"{usage}_model") or "").strip()
+
+
 def get_chat_model(group_id: str, usage: str) -> str:
+    override = _model_override(group_id, usage)
+    if override:
+        return override
     return _provider_spec(resolve_provider(group_id, usage))["chat_model"]
 
 
 def get_vision_model(group_id: str, usage: str) -> str:
+    override = _model_override(group_id, usage)
+    if override:
+        return override
     return _provider_spec(resolve_provider(group_id, usage))["vision_model"]
 
 

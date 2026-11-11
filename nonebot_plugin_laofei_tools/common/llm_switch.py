@@ -16,6 +16,7 @@ from nonebot.adapters.onebot.v11 import (
 )
 from nonebot.permission import SUPERUSER
 from nonebot.rule import Rule
+import re
 
 from . import llm_providers
 
@@ -26,15 +27,27 @@ def _msg(event: MessageEvent) -> str:
     )
 
 
-def _parse_provider(text: str):
-    t = text.lower()
-    if "gemini" in t:
-        return "gemini"
-    if "grok" in t:
-        return "grok"
-    if "deepseek" in t or " ds" in t or t.startswith("ds"):
-        return "deepseek"
-    return None
+def _parse_set(text: str):
+    """从「<用途>模型 <服务商> [模型名]」指令解析 (provider, model)。
+
+    模型名可选；未指定时为 None（仅切服务商，清除模型名 override）。
+    """
+    cleaned = re.sub(r"(反推模型|对话模型|重置)", "", text, flags=re.I)
+    toks = cleaned.split()
+    provider = None
+    idx = -1
+    for i, tok in enumerate(toks):
+        tl = tok.lower()
+        if "gemini" in tl:
+            provider = "gemini"; idx = i; break
+        if "grok" in tl:
+            provider = "grok"; idx = i; break
+        if "deepseek" in tl or tl == "ds" or tl.startswith("ds"):
+            provider = "deepseek"; idx = i; break
+    if provider is None:
+        return None, None
+    model = " ".join(toks[idx + 1:]).strip() or None
+    return provider, model
 
 
 def _is_set_chat(event: MessageEvent) -> bool:
@@ -71,10 +84,10 @@ async def handle_set_chat(matcher, event: MessageEvent):
     if isinstance(event, PrivateMessageEvent):
         await matcher.finish("请在群聊中发送此指令。")
     gid = str(event.group_id)
-    p = _parse_provider(_msg(event))
+    p, model = _parse_set(_msg(event))
     if not p:
-        await matcher.finish("请指定服务商：对话模型 deepseek / grok / gemini")
-    ok, msg = llm_providers.set_provider(gid, "ai_chat", p)
+        await matcher.finish("请指定服务商：对话模型 deepseek / grok / gemini [模型名]")
+    ok, msg = llm_providers.set_provider(gid, "ai_chat", p, model if model else "")
     await matcher.finish(("✅ " if ok else "❌ ") + msg)
 
 
@@ -89,10 +102,10 @@ async def handle_set_reverse(matcher, event: MessageEvent):
     if isinstance(event, PrivateMessageEvent):
         await matcher.finish("请在群聊中发送此指令。")
     gid = str(event.group_id)
-    p = _parse_provider(_msg(event))
+    p, model = _parse_set(_msg(event))
     if not p:
-        await matcher.finish("请指定服务商：反推模型 deepseek / grok / gemini")
-    ok, msg = llm_providers.set_provider(gid, "reverse", p)
+        await matcher.finish("请指定服务商：反推模型 deepseek / grok / gemini [模型名]")
+    ok, msg = llm_providers.set_provider(gid, "reverse", p, model if model else "")
     await matcher.finish(("✅ " if ok else "❌ ") + msg)
 
 
@@ -142,12 +155,14 @@ async def handle_view(matcher, event: MessageEvent):
     dchat = llm_providers.get_default_provider("ai_chat")
     drev = llm_providers.get_default_provider("reverse")
     label = llm_providers.provider_label
+    chat_model = llm_providers.get_chat_model(gid, "ai_chat")
+    rev_model = llm_providers.get_vision_model(gid, "reverse")
     lines = [
         "本群 LLM 模型设置：",
-        f"· 对话：{label(chat)}" + ("" if chat == dchat else f"（默认：{label(dchat)}）"),
-        f"· 图反推：{label(rev)}" + ("" if rev == drev else f"（默认：{label(drev)}）"),
+        f"· 对话：{label(chat)}（{chat_model}）" + ("" if chat == dchat else f"（默认：{label(dchat)}）"),
+        f"· 图反推：{label(rev)}（{rev_model}）" + ("" if rev == drev else f"（默认：{label(drev)}）"),
         "",
-        "切换：超管发送「对话模型 deepseek/grok/gemini」「反推模型 deepseek/grok/gemini」",
+        "切换：超管发送「对话模型 deepseek/grok/gemini [模型名]」「反推模型 deepseek/grok/gemini [模型名]」",
         "重置：超管发送「重置对话模型」「重置反推模型」",
     ]
     await matcher.finish(MessageSegment.text("\n".join(lines)))
