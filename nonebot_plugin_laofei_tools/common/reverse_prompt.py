@@ -258,8 +258,27 @@ def _extract_vision_text(message) -> tuple[str, str]:
 
 # 政策级拦截（safetySettings 的 5 类 BLOCK_NONE 关不掉）：候选级 + prompt 级 finishReason
 _BLOCKED_FINISH_REASONS = {"PROHIBITED_CONTENT", "SAFETY", "BLOCKLIST", "SPII"}
-# 保底兜底顺序：gemini 主路径被拦时，按此顺序试用其他已配置视觉后端
-_FALLBACK_ORDER = ("deepseek", "grok")
+
+
+def _fallback_order(primary: str) -> tuple:
+    """根据主服务商计算保底兜底顺序（deepseek 始终作为终极兜底，放在最后一位）。
+
+    - 主=deepseek：不兜底（DS 为根本，无需兜底）
+    - 主=gemini ：gemini 被拦 → grok → deepseek
+    - 主=grok   ：grok 被拦  → gemini → deepseek
+    """
+    if primary == "deepseek":
+        return ()
+    if primary == "gemini":
+        return ("grok", "deepseek")
+    if primary == "grok":
+        return ("gemini", "deepseek")
+    # 未知主服务商：默认把 deepseek 放到最后兜底
+    others = [p for p in ("gemini", "grok", "deepseek") if p != primary]
+    if "deepseek" in others:
+        others.remove("deepseek")
+        others.append("deepseek")
+    return tuple(others)
 
 
 def _reverse_vision_for(provider: str, gid: str, image_data: bytes, instruction: str) -> dict:
@@ -318,9 +337,12 @@ def _reverse_vision(gid: str, image_data: bytes, instruction: str) -> dict:
 
     主路径：按本群「图反推」设置解析（gemini 走原生关闭安全过滤；deepseek/grok 走 OpenAI）。
 
-    B 保底：当主服务商为 gemini 且被**政策级拦截**（PROHIBITED_CONTENT / SAFETY / BLOCKLIST /
-    SPII，safetySettings 的 5 类 BLOCK_NONE 关不掉）导致无结果时，自动用其他已配置的视觉后端
-    重试一次保底，避免二次元/同人图直接空返回。其他主服务商或主路径已成功不触发兜底。
+    B 保底：当主路径被**政策级拦截**（PROHIBITED_CONTENT / SAFETY / BLOCKLIST / SPII，
+    safetySettings 的 5 类 BLOCK_NONE 关不掉）导致无结果时，按主服务商计算的顺序自动用其他
+    已配置视觉后端重试保底。deepseek 始终作为终极兜底层（最后一位）：
+    - 主=gemini：gemini 被拦 → grok → deepseek
+    - 主=grok  ：grok 被拦  → gemini → deepseek
+    - 主=deepseek：不兜底（DS 为根本）
     """
     provider = llm_providers.resolve_provider(gid, "reverse")
     result = _reverse_vision_for(provider, gid, image_data, instruction)
@@ -329,27 +351,26 @@ def _reverse_vision(gid: str, image_data: bytes, instruction: str) -> dict:
         result.get("safety_blocked")
         or (result.get("finish_reason") or "").upper() in _BLOCKED_FINISH_REASONS
     )
-    if provider == "gemini" and not result.get("text") and blocked:
+    if provider != "deepseek" and not result.get("text") and blocked:
+        order = _fallback_order(provider)
         logger.warning(
-            f"[图反推] Gemini 主路径被政策级拦截（finish_reason={result.get('finish_reason')}），"
-            f"尝试其他已配置后端保底"
+            f"[图反推] {provider} 主路径被政策级拦截（finish_reason={result.get('finish_reason')}），"
+            f"尝试按 [{', '.join(order)}] 顺序保底"
         )
-        for fb in _FALLBACK_ORDER:
-            if fb == provider:
-                continue
+        for fb in order:
             if not llm_providers.is_provider_configured(fb):
                 logger.debug(f"[图反推] 保底后端 {fb} 未配置，跳过")
                 continue
             try:
                 fb_res = _reverse_vision_for(fb, gid, image_data, instruction)
             except Exception as e:
-                logger.warning(f"[图反推] Gemini 保底重试 {fb} 异常：{e}")
+                logger.warning(f"[图反推] {provider} 保底重试 {fb} 异常：{e}")
                 continue
             if fb_res.get("text"):
-                fb_res["fallback_from"] = "gemini"
-                logger.info(f"[图反推] Gemini 保底成功：改用 {fb} 出词")
+                fb_res["fallback_from"] = provider
+                logger.info(f"[图反推] {provider} 保底成功：改用 {fb} 出词")
                 return fb_res
-        logger.warning("[图反推] Gemini 保底：无其他可用后端或均已失败，沿用主路径空结果")
+        logger.warning(f"[图反推] {provider} 保底：无其他可用后端或均已失败，沿用主路径空结果")
 
     return result
 
