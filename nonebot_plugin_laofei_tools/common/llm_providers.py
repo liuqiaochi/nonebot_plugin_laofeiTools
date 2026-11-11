@@ -15,7 +15,9 @@ LLM Provider 抽象层
 - DeepSeek 视觉模型必须显式关闭思考模式（extra_body），Grok 无此参数，按服务商分支处理。
 """
 
+import asyncio
 import json
+import time
 from typing import Optional, Tuple
 
 from nonebot import get_driver
@@ -26,6 +28,9 @@ from ..config import DATA_DIR, safe_json_save
 
 
 PROVIDER_FILE = DATA_DIR / "llm_provider_groups.json"
+MODEL_CACHE_FILE = DATA_DIR / "llm_model_cache.json"
+# 可用模型列表缓存有效期（秒）。模型变动不频繁，24h 足够；可用「模型帮助 刷新」强制更新。
+MODEL_CACHE_TTL = 24 * 3600
 
 VALID_PROVIDERS = ("deepseek", "grok", "gemini")
 VALID_USAGES = ("ai_chat", "reverse")
@@ -135,10 +140,14 @@ def provider_label(provider: str) -> str:
         return provider
 
 
-def format_model_help() -> str:
-    """生成「LLM 模型切换帮助」文本：列出可切换服务商、默认模型、常见可切换模型，
-    以及切换/查看/重置指令。默认模型从 driver.config 动态读取，始终与实际配置一致。
+def format_model_help(live_models: dict = None) -> str:
+    """生成「LLM 模型切换帮助」文本。
+
+    live_models: 可选 {provider: [模型名,...]}，来自端点实时拉取；
+                 为 None 或某服务商未取到时，回退 KNOWN_MODELS 示例并标注。
+    默认模型从 driver.config 动态读取，始终与实际配置一致。
     """
+    live = live_models or {}
     lines = [
         "📋 LLM 模型切换帮助",
         "可切换服务商（同服务商内可指定具体模型名，无需改 config / 重启 bot）：",
@@ -148,20 +157,135 @@ def format_model_help() -> str:
             spec = _provider_spec(p)
         except ValueError:
             continue
-        examples = KNOWN_MODELS.get(p, [])
-        ex = "、".join(examples) if examples else "（以端点实际支持为准）"
+        models = live.get(p)
+        if models:
+            src = ""
+        else:
+            models = KNOWN_MODELS.get(p, [])
+            src = "（示例，实时列表未取到时显示）"
+        # 展示裁剪：避免单服务商模型过多撑爆消息
+        cap = 40
+        if len(models) > cap:
+            shown = models[:cap]
+            tail = f" …等共 {len(models)} 个"
+        else:
+            shown = models
+            tail = ""
+        ex = "、".join(shown) + tail
         lines.append(f"· {spec['label']}：默认 {spec['chat_model']}")
-        lines.append(f"   常见可切换：{ex}")
+        lines.append(f"   可切换模型{src}：{ex}")
     lines.append("")
     lines.append("指令（切换仅超管；查看群成员可用）：")
     lines.append("· 对话模型 <服务商> [模型名]   例：对话模型 gemini  /  对话模型 grok grok-4.7")
     lines.append("· 反推模型 <服务商> [模型名]   例：反推模型 grok  /  反推模型 deepseek deepseek-chat")
     lines.append("· 重置对话模型  /  重置反推模型   （回退全局默认）")
     lines.append("· 模型设置 / 查看模型            （看本群当前配置）")
-    lines.append("· 模型帮助                       （本说明）")
+    lines.append("· 模型帮助 [刷新]               （本说明，实时模型列表）")
     lines.append("")
-    lines.append("说明：不写模型名则用服务商默认；写具体名即覆盖（仅限该服务商端点支持的模型）。")
+    lines.append("说明：不写模型名则用服务商默认；写具体名即覆盖（须为该服务商端点支持的模型）。")
     return "\n".join(lines)
+
+
+# ---------------- 实时可用模型列表（带缓存） ----------------
+
+def _fetch_models_openai(base_url: str, api_key: str) -> list:
+    """用 OpenAI SDK 列出模型（deepseek / grok 通用）。返回模型 id 列表。"""
+    client = OpenAI(api_key=api_key, base_url=base_url, timeout=20.0, max_retries=2)
+    resp = client.models.list()
+    return [m.id for m in resp.data]
+
+
+def _fetch_models_gemini(api_key: str) -> list:
+    """Gemini 原生列出模型接口，仅保留支持 generateContent 的 gemini 系列。"""
+    import httpx
+
+    url = "https://generativelanguage.googleapis.com/v1beta/models"
+    r = httpx.get(url, params={"key": api_key}, timeout=20.0)
+    r.raise_for_status()
+    data = r.json()
+    out = []
+    for m in data.get("models", []):
+        methods = m.get("supportedGenerationMethods", [])
+        name = m.get("name", "")
+        if "generateContent" in methods and "gemini" in name.lower():
+            out.append(name.split("/")[-1])
+    return out
+
+
+def _filter_models(provider: str, models: list) -> list:
+    """剔除不属于该服务商家族的模型（embedding / 非对话等）。"""
+    kw = {"deepseek": "deepseek", "grok": "grok", "gemini": "gemini"}.get(provider, "")
+    if not kw:
+        return models
+    return [m for m in models if kw in m.lower()]
+
+
+def _fetch_models_for(provider: str) -> list:
+    """同步拉取某服务商可用模型（失败返回 []）。"""
+    spec = _provider_spec(provider)
+    if not spec["api_key"]:
+        return []
+    try:
+        if provider == "gemini":
+            raw = _fetch_models_gemini(spec["api_key"])
+        else:
+            raw = _fetch_models_openai(spec["base_url"], spec["api_key"])
+        return _filter_models(provider, raw)
+    except Exception as e:
+        logger.warning(f"[LLM] 拉取 {spec['label']} 可用模型失败: {e}")
+        return []
+
+
+def _load_model_cache() -> dict:
+    if MODEL_CACHE_FILE.exists():
+        try:
+            with open(MODEL_CACHE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _save_model_cache(cache: dict) -> None:
+    safe_json_save(MODEL_CACHE_FILE, cache)
+
+
+def get_available_models(provider: str, force_refresh: bool = False) -> list:
+    """获取某服务商可用模型（同步，带 TTL 缓存）。
+
+    - 缓存命中且在有效期内直接返回；
+    - 未命中或 force_refresh 时实时拉取并写缓存；
+    - 拉取失败：回退到（可能过期的）缓存，再不行回退 KNOWN_MODELS 示例。
+    """
+    cache = _load_model_cache()
+    now = time.time()
+    entry = cache.get(provider)
+    if not force_refresh and entry and now - entry.get("ts", 0) < MODEL_CACHE_TTL:
+        return entry.get("models", [])
+    models = _fetch_models_for(provider)
+    if models:
+        cache[provider] = {"ts": now, "models": models}
+        _save_model_cache(cache)
+        return models
+    if entry and entry.get("models"):
+        return entry["models"]
+    return KNOWN_MODELS.get(provider, [])
+
+
+async def get_available_models_async(provider: str, force_refresh: bool = False) -> list:
+    return await asyncio.to_thread(get_available_models, provider, force_refresh)
+
+
+async def get_all_available_models(force_refresh: bool = False) -> dict:
+    """并发拉取三家可用模型（各自独立失败不影响其余）。"""
+    tasks = {p: asyncio.create_task(get_available_models_async(p, force_refresh)) for p in VALID_PROVIDERS}
+    out = {}
+    for p, t in tasks.items():
+        try:
+            out[p] = await t
+        except Exception:
+            out[p] = KNOWN_MODELS.get(p, [])
+    return out
 
 
 # ---------------- 按群/用途解析与设置 ----------------

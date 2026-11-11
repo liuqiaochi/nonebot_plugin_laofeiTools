@@ -181,7 +181,12 @@ help_cmd = on_message(rule=Rule(_is_help), priority=5, block=True)
 
 @help_cmd.handle()
 async def handle_help(matcher, event: MessageEvent):
-    """列出可切换的服务商、默认/常见模型及切换指令（群成员可用）"""
+    """列出可切换的服务商、默认/实时模型及切换指令（群成员可用）"""
     if isinstance(event, PrivateMessageEvent):
         await matcher.finish("请在群聊中发送此指令。")
-    await matcher.finish(MessageSegment.text(llm_providers.format_model_help()))
+    force = "刷新" in _msg(event)
+    live = await llm_providers.get_all_available_models(force_refresh=force)
+    text = llm_providers.format_model_help(live_models=live)
+    if force:
+        text = "（已强制刷新可用模型列表）\n" + text
+    await matcher.finish(MessageSegment.text(text))
