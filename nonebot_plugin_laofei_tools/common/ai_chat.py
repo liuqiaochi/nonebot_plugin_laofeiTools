@@ -532,7 +532,9 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
     # 5. 联网方式：未开启="" ；开启且对话切到 Grok="grok"（用 Grok 原生 Live Search，不走 DS 搜索 API）；
     #    否则="ds"（DeepSeek 搜索 API 两阶段：先答后判）。
     web_mode = _web_mode(group_id)
-    _add_history(user_id, "user", prompt)  # 历史仅存纯文本，避免图片上下文污染后续轮次
+    # 注意：当前轮的用户提问不在此处预写入历史。_build_messages 末尾会追加 prompt；
+    # 若此处提前 _add_history，会与末尾追加形成「同一提问在历史里出现两次」，
+    # 模型误以为用户重复提问（表现为「你问两遍干嘛」）。用户提问与回复在拿到回复后一并写入历史。
 
     # 构造首轮消息 + 调用参数
     messages = _build_messages(user_id, prompt)
@@ -655,6 +657,8 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
 
     # 去除联网检索残留的来源链接，给出简练答案（DS 联网与 Grok 联网通用兜底）
     reply = _strip_source_links(reply)
+    # 拿到回复后，再把「用户提问 + 助手回复」成对写入历史（用户提问此前未预写，避免重复）。
+    _add_history(user_id, "user", prompt)
     _add_history(user_id, "assistant", reply)
 
     # 随机配图：每次回复从资源目录随机取一张（无图则跳过）
