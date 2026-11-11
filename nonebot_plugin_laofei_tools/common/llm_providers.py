@@ -16,10 +16,12 @@ LLM Provider 抽象层
 """
 
 import asyncio
+import base64
 import json
 import time
 from typing import Optional, Tuple
 
+import httpx
 from nonebot import get_driver
 from nonebot.log import logger
 from openai import OpenAI
@@ -485,6 +487,105 @@ def get_grok_extra_body(group_id: str, usage: str, model: str = "") -> dict:
         logger.debug(f"[LLM] Grok 模型 {model} 不支持 reasoning_effort={raw}，回落到 low")
         raw = "low"
     return {"reasoning_effort": raw}
+
+
+# ---------------- Gemini 原生反推（关闭安全过滤） ----------------
+#
+# 为什么需要单独走原生接口：
+#   图反推走 OpenAI 兼容端点（generativelanguage.googleapis.com/v1beta/openai）时，
+#   该端点**不支持 safetySettings**，Gemini 对二次元/同人图极易触发 SAFETY 过滤，
+#   返回 200 但 content 被清空（finish_reason 映射为 None / 日志"来源: none"），表现为"没结果"。
+#   改用原生 Generative Language API（v1beta/models/{model}:generateContent）并显式设置
+#   safetySettings 全类别 BLOCK_NONE，可规避这类误杀（合法、公开、稳定）。
+#   注意：思考（thinking）若开启会把结果写进 thought 段、content 为空，故对非必要思考的
+#   模型显式 thinkingBudget=0，保证文本落在 content。
+
+GEMINI_HARM_CATEGORIES = (
+    "HARM_CATEGORY_HARASSMENT",
+    "HARM_CATEGORY_HATE_SPEECH",
+    "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+    "HARM_CATEGORY_DANGEROUS_CONTENT",
+    "HARM_CATEGORY_CIVIC_INTEGRITY",
+)
+
+# 仅对这些（支持 thinking 的）模型显式关闭思考，避免旧模型因不识别 thinkingConfig 报错
+_GEMINI_REASONING_MARKS = ("2.5", "3", "4")
+
+
+def gemini_native_reverse(gid: str, image_data: bytes, instruction: str, mime: str = "image/png") -> dict:
+    """Gemini 原生 generateContent 调用，专用于图反推。
+
+    返回 dict：
+      {provider, model, text, source, finish_reason, has_reasoning, safety_blocked}
+      - text: 提取到的反推文本（已拼接，未 sanitize）
+      - source: "content" / "thought" / "none"
+      - safety_blocked: 因安全策略整体被拦（极少，BLOCK_NONE 下基本不会）
+    异常：
+      - ValueError：未配置 Gemini API Key（交给调用方走"配置错误"分支）
+      - 其余（网络/HTTP 错误）：原样抛出，由调用方走"反推失败"分支
+    """
+    spec = _provider_spec("gemini")
+    if not spec["api_key"]:
+        raise ValueError(f"未配置 {spec['key_env']}")
+    model = get_vision_model(gid, "reverse")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+    gen_config: dict = {"temperature": 0.5, "maxOutputTokens": 800}
+    if any(mark in model.lower() for mark in _GEMINI_REASONING_MARKS):
+        gen_config["thinkingConfig"] = {"thinkingBudget": 0}
+
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {"text": instruction},
+                    {"inline_data": {"mime_type": mime, "data": base64.b64encode(image_data).decode()}},
+                ],
+            }
+        ],
+        "generationConfig": gen_config,
+        "safetySettings": [{"category": c, "threshold": "BLOCK_NONE"} for c in GEMINI_HARM_CATEGORIES],
+    }
+
+    try:
+        with httpx.Client(timeout=60.0) as client:
+            r = client.post(url, params={"key": spec["api_key"]}, json=payload)
+            r.raise_for_status()
+            data = r.json()
+    except httpx.HTTPStatusError as e:
+        body = ""
+        try:
+            body = e.response.text[:500]
+        except Exception:
+            pass
+        raise RuntimeError(f"Gemini 原生接口返回 {e.response.status_code}: {body}")
+    except Exception as e:
+        raise RuntimeError(f"Gemini 原生接口请求失败: {e}")
+
+    candidates = data.get("candidates", [])
+    if not candidates:
+        block = data.get("promptFeedback", {}).get("blockReason")
+        return {
+            "provider": "gemini", "model": model, "text": "",
+            "source": "none", "finish_reason": None,
+            "has_reasoning": False, "safety_blocked": bool(block),
+        }
+
+    cand = candidates[0]
+    parts = cand.get("content", {}).get("parts", [])
+    text_parts = [p.get("text", "") for p in parts if p.get("text") and not p.get("thought")]
+    thought_parts = [p.get("text", "") for p in parts if p.get("text") and p.get("thought")]
+    text = "\n".join(text_parts).strip()
+    source = "content" if text else "none"
+    if not text and thought_parts:
+        text = "\n".join(thought_parts).strip()
+        source = "thought"
+    return {
+        "provider": "gemini", "model": model, "text": text,
+        "source": source, "finish_reason": cand.get("finishReason"),
+        "has_reasoning": bool(thought_parts), "safety_blocked": False,
+    }
 
 
 # ---------------- 启动校验 ----------------

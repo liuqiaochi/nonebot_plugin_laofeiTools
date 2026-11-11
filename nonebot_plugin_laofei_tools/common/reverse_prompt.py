@@ -256,6 +256,57 @@ def _extract_vision_text(message) -> tuple[str, str]:
     return "", "none"
 
 
+def _reverse_vision(gid: str, image_data: bytes, instruction: str) -> dict:
+    """统一视觉反推调用（同步；由调用方放进 asyncio.to_thread）。
+
+    - gemini：走原生 generateContent 并关闭安全过滤（规避二次元图 SAFETY 误杀），
+      见 llm_providers.gemini_native_reverse。
+    - deepseek / grok：沿用 OpenAI 兼容客户端（原逻辑）。
+
+    返回 dict：provider / model / text / source / finish_reason / has_reasoning / safety_blocked。
+    text 为未清洗的反推文本，调用方负责 _sanitize_reverse_prompt。
+    """
+    provider = llm_providers.resolve_provider(gid, "reverse")
+    if provider == "gemini":
+        return llm_providers.gemini_native_reverse(gid, image_data, instruction)
+
+    # DeepSeek / Grok：OpenAI 兼容客户端
+    client = llm_providers.build_client(gid, "reverse")
+    model = llm_providers.get_vision_model(gid, "reverse")
+    extra_body = llm_providers.get_vision_extra_body(gid, "reverse")
+    extra_body.update(llm_providers.get_grok_extra_body(gid, "reverse", model))
+    data_url = f"data:image/png;base64,{base64.b64encode(image_data).decode()}"
+    create_kwargs = dict(
+        model=model,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": instruction},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            }
+        ],
+        temperature=0.5,
+        max_tokens=800,
+        timeout=60,
+    )
+    if extra_body:
+        create_kwargs["extra_body"] = extra_body
+    response = client.chat.completions.create(**create_kwargs)
+    msg = response.choices[0].message
+    text, source = _extract_vision_text(msg)
+    return {
+        "provider": provider,
+        "model": model,
+        "text": text,
+        "source": source,
+        "finish_reason": getattr(response.choices[0], "finish_reason", None),
+        "has_reasoning": _message_has_reasoning(msg),
+        "safety_blocked": False,
+    }
+
+
 # ========== 图反推运行日志（记录完整请求与结果，供「反推日志」指令查看）==========
 REVERSE_LOG_FILE = DATA_DIR / "reverse_log.json"
 REVERSE_LOG_MAX = 200          # 最多保留最近 200 条，防止无限增长
@@ -594,41 +645,12 @@ async def handle_reverse_prompt(
             return
 
         # 3. 调用视觉模型反推提示词（服务商按本群「图反推」设置解析）
+        #    gemini 走原生接口并关闭安全过滤（规避二次元图 SAFETY 误杀）；
+        #    其余走 OpenAI 兼容客户端。统一在 asyncio.to_thread 内执行同步网络请求。
         try:
-            client = llm_providers.build_client(gid, "reverse")
-            vision_model = llm_providers.get_vision_model(gid, "reverse")
-            extra_body = llm_providers.get_vision_extra_body(gid, "reverse")
-            # Grok 思考强度（提速）：推理模型默认 high，可调低；DeepSeek / 非推理 Grok 自动为空
-            extra_body.update(llm_providers.get_grok_extra_body(gid, "reverse", vision_model))
-            data_url = f"data:image/png;base64,{base64.b64encode(image_data).decode()}"
-            # 注意：OpenAI SDK 的 chat.completions.create 是**同步阻塞**调用，
-            # 必须放进线程池（asyncio.to_thread）以免冻结整个事件循环；
-            # 视觉请求比纯文本慢，且不设 timeout 会永久挂起，故显式 timeout=60。
-            # 关键：DeepSeek 视觉模型默认开启“思考模式”，会把整段 max_tokens 预算花在
-            # reasoning_content 上导致 content 为空（finish_reason=length）。llm_providers
-            # 已按服务商决定是否附加 extra_body 关闭思考模式（DeepSeek 关闭，Grok 不带）。
-            create_kwargs = dict(
-                model=vision_model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": reverse_instruction(gid)},
-                            {"type": "image_url", "image_url": {"url": data_url}},
-                        ],
-                    }
-                ],
-                temperature=0.5,
-                max_tokens=800,
-                timeout=60,
-            )
-            if extra_body:
-                create_kwargs["extra_body"] = extra_body
-            response = await asyncio.to_thread(
-                client.chat.completions.create,
-                **create_kwargs,
-            )
-            raw, raw_src = _extract_vision_text(response.choices[0].message)
+            res = await asyncio.to_thread(_reverse_vision, gid, image_data, reverse_instruction(gid))
+            raw, raw_src = res["text"], res["source"]
+            vision_model = res["model"]
             prompt = _sanitize_reverse_prompt(raw)
             if prompt and prompt != raw.strip():
                 logger.info(
@@ -677,17 +699,16 @@ async def handle_reverse_prompt(
 
         if not prompt:
             # 诊断：记录并向用户回显 finish_reason / 思考模式状态，便于排查
-            try:
-                choice = response.choices[0]
-                fr = getattr(choice, "finish_reason", None)
-                has_reason = _message_has_reasoning(choice.message)
-                logger.warning(
-                    f"图反推返回空内容: model={vision_model}, finish_reason={fr}, "
-                    f"有思考内容={has_reason}（多为视觉模型 thinking 把结果写在 thought 段或安全过滤清空 content）"
-                )
-                detail = f"（finish_reason={fr}，思考模式={has_reason}）"
-            except Exception:
-                detail = ""
+            fr = res.get("finish_reason")
+            has_reason = res.get("has_reasoning")
+            note = "（多为视觉模型 thinking 把结果写在 thought 段或安全过滤清空 content）"
+            if res.get("safety_blocked"):
+                note = "（安全过滤拦截）"
+            logger.warning(
+                f"图反推返回空内容: model={vision_model}, finish_reason={fr}, "
+                f"有思考内容={has_reason}{note}"
+            )
+            detail = f"（finish_reason={fr}，思考模式={has_reason}）"
             _log_reverse({
                 "time": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "gid": gid, "uid": str(event.user_id),
@@ -1049,35 +1070,11 @@ async def handle_reverse_ai_draw(
             return
 
         # 3.1 视觉模型反推（服务商按本群「图反推」设置解析）
+        #    gemini 走原生接口并关闭安全过滤；其余走 OpenAI 兼容客户端。
         try:
-            client = llm_providers.build_client(gid, "reverse")
-            vision_model = llm_providers.get_vision_model(gid, "reverse")
-            extra_body = llm_providers.get_vision_extra_body(gid, "reverse")
-            # Grok 思考强度（提速）：推理模型默认 high，可调低；DeepSeek / 非推理 Grok 自动为空
-            extra_body.update(llm_providers.get_grok_extra_body(gid, "reverse", vision_model))
-            data_url = f"data:image/png;base64,{base64.b64encode(image_data).decode()}"
-            create_kwargs = dict(
-                model=vision_model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": reverse_instruction(gid)},
-                            {"type": "image_url", "image_url": {"url": data_url}},
-                        ],
-                    }
-                ],
-                temperature=0.5,
-                max_tokens=800,
-                timeout=60,
-            )
-            if extra_body:
-                create_kwargs["extra_body"] = extra_body
-            response = await asyncio.to_thread(
-                client.chat.completions.create,
-                **create_kwargs,
-            )
-            raw, raw_src = _extract_vision_text(response.choices[0].message)
+            res = await asyncio.to_thread(_reverse_vision, gid, image_data, reverse_instruction(gid))
+            raw, raw_src = res["text"], res["source"]
+            vision_model = res["model"]
             prompt = _sanitize_reverse_prompt(raw)
             if prompt and prompt != raw.strip():
                 logger.info(
@@ -1123,13 +1120,11 @@ async def handle_reverse_ai_draw(
             return
 
         if not prompt:
-            try:
-                choice = response.choices[0]
-                fr = getattr(choice, "finish_reason", None)
-                has_reason = _message_has_reasoning(choice.message)
-                detail = f"（finish_reason={fr}，思考模式={has_reason}）"
-            except Exception:
-                detail = ""
+            fr = res.get("finish_reason")
+            has_reason = res.get("has_reasoning")
+            detail = f"（finish_reason={fr}，思考模式={has_reason}）"
+            if res.get("safety_blocked"):
+                detail = "（安全过滤拦截）"
             _log_reverse({
                 "time": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "gid": gid, "uid": str(event.user_id),
