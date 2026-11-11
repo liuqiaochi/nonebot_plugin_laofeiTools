@@ -256,24 +256,30 @@ def _extract_vision_text(message) -> tuple[str, str]:
     return "", "none"
 
 
-def _reverse_vision(gid: str, image_data: bytes, instruction: str) -> dict:
-    """统一视觉反推调用（同步；由调用方放进 asyncio.to_thread）。
+# 政策级拦截（safetySettings 的 5 类 BLOCK_NONE 关不掉）：候选级 + prompt 级 finishReason
+_BLOCKED_FINISH_REASONS = {"PROHIBITED_CONTENT", "SAFETY", "BLOCKLIST", "SPII"}
+# 保底兜底顺序：gemini 主路径被拦时，按此顺序试用其他已配置视觉后端
+_FALLBACK_ORDER = ("deepseek", "grok")
+
+
+def _reverse_vision_for(provider: str, gid: str, image_data: bytes, instruction: str) -> dict:
+    """对指定服务商执行一次视觉反推（同步；由调用方放进 asyncio.to_thread）。
 
     - gemini：走原生 generateContent 并关闭安全过滤（规避二次元图 SAFETY 误杀），
       见 llm_providers.gemini_native_reverse。
-    - deepseek / grok：沿用 OpenAI 兼容客户端（原逻辑）。
+    - deepseek / grok：OpenAI 兼容客户端。provider_override 强制指定服务商，
+      避免回落到本群「图反推」设置的原始服务商（保底兜底场景必需）。
 
     返回 dict：provider / model / text / source / finish_reason / has_reasoning / safety_blocked。
     text 为未清洗的反推文本，调用方负责 _sanitize_reverse_prompt。
     """
-    provider = llm_providers.resolve_provider(gid, "reverse")
     if provider == "gemini":
         return llm_providers.gemini_native_reverse(gid, image_data, instruction)
 
-    # DeepSeek / Grok：OpenAI 兼容客户端
-    client = llm_providers.build_client(gid, "reverse")
-    model = llm_providers.get_vision_model(gid, "reverse")
-    extra_body = llm_providers.get_vision_extra_body(gid, "reverse")
+    # DeepSeek / Grok：OpenAI 兼容客户端（provider_override 强制指定，不回落群设置）
+    client = llm_providers.build_client(gid, "reverse", provider_override=provider)
+    model = llm_providers.get_vision_model(gid, "reverse", provider_override=provider)
+    extra_body = llm_providers.get_vision_extra_body(gid, "reverse", provider_override=provider)
     extra_body.update(llm_providers.get_grok_extra_body(gid, "reverse", model))
     data_url = f"data:image/png;base64,{base64.b64encode(image_data).decode()}"
     create_kwargs = dict(
@@ -305,6 +311,47 @@ def _reverse_vision(gid: str, image_data: bytes, instruction: str) -> dict:
         "has_reasoning": _message_has_reasoning(msg),
         "safety_blocked": False,
     }
+
+
+def _reverse_vision(gid: str, image_data: bytes, instruction: str) -> dict:
+    """统一视觉反推调用（同步；由调用方放进 asyncio.to_thread）。
+
+    主路径：按本群「图反推」设置解析（gemini 走原生关闭安全过滤；deepseek/grok 走 OpenAI）。
+
+    B 保底：当主服务商为 gemini 且被**政策级拦截**（PROHIBITED_CONTENT / SAFETY / BLOCKLIST /
+    SPII，safetySettings 的 5 类 BLOCK_NONE 关不掉）导致无结果时，自动用其他已配置的视觉后端
+    重试一次保底，避免二次元/同人图直接空返回。其他主服务商或主路径已成功不触发兜底。
+    """
+    provider = llm_providers.resolve_provider(gid, "reverse")
+    result = _reverse_vision_for(provider, gid, image_data, instruction)
+
+    blocked = (
+        result.get("safety_blocked")
+        or (result.get("finish_reason") or "").upper() in _BLOCKED_FINISH_REASONS
+    )
+    if provider == "gemini" and not result.get("text") and blocked:
+        logger.warning(
+            f"[图反推] Gemini 主路径被政策级拦截（finish_reason={result.get('finish_reason')}），"
+            f"尝试其他已配置后端保底"
+        )
+        for fb in _FALLBACK_ORDER:
+            if fb == provider:
+                continue
+            if not llm_providers.is_provider_configured(fb):
+                logger.debug(f"[图反推] 保底后端 {fb} 未配置，跳过")
+                continue
+            try:
+                fb_res = _reverse_vision_for(fb, gid, image_data, instruction)
+            except Exception as e:
+                logger.warning(f"[图反推] Gemini 保底重试 {fb} 异常：{e}")
+                continue
+            if fb_res.get("text"):
+                fb_res["fallback_from"] = "gemini"
+                logger.info(f"[图反推] Gemini 保底成功：改用 {fb} 出词")
+                return fb_res
+        logger.warning("[图反推] Gemini 保底：无其他可用后端或均已失败，沿用主路径空结果")
+
+    return result
 
 
 # ========== 图反推运行日志（记录完整请求与结果，供「反推日志」指令查看）==========
@@ -713,7 +760,7 @@ async def handle_reverse_prompt(
                 "time": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "gid": gid, "uid": str(event.user_id),
                 "mode": "text",
-                "provider": llm_providers.resolve_provider(gid, "reverse"),
+                "provider": res["provider"],
                 "model": vision_model,
                 "cmd": _message_text(event).strip(),
                 "request": reverse_instruction(gid),
@@ -764,8 +811,8 @@ async def handle_reverse_prompt(
             "time": time.strftime("%Y-%m-%d %H:%M:%S"),
             "gid": gid, "uid": str(event.user_id),
             "mode": "text",
-            "provider": llm_providers.resolve_provider(gid, "reverse"),
-            "model": vision_model,
+            "provider": res["provider"],
+                "model": vision_model,
             "cmd": _message_text(event).strip(),
             "request": reverse_instruction(gid),
             "image": {"source": source_desc, "size_kb": None},
@@ -1129,7 +1176,7 @@ async def handle_reverse_ai_draw(
                 "time": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "gid": gid, "uid": str(event.user_id),
                 "mode": "ai_draw",
-                "provider": llm_providers.resolve_provider(gid, "reverse"),
+                "provider": res["provider"],
                 "model": vision_model,
                 "cmd": _message_text(event).strip(),
                 "request": reverse_instruction(gid),
@@ -1162,8 +1209,8 @@ async def handle_reverse_ai_draw(
         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
         "gid": gid, "uid": str(event.user_id),
         "mode": "ai_draw",
-        "provider": llm_providers.resolve_provider(gid, "reverse"),
-        "model": vision_model,
+        "provider": res["provider"],
+                "model": vision_model,
         "cmd": _message_text(event).strip(),
         "request": reverse_instruction(gid),
         "image": {"source": source_desc, "size_kb": None},

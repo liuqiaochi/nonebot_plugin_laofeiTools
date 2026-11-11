@@ -369,9 +369,12 @@ def reset_provider(group_id: str, usage: str) -> Tuple[bool, str]:
 
 # ---------------- 客户端与模型 ----------------
 
-def build_client(group_id: str, usage: str) -> OpenAI:
-    """构建对应服务商客户端；若该服务商未配置 key 抛 ValueError（含中文提示）。"""
-    provider = resolve_provider(group_id, usage)
+def build_client(group_id: str, usage: str, provider_override: str = None) -> OpenAI:
+    """构建对应服务商客户端；若该服务商未配置 key 抛 ValueError（含中文提示）。
+
+    provider_override：显式指定服务商（图反推保底兜底场景用）；默认 None 按本群解析结果。
+    """
+    provider = provider_override or resolve_provider(group_id, usage)
     spec = _provider_spec(provider)
     if not spec["api_key"]:
         raise ValueError(
@@ -381,6 +384,14 @@ def build_client(group_id: str, usage: str) -> OpenAI:
     # Gemini 走 Google 共享集群，偶发 503 高负载；多给一次重试自愈（其余服务商保持默认 2 次）
     max_retries = 3 if provider == "gemini" else 2
     return OpenAI(api_key=spec["api_key"], base_url=spec["base_url"], timeout=60.0, max_retries=max_retries)
+
+
+def is_provider_configured(provider: str) -> bool:
+    """判断某服务商是否已配置 API Key（图反推保底兜底场景用于跳过未配置后端）。"""
+    try:
+        return bool(_provider_spec(provider).get("api_key"))
+    except ValueError:
+        return False
 
 
 def _model_override(group_id: str, usage: str) -> str:
@@ -403,21 +414,24 @@ def get_chat_model(group_id: str, usage: str) -> str:
     return _provider_spec(resolve_provider(group_id, usage))["chat_model"]
 
 
-def get_vision_model(group_id: str, usage: str) -> str:
+def get_vision_model(group_id: str, usage: str, provider_override: str = None) -> str:
+    if provider_override:
+        # 保底兜底场景：忽略群内可能针对其他服务商的模型名 override，直接用该服务商默认视觉模型
+        return _provider_spec(provider_override)["vision_model"]
     override = _model_override(group_id, usage)
     if override:
         return override
     return _provider_spec(resolve_provider(group_id, usage))["vision_model"]
 
 
-def get_vision_extra_body(group_id: str, usage: str) -> dict:
+def get_vision_extra_body(group_id: str, usage: str, provider_override: str = None) -> dict:
     """视觉模型额外参数：DeepSeek 需关闭思考模式；Gemini 默认开启 thinking 且无法关闭，
     显式降到最低推理预算以减少 thought 噪声、省 token；Grok 无需。
 
     注意：Gemini 的 reasoning_effort 仅支持 low/medium/high（minimal 仅 Gemini 3 Flash /
     3.1 Flash-Lite 支持，4 系传 minimal 会 400）。这里统一用 medium（平衡档，全系列支持）。
     """
-    provider = resolve_provider(group_id, usage)
+    provider = provider_override or resolve_provider(group_id, usage)
     spec = _provider_spec(provider)
     if spec["thinking_disable"]:
         return {"thinking": {"type": "disabled"}}
