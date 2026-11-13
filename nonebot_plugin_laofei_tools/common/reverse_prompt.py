@@ -259,6 +259,28 @@ def _extract_vision_text(message) -> tuple[str, str]:
 # 政策级拦截（safetySettings 的 5 类 BLOCK_NONE 关不掉）：候选级 + prompt 级 finishReason
 _BLOCKED_FINISH_REASONS = {"PROHIBITED_CONTENT", "SAFETY", "BLOCKLIST", "SPII"}
 
+# 拒绝话术识别：Grok / DeepSeek 等 OpenAI 兼容后端被拦时，往往不返回空、也不带错误 finish_reason，
+# 而是返回一段正常文本（"I can't help with that." / "I'm sorry, I cannot…"）。这类非空文本应视为拦截，
+# 触发兜底（且兜底命中时也要排除后端自己返回拒绝话术）。
+# 仅对文本开头片段做匹配，并限制长度，避免把正常反推提示词（描述性，极少见以 I/Sorry 开头）误判。
+_REFUSAL_RE = re.compile(
+    r"(?i)^\s*"
+    r"(i\s*(can('?t|not)|won('?t|ot)|will\s+not|am\s+unable|'m\s+(sorry|afraid|unable)|apologize)"
+    r"|sorry[,.]?\s*(but\s+)?i\s*(can('?t|not)|won('?t|ot)|am\s+unable)"
+    r"|\bas\s+an\s+(?:ai|assistant)\b)"
+)
+
+
+def _looks_like_refusal(text: str) -> bool:
+    """判断视觉反推返回文本是否是一句「拒绝话术」而非真正的提示词。
+
+    仅对开头片段（前 120 字）做匹配，且整段超过 600 字视为正常描述（反推提示词通常较长或极短标签，
+    不会是长篇拒绝说明），以降低误判。
+    """
+    if not text or len(text) > 600:
+        return False
+    return bool(_REFUSAL_RE.search(text[:120]))
+
 
 def _fallback_order(primary: str) -> tuple:
     """根据主服务商计算保底兜底顺序（deepseek 始终作为终极兜底，放在最后一位）。
@@ -337,9 +359,12 @@ def _reverse_vision(gid: str, image_data: bytes, instruction: str) -> dict:
 
     主路径：按本群「图反推」设置解析（gemini 走原生关闭安全过滤；deepseek/grok 走 OpenAI）。
 
-    B 保底：当主路径被**政策级拦截**（PROHIBITED_CONTENT / SAFETY / BLOCKLIST / SPII，
-    safetySettings 的 5 类 BLOCK_NONE 关不掉）导致无结果时，按主服务商计算的顺序自动用其他
-    已配置视觉后端重试保底。deepseek 始终作为终极兜底层（最后一位）：
+    B 保底：当主路径被拦截时，按主服务商计算的顺序自动用其他已配置视觉后端重试保底。
+    拦截判定（blocked）：① safety_blocked 标记；② finish_reason ∈ {PROHIBITED_CONTENT, SAFETY,
+    BLOCKLIST, SPII}（Gemini 政策级硬拦截，safetySettings 的 5 类 BLOCK_NONE 关不掉）；
+    ③ 返回文本是一句「拒绝话术」（Grok/DeepSeek 等 OpenAI 兼容后端被拦时返回 "I can't…" 而非空，
+    见 _looks_like_refusal）。
+    deepseek 始终作为终极兜底层（最后一位）：
     - 主=gemini：gemini 被拦 → grok → deepseek
     - 主=grok  ：grok 被拦  → gemini → deepseek
     - 主=deepseek：不兜底（DS 为根本）
@@ -350,8 +375,9 @@ def _reverse_vision(gid: str, image_data: bytes, instruction: str) -> dict:
     blocked = (
         result.get("safety_blocked")
         or (result.get("finish_reason") or "").upper() in _BLOCKED_FINISH_REASONS
+        or _looks_like_refusal(result.get("text") or "")
     )
-    if provider != "deepseek" and not result.get("text") and blocked:
+    if provider != "deepseek" and blocked:
         order = _fallback_order(provider)
         logger.warning(
             f"[图反推] {provider} 主路径被政策级拦截（finish_reason={result.get('finish_reason')}），"
@@ -366,7 +392,7 @@ def _reverse_vision(gid: str, image_data: bytes, instruction: str) -> dict:
             except Exception as e:
                 logger.warning(f"[图反推] {provider} 保底重试 {fb} 异常：{e}")
                 continue
-            if fb_res.get("text"):
+            if fb_res.get("text") and not _looks_like_refusal(fb_res.get("text")):
                 fb_res["fallback_from"] = provider
                 logger.info(f"[图反推] {provider} 保底成功：改用 {fb} 出词")
                 return fb_res
