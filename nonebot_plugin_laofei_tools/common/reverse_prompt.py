@@ -259,15 +259,20 @@ def _extract_vision_text(message) -> tuple[str, str]:
 # 政策级拦截（safetySettings 的 5 类 BLOCK_NONE 关不掉）：候选级 + prompt 级 finishReason
 _BLOCKED_FINISH_REASONS = {"PROHIBITED_CONTENT", "SAFETY", "BLOCKLIST", "SPII"}
 
-# 拒绝话术识别：Grok / DeepSeek 等 OpenAI 兼容后端被拦时，往往不返回空、也不带错误 finish_reason，
-# 而是返回一段正常文本（"I can't help with that." / "I'm sorry, I cannot…"）。这类非空文本应视为拦截，
-# 触发兜底（且兜底命中时也要排除后端自己返回拒绝话术）。
+# 拒绝话术识别：Gemini（原生接口）/ Grok / DeepSeek 等后端被拦时，往往不返回空、也不带错误
+# finish_reason，而是返回一段正常文本（"I can't help with that." / "I'm sorry, I cannot…" /
+# "As a language model, I can't…" / "I'm not able to…"）。这类非空文本应视为拦截，触发兜底
+# （且兜底命中时也要排除后端自己返回拒绝话术）。
+# Gemini 走原生 generateContent 并关闭安全过滤后：政策级硬拦截表现为 finish_reason=PROHIBITED_CONTENT
+# （已由 _BLOCKED_FINISH_REASONS 覆盖），但「软拒绝」仍会正常返回 "I can't…" 文本，同样需识别。
 # 仅对文本开头片段做匹配，并限制长度，避免把正常反推提示词（描述性，极少见以 I/Sorry 开头）误判。
 _REFUSAL_RE = re.compile(
     r"(?i)^\s*"
-    r"(i\s*(can('?t|not)|won('?t|ot)|will\s+not|am\s+unable|'m\s+(sorry|afraid|unable)|apologize)"
+    r"(i\s*(can('?t|not)|won('?t|ot)|will\s+not|am\s+unable|"
+    r"'m\s+(sorry|afraid|unable|not\s+able)|apologize)"
     r"|sorry[,.]?\s*(but\s+)?i\s*(can('?t|not)|won('?t|ot)|am\s+unable)"
-    r"|\bas\s+an\s+(?:ai|assistant)\b)"
+    r"|\bas\s+an?\s+(?:ai|assistant)\b"
+    r"|\bas\s+a\s+(?:large\s+)?language\s+model\b)"
 )
 
 
@@ -362,8 +367,8 @@ def _reverse_vision(gid: str, image_data: bytes, instruction: str) -> dict:
     B 保底：当主路径被拦截时，按主服务商计算的顺序自动用其他已配置视觉后端重试保底。
     拦截判定（blocked）：① safety_blocked 标记；② finish_reason ∈ {PROHIBITED_CONTENT, SAFETY,
     BLOCKLIST, SPII}（Gemini 政策级硬拦截，safetySettings 的 5 类 BLOCK_NONE 关不掉）；
-    ③ 返回文本是一句「拒绝话术」（Grok/DeepSeek 等 OpenAI 兼容后端被拦时返回 "I can't…" 而非空，
-    见 _looks_like_refusal）。
+    ③ 返回文本是一句「拒绝话术」（Gemini 原生 / Grok / DeepSeek 等后端被拦时返回 "I can't…" 而非空，
+    见 _looks_like_refusal：该判定对全部服务商通用，Gemini 软拒绝同样会命中）。
     deepseek 始终作为终极兜底层（最后一位）：
     - 主=gemini：gemini 被拦 → grok → deepseek
     - 主=grok  ：grok 被拦  → gemini → deepseek
