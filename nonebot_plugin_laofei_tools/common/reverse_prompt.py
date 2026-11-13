@@ -479,6 +479,9 @@ def _format_reverse_log(e: dict, idx: int) -> str:
         lines.append(f"错误: {err}")
     prompt = (e.get("prompt") or "").strip()
     if prompt:
+        # 最终提示词可能很长（NAI 长 tag 堆砌），QQ 单条 node 同样截断到 1500 字，完整见文件
+        if len(prompt) > 1500:
+            prompt = prompt[:1500] + "\n…(已截断，完整提示词见 reverse_log.json)"
         lines.append(f"最终提示词:\n{prompt}")
     raw = (e.get("raw") or "").strip()
     if raw:
@@ -1441,26 +1444,51 @@ async def handle_reverse_log(matcher, bot, event):
         pass
     group_id = getattr(event, "group_id", None)
 
-    # 群聊：合并转发，每条日志一个 node（完整可读）
+    # 群聊：合并转发，每条日志一个 node（完整可读）。
+    # 单条日志经 _format_reverse_log 截断后约 ≤5KB，但多条累积可能触发转发通道体积上限
+    # （表现为「合并转发发送失败」且重启 NapCat 无效）。按单包安全上限分批发送，避免整包过大发不出。
     if group_id:
-        nodes = []
+        CHUNK_CHARS = 20000  # 单包（一次 send_group_forward_msg）字符数安全上限
+        batches = []
+        cur = []
+        cur_len = 0
         for i, e in enumerate(logs, 1):
-            nodes.append({
+            text = _format_reverse_log(e, i)
+            if cur and cur_len + len(text) > CHUNK_CHARS:
+                batches.append(cur)
+                cur = []
+                cur_len = 0
+            cur.append({
                 "type": "node",
                 "data": {
                     "name": bot_name,
                     "uin": bot.self_id,
-                    "content": str(MessageSegment.text(_format_reverse_log(e, i))),
+                    "content": str(MessageSegment.text(text)),
                 },
             })
+            cur_len += len(text)
+        if cur:
+            batches.append(cur)
+
+        sent = 0
         try:
-            await asyncio.wait_for(
-                bot.call_api("send_group_forward_msg", group_id=group_id, messages=nodes),
-                timeout=90,
-            )
+            for b in batches:
+                await asyncio.wait_for(
+                    bot.call_api("send_group_forward_msg", group_id=group_id, messages=b),
+                    timeout=90,
+                )
+                sent += 1
         except Exception as ex:
             logger.error(f"反推日志合并转发失败: {ex}")
-            await matcher.send("⚠️ 日志合并转发发送失败，请稍后重试或直接查看服务器 reverse_log.json")
+        if sent == 0:
+            await matcher.send(
+                "⚠️ 日志合并转发发送失败，请稍后重试或直接查看服务器 reverse_log.json"
+            )
+        elif sent < len(batches):
+            await matcher.send(
+                f"⚠️ 日志合并转发部分发送成功（{sent}/{len(batches)} 包），"
+                f"其余请稍后重试或查看服务器 reverse_log.json"
+            )
         await matcher.finish()
         return
 
