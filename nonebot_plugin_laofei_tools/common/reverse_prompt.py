@@ -409,7 +409,7 @@ def _reverse_vision(gid: str, image_data: bytes, instruction: str) -> dict:
 # ========== 图反推运行日志（记录完整请求与结果，供「反推日志」指令查看）==========
 REVERSE_LOG_FILE = DATA_DIR / "reverse_log.json"
 REVERSE_LOG_MAX = 200          # 最多保留最近 200 条，防止无限增长
-REVERSE_LOG_VIEW = 10          # 「反推日志」指令默认查看最近 10 条
+REVERSE_LOG_VIEW = 3           # 「反推日志」指令默认查看最近 3 条
 
 
 def _load_reverse_log() -> list:
@@ -1403,7 +1403,7 @@ async def handle_prompt_manage(matcher: Matcher, event: MessageEvent):
         )
 
 
-# ========== 图反推运行日志查看（最近 10 条，供排查）==========
+# ========== 图反推运行日志查看（最近 3 条，供排查）==========
 REVERSE_LOG_KEYWORDS = ("图反推日志", "反推日志", "reverse日志", "查看反推日志")
 
 
@@ -1426,7 +1426,7 @@ reverse_log_cmd = on_message(
 
 @reverse_log_cmd.handle()
 async def handle_reverse_log(matcher, bot, event):
-    """查看最近 10 条图反推/反推AI图日志（含完整请求与结果摘要，合并转发呈现）。"""
+    """查看最近 3 条图反推/反推AI图日志（含完整请求与结果摘要，合并转发呈现）。"""
     gid = str(event.group_id) if getattr(event, "group_id", None) is not None else ""
     logs = _load_reverse_log()
     if gid:
