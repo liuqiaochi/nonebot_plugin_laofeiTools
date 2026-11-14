@@ -676,60 +676,10 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
     # 随机配图：每次回复从资源目录随机取一张（无图则跳过）
     img_seg = _random_ai_image()
 
-    # 回复：超过 150 字用合并转发，否则直接引用回复
-    if len(reply) > 150:
-        # 合并转发消息格式
-        bot_name = "蓝色大肥鱼"
-        try:
-            bot_info = await bot.get_login_info()
-            bot_name = bot_info.get("nickname", "蓝色大肥鱼")
-        except Exception:
-            pass
-
-        forward_msgs = []
-
-        # 配图作为合并转发的第一个节点一起发出（图片在前，文本在后）
-        if img_seg is not None:
-            forward_msgs.append({
-                "type": "node",
-                "data": {
-                    "name": bot_name,
-                    "uin": bot.self_id,
-                    "content": str(img_seg),
-                },
-            })
-
-        chunks = _split_long_message(reply)
-        for chunk in chunks:
-            forward_msgs.append({
-                "type": "node",
-                "data": {
-                    "name": bot_name,
-                    "uin": bot.self_id,
-                    "content": chunk,
-                },
-            })
-
-        try:
-            await bot.call_api(
-                "send_group_forward_msg",
-                group_id=event.group_id,
-                messages=forward_msgs,
-            )
-        except Exception as e:
-            logger.warning(f"合并转发失败，降级为普通回复: {e}")
-            if img_seg is not None:
-                await matcher.send(img_seg)
-            for chunk in chunks:
-                await matcher.send(chunk, reply_message=True)
-    else:
-        # 图片在前、文本在后
-        if img_seg is not None:
-            await matcher.send(img_seg + MessageSegment.text(reply), reply_message=True)
-        else:
-            await matcher.send(reply, reply_message=True)
-
-    # 8. 语音回复（仅 DeepSeek 对话模型 + 用户加了「语音 」前缀）
+    # 语音回复（仅 DeepSeek 对话模型 + 用户加了「语音 」前缀）
+    # 策略：语音成功则「只发语音、不回文本」；语音失败/不可用才回文字兜底。
+    voice_sent = False
+    provider = None
     if want_voice and reply:
         provider = llm_providers.resolve_provider(group_id, "ai_chat")
         if provider == "deepseek":
@@ -744,7 +694,6 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
                 # 传相对路径时 NapCat 不会当本地文件，而是当 URL 解析，
                 # 报 retcode=1200「识别URL失败」；bot 进程 CWD 也不在项目根。
                 abs_uri = "file://" + str(tmp_path.resolve())
-                sent_ok = False
                 try:
                     await matcher.send(MessageSegment.record(abs_uri))
                     if truncated:
@@ -752,22 +701,84 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
                             "（语音已截断：回复过长，仅朗读了前部分内容）",
                             reply_message=True,
                         )
-                    sent_ok = True
+                    voice_sent = True
                 except Exception as e:
                     logger.error(f"AI 语音发送失败: {e} | 音频文件保留于 {tmp_path}")
-                if sent_ok:
+                if voice_sent:
                     try:
                         tmp_path.unlink()
                     except OSError:
                         pass
             except Exception as e:
                 logger.error(f"AI 语音合成失败: {e}")
-                await matcher.send("（语音合成失败，已正常返回文字回复）", reply_message=True)
+
+    # 文字回复：语音已成功发送则跳过；仅在「非语音模式」或「语音失败/不可用」时回文字
+    if not voice_sent:
+        # 超过 150 字用合并转发，否则直接引用回复
+        if len(reply) > 150:
+            # 合并转发消息格式
+            bot_name = "蓝色大肥鱼"
+            try:
+                bot_info = await bot.get_login_info()
+                bot_name = bot_info.get("nickname", "蓝色大肥鱼")
+            except Exception:
+                pass
+
+            forward_msgs = []
+
+            # 配图作为合并转发的第一个节点一起发出（图片在前，文本在后）
+            if img_seg is not None:
+                forward_msgs.append({
+                    "type": "node",
+                    "data": {
+                        "name": bot_name,
+                        "uin": bot.self_id,
+                        "content": str(img_seg),
+                    },
+                })
+
+            chunks = _split_long_message(reply)
+            for chunk in chunks:
+                forward_msgs.append({
+                    "type": "node",
+                    "data": {
+                        "name": bot_name,
+                        "uin": bot.self_id,
+                        "content": chunk,
+                    },
+                })
+
+            try:
+                await bot.call_api(
+                    "send_group_forward_msg",
+                    group_id=event.group_id,
+                    messages=forward_msgs,
+                )
+            except Exception as e:
+                logger.warning(f"合并转发失败，降级为普通回复: {e}")
+                if img_seg is not None:
+                    await matcher.send(img_seg)
+                for chunk in chunks:
+                    await matcher.send(chunk, reply_message=True)
         else:
-            await matcher.send(
-                "（当前对话模型非 DeepSeek，语音功能仅 DeepSeek 可用）",
-                reply_message=True,
-            )
+            # 图片在前、文本在后
+            if img_seg is not None:
+                await matcher.send(img_seg + MessageSegment.text(reply), reply_message=True)
+            else:
+                await matcher.send(reply, reply_message=True)
+
+        # 语音相关兜底提示（仅当用户主动要求了语音但未能发出语音时）
+        if want_voice:
+            if provider == "deepseek":
+                await matcher.send(
+                    "（语音合成或发送失败，已改为文字回复）",
+                    reply_message=True,
+                )
+            else:
+                await matcher.send(
+                    "（当前对话模型非 DeepSeek，语音功能仅 DeepSeek 可用）",
+                    reply_message=True,
+                )
 
 
 # ========== AI 自由发言（群级子开关，依赖 AI 对话已开启） ==========
