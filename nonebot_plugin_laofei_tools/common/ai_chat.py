@@ -740,14 +740,22 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
                 tmp_dir.mkdir(parents=True, exist_ok=True)
                 tmp_path = tmp_dir / f"tts_{int(time.time() * 1000)}.wav"
                 tmp_path.write_bytes(audio)
+                # 关键：record 的 file 必须是「绝对路径 + file:// 协议头」。
+                # 传相对路径时 NapCat 不会当本地文件，而是当 URL 解析，
+                # 报 retcode=1200「识别URL失败」；bot 进程 CWD 也不在项目根。
+                abs_uri = "file://" + str(tmp_path.resolve())
+                sent_ok = False
                 try:
-                    await matcher.send(MessageSegment.record(str(tmp_path)))
+                    await matcher.send(MessageSegment.record(abs_uri))
                     if truncated:
                         await matcher.send(
                             "（语音已截断：回复过长，仅朗读了前部分内容）",
                             reply_message=True,
                         )
-                finally:
+                    sent_ok = True
+                except Exception as e:
+                    logger.error(f"AI 语音发送失败: {e} | 音频文件保留于 {tmp_path}")
+                if sent_ok:
                     try:
                         tmp_path.unlink()
                     except OSError:
