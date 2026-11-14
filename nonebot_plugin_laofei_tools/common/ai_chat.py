@@ -484,6 +484,18 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
 
     # 提取 @bot 后的文本（去掉 @bot 本身和空白）
     text = _strip_at_segments(event.message)
+    # 语音回复前缀解析：@bot 消息前加「语音 」让 DeepSeek 回复额外发语音；
+    # 再加「男声 」切到 tide 男声（默认 stella 女声）。仅 DeepSeek 对话模型生效。
+    want_voice = False
+    voice = "stella"
+    _vm = re.match(r"^\s*语音\s*", text)
+    if _vm:
+        want_voice = True
+        text = text[_vm.end():]
+        _mm = re.match(r"^\s*男声\s*", text)
+        if _mm:
+            voice = "tide"
+            text = text[_mm.end():]
     if text:
         prompt_parts.append(text)
 
@@ -716,6 +728,38 @@ async def handle_at_bot_chat(matcher: Matcher, bot: Bot, event: GroupMessageEven
             await matcher.send(img_seg + MessageSegment.text(reply), reply_message=True)
         else:
             await matcher.send(reply, reply_message=True)
+
+    # 8. 语音回复（仅 DeepSeek 对话模型 + 用户加了「语音 」前缀）
+    if want_voice and reply:
+        provider = llm_providers.resolve_provider(group_id, "ai_chat")
+        if provider == "deepseek":
+            try:
+                tts_text, truncated = _tts_truncate(reply)
+                audio = await asyncio.to_thread(llm_providers.deepseek_tts, tts_text, voice)
+                tmp_dir = DATA_DIR / "tts_tmp"
+                tmp_dir.mkdir(parents=True, exist_ok=True)
+                tmp_path = tmp_dir / f"tts_{int(time.time() * 1000)}.wav"
+                tmp_path.write_bytes(audio)
+                try:
+                    await matcher.send(MessageSegment.record(str(tmp_path)))
+                    if truncated:
+                        await matcher.send(
+                            "（语音已截断：回复过长，仅朗读了前部分内容）",
+                            reply_message=True,
+                        )
+                finally:
+                    try:
+                        tmp_path.unlink()
+                    except OSError:
+                        pass
+            except Exception as e:
+                logger.error(f"AI 语音合成失败: {e}")
+                await matcher.send("（语音合成失败，已正常返回文字回复）", reply_message=True)
+        else:
+            await matcher.send(
+                "（当前对话模型非 DeepSeek，语音功能仅 DeepSeek 可用）",
+                reply_message=True,
+            )
 
 
 # ========== AI 自由发言（群级子开关，依赖 AI 对话已开启） ==========
@@ -1578,6 +1622,7 @@ def _generate_ai_help_image() -> str:
             ("@机器人 + 问题", "群聊需先开启，私聊直接用"),
             ("@机器人 + 图片 + 问题", "附图片或引用含图消息再@我，可看图回答（如「这图里的是谁」）"),
             ("lg清记忆 / lg清空记忆", "清除当前对话历史"),
+            ("语音回复", "消息前加「语音」发语音（仅 DeepSeek，加「男声」用男声）"),
         ]),
         ("图反推（需开启 AI 功能）", [
             ("图反推", "发图片后发送，反推 NovelAI 提示词（别名 反推提示词/图片反推/提示词反推）"),
@@ -1679,6 +1724,7 @@ async def handle_ai_help(matcher: Matcher) -> None:
             "🤖 蓝色大肥鱼 · AI 指令\n"
             "· @机器人 + 问题（群聊需开启，私聊直用）\n"
             "· @机器人 + 图片 + 问题：附图片或引用含图消息再@我，可看图回答（如「这图里的是谁」）\n"
+            "· 语音回复：消息前加「语音」让 DeepSeek 回复发语音（加「男声」用男声；仅 DeepSeek 模型可用）\n"
             "· lg清记忆（清除对话历史）\n"
             "· 自由发言（超管）：打开/关闭 ai自由发言 — 开启后无需@，bot 基于最近群聊自动接话（需先开启AI）\n"
             "· 管理（超管）：开启AI / 关闭AI / AI拉黑 / AI解除\n"
@@ -1691,5 +1737,21 @@ async def handle_ai_help(matcher: Matcher) -> None:
             "· ai余额：发送「ai余额」查询当前 DeepSeek API Key 余额（图片返回）；仅超管可用，需本群开启 AI 功能或私聊"
         )
     await matcher.finish(MessageSegment.image(f"base64://{img_b64}"))
+
+
+def _tts_truncate(text: str, max_billable: int = 9000) -> Tuple[str, bool]:
+    """DeepSeek TTS 计费字符上限（汉字×2，其余×1）。超限截断，返回 (文本, 是否截断)。
+
+    上限 10000 计费字符，这里留 1000 余量，避免长中文连续触发限流报错。
+    """
+    total = 0
+    out = []
+    for ch in text:
+        cost = 2 if "\u4e00" <= ch <= "\u9fff" else 1
+        if total + cost > max_billable:
+            return "".join(out), True
+        total += cost
+        out.append(ch)
+    return "".join(out), False
 
 

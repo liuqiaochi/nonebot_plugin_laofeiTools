@@ -651,3 +651,36 @@ def check_provider_keys() -> None:
             )
     except Exception as e:
         logger.warning(f"⚠️ openai SDK 联网能力自检失败: {e}")
+
+
+# ---------------- DeepSeek 官方 TTS（语音合成） ----------------
+
+def deepseek_tts(text: str, voice: str = "stella", audio_format: str = "wav") -> bytes:
+    """DeepSeek 官方语音合成（POST /v1/tools/tts）。返回音频字节（默认 wav）。
+
+    仅 deepseek 对话模型可用，鉴权复用同一个 deepseek_api_key。
+    计费规则：汉字算 2 字符、其余算 1，单次上限 10000 计费字符；超限由调用方截断。
+    """
+    spec = _provider_spec("deepseek")
+    api_key = spec["api_key"]
+    if not api_key:
+        raise ValueError("DeepSeek API Key 未配置，无法使用语音合成")
+    url = "https://api.deepseek.com/v1/tools/tts"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "text": text,
+        "voice": voice,
+        "format": audio_format,
+        "filter_markdown": True,
+    }
+    try:
+        with httpx.Client(timeout=60.0) as client:
+            r = client.post(url, json=payload, headers=headers)
+    except Exception as e:
+        raise RuntimeError(f"TTS 请求失败: {e}") from e
+    if r.status_code != 200:
+        raise RuntimeError(f"TTS 失败 HTTP {r.status_code}: {r.text[:200]}")
+    return r.content
